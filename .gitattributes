@@ -1,0 +1,2 @@
+content/posts/**/*.jpg filter=lfs diff=lfs merge=lfs -text
+content/posts/**/*.png filter=lfs diff=lfs merge=lfs -text
