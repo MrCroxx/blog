@@ -1,12 +1,12 @@
 ---
-title: "GFS SOSP2003 论文翻译"
+title: "《The Google File System》论文翻译（GFS-SOSP2003）"
 date: 2020-07-21T14:24:45+08:00
-lastmod: 2020-07-24T14:24:45+08:00
+lastmod: 2020-08-07T00:40:45+08:00
 draft: false
 keywords: []
 description: ""
-tags: []
-categories: []
+tags: ["GFS", "Translation"]
+categories: ["Paper Reading"]
 author: ""
 
 # You can also close(false) or open(true) something for this content.
