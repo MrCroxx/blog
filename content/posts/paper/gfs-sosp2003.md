@@ -164,6 +164,8 @@ GFS宽松的一致性模型可以很好地支持我们的高度分布式应用�
 
 文件命名空间的变更（例如创建文件）操作时原子性的。它们仅由master处理。命名空间锁保证了原子性和正确性（[章节4.1](#41-命名空间管理与锁)）；master的操作日志定义了这些操作的全局总顺序（[章节2.6.3](#263-操作日志)）。
 
+在数据变更后，无论变更的成功与否，一个文件区域（file region）的状态都取决于变更类型。**表1**总结了变更后文件区域的状态。如果一个文件区域的任意一个副本被任何client读取总能得到相同的数据，那么这个文件区域状态为consistent（一致的）。在一个文件区域的数据变更后，如果它是一致的，且client总能看到其写入的内容（译注：并发写等操作后文件区域虽然consistent，但是client不一定能够读到其写入的数据，后文会描述这种情况。），那么这个文件区域的状态为defined（确定的）（defined状态包含了consistent状态）。文件区域在并发变更执行后的状态为consistent but undefined（一致的但非确定的）：所有客户端能考到同样的数据，但数据可能并不反映任何一个变更写入的数据。通常，数据融合了多个变更的内容。文件区域在一个失败的变更后状态会变为inconsistent（不一致的）（且undefined）：不同client在不同时刻可能看到不同的数据。下面我摩恩将描述我们的应用程序如何区分defined和undefined的区域。应用程序不需要进一步区分不同种的undefined状态。
+
 <table style="text-align:center;">
     <tr>
       <th colspan="3">
@@ -189,8 +191,6 @@ GFS宽松的一致性模型可以很好地支持我们的高度分布式应用�
       <td colspan="2">inconsistent<br>（不一致的）</td>
     </tr>
 </table>
-
-在数据变更后，无论变更的成功与否，一个文件区域（file region）的状态都取决于变更类型。**表1**总结了变更后文件区域的状态。如果一个文件区域的任意一个副本被任何client读取总能得到相同的数据，那么这个文件区域状态为consistent（一致的）。在一个文件区域的数据变更后，如果它是一致的，且client总能看到其写入的内容（译注：并发写等操作后文件区域虽然consistent，但是client不一定能够读到其写入的数据，后文会描述这种情况。），那么这个文件区域的状态为defined（确定的）（defined状态包含了consistent状态）。文件区域在并发变更执行后的状态为consistent but undefined（一致的但非确定的）：所有客户端能考到同样的数据，但数据可能并不反映任何一个变更写入的数据。通常，数据融合了多个变更的内容。文件区域在一个失败的变更后状态会变为inconsistent（不一致的）（且undefined）：不同client在不同时刻可能看到不同的数据。下面我摩恩将描述我们的应用程序如何区分defined和undefined的区域。应用程序不需要进一步区分不同种的undefined状态。
 
 数据变更操作可能为write或record append（译注：record append操作与文件的append有所不同，下文中会有对record append的介绍）。write操作会在应用程序指定的文件与偏移处写入数据。record append会将数据至少一次（at least once）地原子性地写入文件，即使在record append的同时可能存在并发的变更，但是record append写入位置是由GFS选择的偏移量（[章节3.3](#33-)）。（与常规的append不同，append仅会在client认为的文件末尾处写入数据。）record append的偏移量会被返回到client，这个偏移量为record append写入的数据的起始位置。除此之外，GFS可能会在记录的中间插入填充（padding）和或重复的记录。它们占用的区域状态为inconsistent的，通常情况下，它们的数量远少于用户数据。
 
@@ -262,7 +262,7 @@ record append是变更的一种，也遵循[章节3.1](#31-租约和变更顺序
 
 快照操作几乎会在瞬间对一个文件或一个目录树（被称为源）完成拷贝，同时能够尽可能少地打断正在执行的变更。我们的用户使用快照操作来快速地对一个庞大的数据集的一个分支进行拷贝（或对其拷贝再进行拷贝等等），或者在实验前对当前状态创建检查点，这样就可以在试验后轻松地提交或回滚变更。
 
-我们使用类似AFS的标准的写入时复制技术来实现快照。当master收到快照请求的时候，它首先会撤销快照涉及到的文件的chunk上所有未完成的租约。这确保了对这些chunk在后续的写入时都需要与master交互以查找租约的持有者。这会给master优先拷贝这些chunk的机会。
+我们使用类似AFS<sup>\[5\]</sup>的标准的写入时复制技术来实现快照。当master收到快照请求的时候，它首先会撤销快照涉及到的文件的chunk上所有未完成的租约。这确保了对这些chunk在后续的写入时都需要与master交互以查找租约的持有者。这会给master优先拷贝这些chunk的机会。
 
 在租约被收回或过期后，master会将快照操作记录到日志中，并写入到磁盘。随后，master会通过在内存中创建一个源文件或源目录树的元数据的副本的方式来进行快照操作。新创建的快照文件与源文件指向相同的chunk。
 
@@ -416,6 +416,12 @@ $N$个client同时向$N$个不同的文件写入。每个client通过一系列�
 
 现在我们来考察在Google中使用的两个集群，它们代表了其他类似的集群。集群A是数百个工程师常用来研究或开发的集群。其中典型的任务由人启动并运行几个小时。这些任务会读几MB到几TB的数据，对其分析处理，并将结果写回到集群中。集群B主要用于生产数据的处理。其中的任务持续时间更长，会不断地生成数TB的数据集，且偶尔才会有人工干预。在这两种情况中，每个任务都有许多过程进程组成，这些进程包括许多机器对许多文件同时的读写操作。
 
+#### 6.2.1 存储
+
+正如**表2**所示，两个集群都有数百个chunkserver，有数TB的磁盘存储空间，且大部分存储空间都被使用，但还没满。其中“已使用空间”包括所有chunk的副本占用的空间。几乎所有文件都以3份副本存储。因此，集群分别存储了$18TB$和$52TB$的数据。
+
+这两个集群中的文件数相似，但集群B中停用文件（dead file）比例更大。停用文件即为被删除或被新副本替换后还未被回收其存储空间的文件。同样，集群B中chunk数量更多，因为其中文件一般更大。
+
 <table style="text-align:center;">
     <tr>
       <th colspan="3">表2 两个GFS集群的特征</th>
@@ -446,12 +452,6 @@ $N$个client同时向$N$个不同的文件写入。每个client通过一系列�
       <td>21 GB<br>60 MB</td>
     </tr>
 </table>
-
-#### 6.2.1 存储
-
-正如**表2**所示，两个集群都有数百个chunkserver，有数TB的磁盘存储空间，且大部分存储空间都被使用，但还没满。其中“已使用空间”包括所有chunk的副本占用的空间。几乎所有文件都以3份副本存储。因此，集群分别存储了$18TB$和$52TB$的数据。
-
-这两个集群中的文件数相似，但集群B中停用文件（dead file）比例更大。停用文件即为被删除或被新副本替换后还未被回收其存储空间的文件。同样，集群B中chunk数量更多，因为其中文件一般更大。
 
 #### 6.2.2 元数据
 
@@ -495,3 +495,358 @@ $N$个client同时向$N$个不同的文件写入。每个client通过一系列�
 
 #### 6.2.4 master的负载
 
+**表3**中还展示了向master发送操作指令的速率，该速率大概在美妙200到500次左右。master可以在该速率下轻松地工作，因此这不会成为负载的瓶颈。
+
+GFS在早期版本中，在某些负载场景下，master偶尔会成为瓶颈。当时master会消耗大量的时间来扫描包含成百上千个文件的目录以寻找指定文件。在那之后，我们修改了master中的数据结构，允许其通过二分查找的方式高效地搜索命名空间。目前，master已经可以轻松地支持每秒上千次的文件访问。如果有必要，我们还可以通过在命名空间数据结构前放置名称缓存的方式进一步加快速度。
+
+#### 6.2.5 恢复时间
+
+当chunkserver故障后，一些chunk的副本数会变得不饱和，系统必须克隆这些块的副本以使副本数重新饱和。恢复所有chunk需要的时间取决于资源的数量。在一次实验中，我们杀掉集群B中的一个chunkserver。该chunkserver上有大概15000个chunk，总计约600GB的数据。为了限制重分配副本对正在运行的应用程序的影响并提供更灵活的调度策略，我们的默认参数限制了集群中只能有91个并发的克隆操作（该值为集群中chunkserver数量的40%）。其中，每个克隆操作的速率上限为$6.25MB/s$（$50Mbps$）。所有的chunk在23.2分钟内完成恢复，有效地复制速率为$440MB/s$。
+
+在另一个实验中，我们杀掉了两台均包含16000个chunk和660GB数据的chunkserver。这两个chunkserver的故障导致了266个chunk仅剩一分副本。这266个块在克隆时有着更高的优先级，在2分钟内即恢复到至少两份副本的状态，此时可以保证集群中即使再有一台chunkserver故障也不会发生数据丢失。
+
+### 6.3 负载分解
+
+在本节中，我们将详细介绍两个GFS集群中的工作负载。这两个集群与[章节6.2](#62-)中的类似但并不完全相同。集群X用来研究和开发，集群Y用来处理生产数据。
+
+#### 6.3.1 方法和注意事项
+
+这些实验结果仅包含来自client的请求，因此结果反映了我们的应用程序为整个文件系统带来的负载情况。结果中不包括用来处理client请求的内部请求和内部的后台活动，如chunkserver间传递write数据和副本重分配等。
+
+I/O操作的统计数据来源于GFS通过RPC请求日志启发式重建得到的信息。例如，GFS的client代码可能将一个read操作分解为多个RPC请求以提高并行性，通过日志启发式重建后，我们可以推断出原read操作。因为我们的访问模式是高度一致化的，所以我们期望的错误都在数据噪声中。应用程序中显式的日志可能会提供更加准确的数据，但是重新编译并重启上千个正在运行的client是现实的，且从上千台机器上采集数据结果也非常困难。
+
+需要注意的一点是，不要过度地推广我们的负载情况。因为Google对GFS和它的应用程序具有绝对的控制权，所以应用程序会面向GFS优化，而GFS也正是为这些应用程序设计的。虽然这种应用程序与文件系统间的互相影响在一般情况下也存在，但是这种影响在我们的例子中可能会更明显。
+
+#### 6.3.2 chunkserver的负载
+
+**表4**展示了各种大小的操作占比。读操作的大小呈双峰分布。64KB以下的小规模read来自client从大文件查找小片数据的seek密集操作。超过512KB的大规模read来自读取整个文件的线性读取。
+
+在集群Y中，大量的read没有返回任何数据。在我们的应用程序中（特别是生产系统中的应用程序），经常将文件作为生产者-消费者队列使用。在多个生产者并发地向同一个文件支架数据的同时，会有一个消费者读末尾的数据。偶尔当消费者超过生产者时，read即不会返回数据。集群X中这种情况出现的较少，因为在集群X中的应用程序通常为短期运行的数据分析程序，而非长期运行的分布式应用程序。
+
+write也呈同样的双峰分布。超过256KB的大规模write操作通常是由writer中的大量的缓冲区造成的。小于64KB的小规模写操作通常来自于那些缓冲区小、创建检查点操作或者同步操作更频繁、或者是仅生成少量数据的writer。
+
+对于record append操作，集群Y中大规模的record append操作比集群X中要高很多。因为我们的生产系统使用了集群Y，生产系统的应用程序会更激进地面向GFS优化。
+
+<table style="text-align:center;">
+  <tr>
+    <th colspan="7">表4 各种大小的操作占比（%）<br><small>对于read操作，数据大小为实际读取和传输的数据大小，而非请求读取的总大小。</small></th>
+  </tr>
+  <tr>
+    <th>操作类型</th>
+    <th colspan="2">read</th>
+    <th colspan="2">write</th>
+    <th colspan="2">record append</th>
+  </tr>
+  <tr>
+    <td>集群</td>
+    <td>X</td>
+    <td>Y</td>
+    <td>X</td>
+    <td>Y</td>
+    <td>X</td>
+    <td>Y</td>
+  </tr>
+  <tr>
+    <td>0K</td>
+    <td>0.4</td>
+    <td>2.6</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>0</td>
+  </tr>
+  <tr>
+    <td>1B...1K</td>
+    <td>0.1</td>
+    <td>4.1</td>
+    <td>6.6</td>
+    <td>4.9</td>
+    <td>0.2</td>
+    <td>9.2</td>
+  </tr>
+  <tr>
+    <td>1K...8K</td>
+    <td>65.2</td>
+    <td>38.5</td>
+    <td>0.4</td>
+    <td>1.0</td>
+    <td>18.9</td>
+    <td>15.2</td>
+  </tr>
+  <tr>
+    <td>8K...64K</td>
+    <td>29.9</td>
+    <td>45.1</td>
+    <td>17.8</td>
+    <td>43.0</td>
+    <td>78.0</td>
+    <td>2.8</td>
+  </tr>
+  <tr>
+    <td>64K...128K</td>
+    <td>0.1</td>
+    <td>0.7</td>
+    <td>2.3</td>
+    <td>1.9</td>
+    <td>&lt; .1</td>
+    <td>4.3</td>
+  </tr>
+  <tr>
+    <td>128K...256K</td>
+    <td>0.2</td>
+    <td>0.3</td>
+    <td>31.6</td>
+    <td>0.4</td>
+    <td>&lt; .1</td>
+    <td>10.6</td>
+  </tr>
+  <tr>
+    <td>256K...512K</td>
+    <td>0.1</td>
+    <td>0.1</td>
+    <td>4.2</td>
+    <td>7.7</td>
+    <td>&lt; .1</td>
+    <td>31.2</td>
+  </tr>
+  <tr>
+    <td>512K...1M</td>
+    <td>3.9</td>
+    <td>6.9</td>
+    <td>35.5</td>
+    <td>28.7</td>
+    <td>2.2</td>
+    <td>25.5</td>
+  </tr>
+  <tr>
+    <td>1M...inf</td>
+    <td>0.1</td>
+    <td>1.8</td>
+    <td>1.5</td>
+    <td>12.3</td>
+    <td>0.7</td>
+    <td>2.2</td>
+  </tr>
+</table>
+
+**表5**中展示了不同大小的操作中传输数据的总量的占比。对于所有类型的操作，超过256KB的大规模操作通常都是字节传输导致的。小于64KB的小规模read操作通常来自seek操作，这些读操作传输了很小但很重要的数据。
+
+#### 6.3.3 append vs write
+
+record append操作在我们的系统中被大量使用，尤其是我们的生产系统。在集群X中，write操作和record append操作的操作次数比例为8:1，字节传输比例为108:1。在集群Y中，这二者的比例分别为2.5:1和3.7:1。这些数据显示了对于两个集群来说，record append操作的规模通常比write打。然而。在集群X中，测量期间record append的使用量非常的少。因此。这个测量结果可能受一两个有特定缓冲区大小的应用程序影响较大。
+
+正如我们预期的那样，我们的数据变更负载主要来自于append而非overwrite。我们测量了primary副本上overwrite的数据总量。测量值很接近client故意overwrite数据而不append的情况。对于集群X，overwrite的操作总量低于变更操作的0.0003%，字节数占比低于总量的0.0001%。对于集群Y，这两个数据均为0.05%。尽管这个比例已经很小了，但仍比我们预期的要高。大部分的overwrite都是由client因错误或超时而重试造成的。这本质上是由重试机制造成的而非工作负载。
+
+<table style="text-align:center;">
+  <tr>
+    <th colspan="7">表5 各种大小的操作字节传输量占比（%）<br><small>对于read操作，数据大小为实际读取和传输的数据大小，而非请求读取的总大小。二者的区别为，读取请求可能会试图读取超过文件末尾的内容。在我们的设计中，这不是常见的负载。</small></th>
+  </tr>
+  <tr>
+    <th>操作类型</th>
+    <th colspan="2">read</th>
+    <th colspan="2">write</th>
+    <th colspan="2">record append</th>
+  </tr>
+  <tr>
+    <td>集群</td>
+    <td>X</td>
+    <td>Y</td>
+    <td>X</td>
+    <td>Y</td>
+    <td>X</td>
+    <td>Y</td>
+  </tr>
+  <tr>
+    <td>1B...1K</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+  </tr>
+  <tr>
+    <td>1K...8K</td>
+    <td>13.8</td>
+    <td>3.9</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+    <td>&lt; .1</td>
+    <td>0.1</td>
+  </tr>
+  <tr>
+    <td>8K...64K</td>
+    <td>11.4</td>
+    <td>9.3</td>
+    <td>2.4</td>
+    <td>5.9</td>
+    <td>2.3</td>
+    <td>0.3</td>
+  </tr>
+  <tr>
+    <td>64K...128K</td>
+    <td>0.3</td>
+    <td>0.7</td>
+    <td>0.3</td>
+    <td>0.3</td>
+    <td>22.7</td>
+    <td>1.2</td>
+  </tr>
+  <tr>
+    <td>128K...256K</td>
+    <td>0.8</td>
+    <td>0.6</td>
+    <td>16.5</td>
+    <td>0.2</td>
+    <td>&lt; .1</td>
+    <td>5.8</td>
+  </tr>
+  <tr>
+    <td>256K...512K</td>
+    <td>1.4</td>
+    <td>0.3</td>
+    <td>3.4</td>
+    <td>7.7</td>
+    <td>&lt; .1</td>
+    <td>38.4</td>
+  </tr>
+  <tr>
+    <td>512K...1M</td>
+    <td>65.9</td>
+    <td>55.1</td>
+    <td>74.1</td>
+    <td>58.0</td>
+    <td>.1</td>
+    <td>46.8</td>
+  </tr>
+  <tr>
+    <td>1M...inf</td>
+    <td>6.4</td>
+    <td>30.1</td>
+    <td>3.3</td>
+    <td>28.0</td>
+    <td>53.9</td>
+    <td>7.4</td>
+  </tr>
+</table>
+
+#### 6.3.4 master的负载
+
+**表6**展示了对master的各种类型的请求占比。其中，大部分请求来自read操作询问chunk位置的请求（FindLocation）和数据变更操作询问租约持有者（FindLeaseLocker）。
+
+集群X与集群Y中Delete请求量差异很大，因为集群Y存储被经常重新生成或者移动的生产数据。一些Delete请求量的差异还隐藏在Open请求中，因为打开并从头写入文件时（Unix中以“w”模式打开文件），会隐式地删除旧版本的文件。
+
+FindMatchingFiles是用来支持“ls”或类似文件系统操作的模式匹配请求。不像给master的其他请求，FindMatchingFiles请求可能处理很大一部分命名空间，因此这种请求开销很高。在集群Y中，这种请求更加频繁，因为自动化的数据处理任务常通过检查部分文件系统的方式来了解应用程序的全局状态。相反，使用集群X的应用程序会被用户更明确地控制，通常会提交知道所需的文件名。
+
+<table style="text-align:center;">
+  <tr>
+    <th colspan="3">表6 master请求类型占比（%）</th>
+  </tr>
+  <tr>
+    <th>集群</th>
+    <th>X</th>
+    <th>Y</th>
+  </tr>
+  <tr>
+    <td>Open</td>
+    <td>26.1</td>
+    <td>16.3</td>
+  </tr>
+  <tr>
+    <td>Delete</td>
+    <td>0.7</td>
+    <td>1.5</td>
+  </tr>
+  <tr>
+    <td>FindLocation</td>
+    <td>64.3</td>
+    <td>65.8</td>
+  </tr>
+  <tr>
+    <td>FindLeaseHolder</td>
+    <td>7.8</td>
+    <td>13.4</td>
+  </tr>
+  <tr>
+    <td>FindMatchingFiles</td>
+    <td>0.6</td>
+    <td>2.2</td>
+  </tr>
+  <tr>
+    <td>All otder combined</td>
+    <td>0.5</td>
+    <td>0.8</td>
+  </tr>
+</table>
+
+## 7. 开发经历
+
+在构建和部署GFS的过程中，我们经历了很多问题。其中，有些是操作问题，有些是技术问题。
+
+最初，GFS的构思是将其作为我们生产系统的后端文件系统。随着时间推移，GFS的用途演变为包括了研究和开发任务。GFS开始时几乎不支持权限、配额之类的功能，但现在这些功能都变为GFS包含的基本功能。虽然生产系统有着良好的纪律并被良好地控制着，但用户有时却没有。因此，其需要更多的基础设施来防止用户互相干扰。
+
+我们最大的一些问题是磁盘问题和Linux相关问题。我们的许多磁盘都想Linux驱动程序声称它们支持很多版本的IDE（译注：本文IDE指集成设备电路Intergated Drive Electronics）协议，但事实上，它们可能只能可靠地响应最近几个版本的协议。因为这些协议都非常相似，所以大部分时间驱动器都能正常工作。但协议版本偶尔不匹配就会导致驱动器和内核中所认为的驱动器的状态不一致。由于内核中的问题，数据会无法察觉地损坏。这个问题驱动我们通过校验和的方式检测数据是否损坏，同时我们修改了内核去处理协议不匹配的问题。
+
+早些时候，由于*fsync()*的开销，我们在Linux2.2内核中遇到了一些问题。这个函数的开销和文件成正比，而不是和修改的部分大小成正比。这对我们使用较大的操作日志造成了问题（特别是在我们实现检查点机制以前）。我们曾经通过同步写入的方式来解决这个问题，直到迁移到Linux2.4。
+
+另一个Linux的问题是一个读写锁。当任何地址空间的线程从磁盘换入页（读锁）或者通过*mmap()*函数修改地址空间（写锁）时，都必须持有这一个读写锁。我们发现系统在轻负载下的一个瞬间会出现超时问题，所以我们努力地去寻找资源瓶颈和零星的硬件故障。最终，我们发现在磁盘线程正在换入之前映射的文件时，这个读写锁阻塞了网络主线程，导致其无法将新数据映射到内存。因为我们主要受网络接口限制而非受内存拷贝带宽限制，所以我们用*pread()*替换了*mmap()*函数，其代价是多了一次额外的拷贝操作。
+
+尽管偶尔会有问题发生，Linux代码的可用性还是帮助了我们一次又一次地探索和理解系统行为。当时机合适时，我们会改进内核并将这些改进与开源社区分享。
+
+## 8. 相关工作
+
+就像其他大型的分布式文件系统一样（如AFS<sup>\[5\]</sup>），GFS提供了与位置无关的命名空间，这可以允许数据为了负载均衡和容错地移动，这一操作对client是透明的。但与AFS不同，GFS将文件数据通过类似xFS<sup>\[1\]</sup>和Swtift<sup>\[3\]</sup>的方式分散到了存储服务器上，以释放集群整体性能并提高容错能力。
+
+因为磁盘相对廉价且副本的方式比复杂的RAID<sup>\[9\]</sup>的方式简单很多，所以GFS仅通过副本的方式作为冗余，因此GFS会比xFS或Swift消耗更多的原始存储空间。与类似AFS、xFS、Frangipani<sup>\[12\]</sup>和Intermezzo<sup>\[6\]</sup>的文件系统不同，GFS在系文件系统接口下没有提供任何的缓存。在我们的目标工作负载中，一个应用程序几乎不会重用数据，因为其或者流式地处理一个大型数据集，或者每次仅在大型数据及中随机地seek并读取很小一部分的数据。
+
+一些分布式文件系统移除了集中式的服务器，并依赖分布式算法来实现一致性和管理，如Frangipani、xFS、Minnesota's GFS<sup>\[11\]</sup>和GPFS<sup>\[10\]</sup>。我们选择了集中式的方法来简化设计、增强可靠性，同时还获得了灵活性。集中式的master还大大简化了复杂的chunk分配操作和重分配副本的策略，因为master已经有了大部分相关信息，且由master来控制如何变化。我们通过保持master的状态大小很小并在其他机器上有充足的副本的方式来提高容错能力。可伸缩性和高可用性（对于read操作来说）目前通过影子master服务器机制提供。master状态的变化会通过追加到预写日志的方式进行持久化。因此我们可以通过适配像Harp<sup>\[7\]</sup>中的主拷贝模式（primary-copy scheme）的方法，来提供比当前的一致性有更强保证的高可用性。
+
+我们遇到了一个类似Lustre<sup>\[8\]</sup>的问题，即为大量client提供整体的性能。然而，我们通过将重点放在我们的应用程序的需求而不是构架一个兼容POSIX文件系统的方式，大幅简化了这个问题。除此之外，GFS假设大量的设备是不可靠的，因此容错是我们设计中的中心问题。
+
+GFS非常接近NASD架构<sup>\[4\]</sup>。NASD架构基于通过网络连接的磁盘驱动器，而GFS使用一般的商品机作为chunkserver，就像NASD的原型那样。与NASD不同是，我们的chunkserver懒式分配固定大小的chunk，而不是可变长的对象。另外，GFS实现了如负载均衡、副本重分配和恢复等在生产环境中需要的特性。
+
+与Minnesota's GFS或NASD不同，我们不希望改变存储设备的模型。我们着重解决由已有的商品级设备组成的复杂的分布式系统的日常数据处理问题。
+
+对生产者-消费者队列的原子性record append操作解决了类似于River的分布式队列问题。River<sup>\[2\]</sup>使用了分布在不同机器上的基于内存的队列和谨慎的数据流控制，而GFS采用了可以被多个生产者并发追加的持久化文件。River的模型支持M:N的分布式队列，但缺少持久化存储带来的容错能力。而GFS仅支持M:1的高效的队列。多个消费者可一个读相同的文件，但必须相互协调载入的分区。
+
+## 9. 结论
+
+Google File System论证了在产品级硬件上支持大规模数据处理负载的必要特性。虽然很多设计是为我们特殊的场景定制的，但很多设计可能适用于规模和预算相似的数据处理任务。
+
+我们根据我们当前和预期的应用程序负载和技术环境，重新考察了传统文件系统设计中的假设。我们的考察结果指向了完全不同的设计。我们视设备故障为平常事件而非异常事件。我们优化了大部分操作为追加（可能是并发追加）和读取（通常为顺序读取）的大文件。我们还扩展并放宽了标准文件系统接口来改进整个系统。
+
+我们的系统通过持续的监控、备份关键数据、自动且快速的恢复来提供容错能力。chunk副本让我们能够容忍chunkserver故障。这些故障的频率让我们设计了一种新的在线修复机制：周期性地对client不可见的修复损坏数据，并尽快补充丢失的副本。另外，我们通过校验和的方式来检测磁盘或IDE子系统级别的数据损坏，因为GFS系统中磁盘数量很多，这类问题是非常普遍的。
+
+我们的设计为并发执行多种任务的reader和writer提供了很高的整体吞吐量。为了实现这一点，我们将通过master进行的文件系统控制和通过chunkserver、client的数据传输分离开来。我们还通过选取较大的chunk大小和chunk租约（将数据变更授权给primary副本）的方式最小化了master对一般操作的参与度。这种方式让master变得简单，且中心化的master不会成为系统瓶颈。我们相信，通过改进网络栈，会减少当前对单个client的写入吞吐量的限制。
+
+GFS成功地满足了我们的存储需求，并已经在Google内部作为研究、开发和生产数据处理的存储平台使用。GFS是让我们能够进一步创新并攻克web规模问题的重要工具。
+
+## 鸣谢
+
+感谢以下对本系统或本论文做出了贡献的人。Brain Bershad（我们的指导者）和给我我们珍贵的评论和建议的匿名评审员。Anurag Acharya、Jeff Dean和David Desjardins为系统的早期设计做出了贡献。Fay Chang致力于chunkserver间副本比较的研究。Guy Edjlali致力于存储配额的研究。Markus Gutschke致力于测试框架与安全性增强的研究。Fay Chang、Urs Hoelzle、Max Ibel、Sharon Perl、Rob Pike和Debby Wallach对本论文早期的草稿做出了评论。我们在Google的许多勇敢的同事，他们信任这个新文件系统并给我们提出了很多很有用的反馈。Yoshka在早期的测试中提供了帮助。
+
+## 参考文献
+
+[1] Thomas Anderson, Michael Dahlin, Jeanna Neefe, David Patterson, Drew Roselli, and Randolph Wang. Serverless networkfile systems. In Proceedings of the 15th ACM Symposium on Operating System Principles, pages 109–126, Copper Mountain Resort, Colorado, December 1995.
+
+[2] Remzi H. Arpaci-Dusseau, Eric Anderson, Noah Treuhaft, David E. Culler, Joseph M. Hellerstein, David Patterson, and Kathy Yelick. Cluster I/O with River: Making the fast case common. In Proceedings of the Sixth Workshop on Input/Output in Parallel and Distributed Systems (IOPADS ’99), pages 10–22, Atlanta, Georgia, May 1999.
+
+[3] Luis-Felipe Cabrera and Darrell D. E. Long. Swift: Using distributed diskstriping to provide high I/O data rates. Computer Systems, 4(4):405–436, 1991.
+
+[4] Garth A. Gibson, David F. Nagle, Khalil Amiri, Jeff Butler, Fay W. Chang, Howard Gobioff, Charles Hardin, ErikRiedel, David Rochberg, and Jim Zelenka. A cost-effective, high-bandwidth storage architecture. In Proceedings of the 8th Architectural Support for Programming Languages and Operating Systems, pages 92–103, San Jose, California, October 1998.
+
+[5] John Howard, Michael Kazar, Sherri Menees, David Nichols, Mahadev Satyanarayanan, Robert Sidebotham, and Michael West. Scale and performance in a distributed file system. ACM Transactions on Computer Systems, 6(1):51–81, February 1988.
+
+[6] InterMezzo. http://www.inter-mezzo.org, 2003.
+
+[7] Barbara Liskov, Sanjay Ghemawat, Robert Gruber, Paul Johnson, Liuba Shrira, and Michael Williams. Replication in the Harp file system. In 13th Symposium on Operating System Principles, pages 226–238, Pacific Grove, CA, October 1991.
+
+[8] Lustre. http://www.lustreorg, 2003.
+
+[9] David A. Patterson, Garth A. Gibson, and Randy H. Katz. A case for redundant arrays of inexpensive disks (RAID). In Proceedings of the 1988 ACM SIGMOD International Conference on Management of Data, pages 109–116, Chicago, Illinois, September 1988.
+
+[10] FrankSchmuckand Roger Haskin. GPFS: A shared-diskfile system for large computing clusters. In Proceedings of the First USENIX Conference on File and Storage Technologies, pages 231–244, Monterey, California, January 2002.
+
+[11] Steven R. Soltis, Thomas M. Ruwart, and Matthew T. O’Keefe. The Gobal File System. In Proceedings of the Fifth NASA Goddard Space Flight Center Conference on Mass Storage Systems and Technologies, College Park, Maryland, September 1996.
+
+[12] Chandramohan A. Thekkath, Timothy Mann, and Edward K. Lee. Frangipani: A scalable distributed file system. In Proceedings of the 16th ACM Symposium on Operating System Principles, pages 224–237, Saint-Malo, France, October 1997.
