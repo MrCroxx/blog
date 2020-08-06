@@ -2,8 +2,7 @@
 title: "带LDAP认证与WebUI的Docker私有仓库搭建"
 date: 2019-07-22T16:37:55+08:00
 draft: false
-categories: ["docker","LDAP","registry"]
-topics: ["docker"]
+categories: ["Docker"]
 ---
 
 # 带LDAP认证与WebUI的Docker私有仓库搭建
