@@ -8,43 +8,13 @@ description: ""
 tags: ["GFS", "Translation"]
 categories: ["Paper Reading"]
 author: ""
-
-# You can also close(false) or open(true) something for this content.
-# P.S. comment can only be closed
-comment: true
-toc: true
-autoCollapseToc: true
-postMetaInFooter: false
-hiddenFromHomePage: false
-# You can also define another contentCopyright. e.g. contentCopyright: "This is another copyright."
-contentCopyright: false
-reward: false
-mathjax: false
-mathjaxEnableSingleDollar: false
-mathjaxEnableAutoNumber: false
-
-# You unlisted posts you might want not want the header or footer to show
-hideHeaderAndFooter: false
-
-# You can enable or disable out-of-date content warning for individual post.
-# Comment this out to use the global config.
-#enableOutdatedInfoWarning: false
-
-flowchartDiagrams:
-  enable: false
-  options: ""
-
-sequenceDiagrams: 
-  enable: false
-  options: ""
-
 ---
 
 *本篇文章是对论文[GFS-SOSP2003](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/gfs-sosp2003.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
 ## 摘要
 
-GFS（Google File System）是由我们设计并实现的为大规模分布式数据密集型应用程序设计的可伸缩（scalable）的分布式文件系统。GFS为在廉价设备上运行提供了容错能力，并可以在有大量客户端的情况下提供较高的整体性能。
+GFS（Google File System）是由我们设计并实现的为大规模分布式数据密集型应用程序设计的可伸缩（scalable）的分布式文件系统。GFS为在廉价商用设备上运行提供了容错能力，并可以在有大量客户端的情况下提供较高的整体性能。
 
 GFS的设计来自于我们对我们的应用负载与技术环境的观察。虽然GFS与过去的分布式文件系统有着共同的目标，但是根据我们的观察，我们的应用负载和技术环境与过去的分布式系统所做的假设有明显的不同。这让我们重新审视了传统的选择并去探索完全不同的设计。
 
@@ -74,7 +44,7 @@ GFS很好地满足了我们的存储需求。GFS在Google被广泛地作为存�
 
 在设计能够满足我们需求的文件系统时，我们提出并遵循了一些挑战与机遇并存的假设。之前我们已经提到了一些，现在我们将更详细地阐述我们的假设。
 
-- 系统有许多可能经常发生故障的链家的设备组成。它必须具有持续监控自身并检测故障、容错、及时从设备故障中恢复的能力。
+- 系统有许多可能经常发生故障的廉价的商用设备组成。它必须具有持续监控自身并检测故障、容错、及时从设备故障中恢复的能力。
 
 - 系统存储一定数量的大文件。我们的期望是能够存储几百万个大小为100MB左右或更大的文件。系统中经常有几GB的文件，且这些文件需要被高效管理。系统同样必须支持小文件，但是不需要对其进行优化。
 
@@ -803,9 +773,9 @@ FindMatchingFiles是用来支持“ls”或类似文件系统操作的模式匹�
 
 我们遇到了一个类似Lustre<sup>\[8\]</sup>的问题，即为大量client提供整体的性能。然而，我们通过将重点放在我们的应用程序的需求而不是构架一个兼容POSIX文件系统的方式，大幅简化了这个问题。除此之外，GFS假设大量的设备是不可靠的，因此容错是我们设计中的中心问题。
 
-GFS非常接近NASD架构<sup>\[4\]</sup>。NASD架构基于通过网络连接的磁盘驱动器，而GFS使用一般的商品机作为chunkserver，就像NASD的原型那样。与NASD不同是，我们的chunkserver懒式分配固定大小的chunk，而不是可变长的对象。另外，GFS实现了如负载均衡、副本重分配和恢复等在生产环境中需要的特性。
+GFS非常接近NASD架构<sup>\[4\]</sup>。NASD架构基于通过网络连接的磁盘驱动器，而GFS使用一般的商用机器作为chunkserver，就像NASD的原型那样。与NASD不同是，我们的chunkserver懒式分配固定大小的chunk，而不是可变长的对象。另外，GFS实现了如负载均衡、副本重分配和恢复等在生产环境中需要的特性。
 
-与Minnesota's GFS或NASD不同，我们不希望改变存储设备的模型。我们着重解决由已有的商品级设备组成的复杂的分布式系统的日常数据处理问题。
+与Minnesota's GFS或NASD不同，我们不希望改变存储设备的模型。我们着重解决由已有的商用设备组成的复杂的分布式系统的日常数据处理问题。
 
 对生产者-消费者队列的原子性record append操作解决了类似于River的分布式队列问题。River<sup>\[2\]</sup>使用了分布在不同机器上的基于内存的队列和谨慎的数据流控制，而GFS采用了可以被多个生产者并发追加的持久化文件。River的模型支持M:N的分布式队列，但缺少持久化存储带来的容错能力。而GFS仅支持M:1的高效的队列。多个消费者可一个读相同的文件，但必须相互协调载入的分区。
 

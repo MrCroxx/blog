@@ -66,11 +66,11 @@ params:
     comment:
       enable: true
       gitalk:
-        enable: false
+        enable: true
         owner: MrCroxx
         repo: mrcroxx.github.io
-        clientId: e7c73b6a2c5316d83e9c
-        clientSecret: b8f28f4c33b4877ac560000c5b0e6b66046d38d0
+        clientId: cea7c74a1c09d447d6bc
+        clientSecret: 5ee9349a6af24ec56fbe5f545f858adb4fe0a1a7
     math:
       enable: true
       blockLeftDelimiter: ""
