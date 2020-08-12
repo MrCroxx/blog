@@ -84,7 +84,7 @@ params:
     profile:
       enable: true
       gravatarEmail: ""
-      avatarURL: /img/avatar.jpg
+      avatarURL: /avatar.jpg
       title: 叉鸽 | MrCroxx
       subtitle: "Welcome to MrCroxx's blog."
       typeit: true
