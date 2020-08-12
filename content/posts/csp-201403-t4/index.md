@@ -80,15 +80,15 @@ tags: ["CCF CSP","Algorithm"]
 
 将这组数据绘制成图，虚线表示0号和1号路由器，白点表示已有的路由器，黑点表示可以添加的路由器。可以互相连通的路由器中间使用直线连接：
 
-{{< image src="/img/csp-201403-t4/origin.png" caption="origin" width="100px" >}}
+![origin](origin.png "origin")
 
 在这组数据中，`k=1`。如果`dis`只有一维，在遇到第一个黑点时会经过，这样到黑点后的第一个路由器的距离为`2`，我们设这个点为`x`点。当绕过黑点的路径到达该点时，该点已被遍历，不会再次遍历。而到达第二个黑点时，由于第一个黑点已经耗尽了增加路由器的次数，因此只能绕更远的路。最终导致得到的答案为`9`。其路径如下图所示；
 
-{{< image src="/img/csp-201403-t4/wrong.png" caption="wrong" width="100px" >}}
+![wrong](wrong.png "wrong")
 
 而使用二维距离时，`dis[i][j]`表示从0号路由器到`i`号路由器，在新增了`j`个路由器时的最少总路由器数。因此对于我们命名为`x`的点时，有两种不同的状态：`dis[x][1]=2`与`dis[x][0]=4`。这样，可以通过`dis[x][0]=4`继续遍历，经过第二个黑点找到到达终点的真正最短路`7`。其路径如下图所示：
 
-{{< image src="/img/csp-201403-t4/correct.png" caption="correct" width="100px" >}}
+![correct](correct.png "correct")
 
 通过比较网上一维BFS的结果与二维BFS在这组数据下得到的结果，证明这个问题确实存在。
 

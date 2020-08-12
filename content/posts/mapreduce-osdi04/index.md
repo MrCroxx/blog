@@ -10,7 +10,7 @@ categories: ["Paper Reading"]
 author: ""
 ---
 
-*本篇文章是对论文[GFS-SOSP2003](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/mapreduce-osdi04.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
+*本篇文章是对论文[MapReduce-OSDI04](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/mapreduce-osdi04.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
 
 <!--more-->
@@ -114,7 +114,7 @@ MapReduce接口可能有很多不同的实现。如何作出正确的选择取�
 
 输入数据会自动被分割为$M$个分片（split），这样，*map*函数调用可以在多个机器上分布式执行，每个输入的分片可以在不同机器上并行处理。*中间键值对*的键空间会通过被分区函数(例如，$hash(key) mod R$)分割为$R$个分区，这样，*reduce*函数也可以分布式执行。其中分区的数量（$R$）和分区函数由用户指定。
 
-{{< image src="/img/mapreduce-osdi04/figure-1.png" caption="图1 执行概览">}}
+![图1 执行概览](figure-1.png "图1 执行概览")
 
 **图1**展示了在我们的实现中，MapReduce操作的完整工作流。当用户程序调用MapReduce函数时会发生如下的操作（下列序号与图1中序号对应）：
 

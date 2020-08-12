@@ -16,11 +16,11 @@ tags: ["CCF CSP","Algorithm"]
 
 在横轴上放了n个相邻的矩形，每个矩形的宽度是1，而第i（1 ≤ i ≤ n）个矩形的高度是hi。这n个矩形构成了一个直方图。例如，下图中六个矩形的高度就分别是3, 1, 6, 5, 2, 3。
 
-![img](https://mrcroxx.github.io/img/csp-201312-t3/1.png)
+![Figure 1](figure-1.png "Figure 1")
 
 请找出能放在给定直方图里面积最大的矩形，它的边要与坐标轴平行。对于上面给出的例子，最大矩形如下图所示的阴影部分，面积是10。
 
-![img](https://mrcroxx.github.io/img/csp-201312-t3/2.png)
+![Figure 2](figure-2.png "Figure 2")
 
 ### 输入格式
 
