@@ -791,7 +791,7 @@ Google File System论证了在产品级硬件上支持大规模数据处理负�
 
 GFS成功地满足了我们的存储需求，并已经在Google内部作为研究、开发和生产数据处理的存储平台使用。GFS是让我们能够进一步创新并攻克web规模问题的重要工具。
 
-## 鸣谢
+## 致谢
 
 感谢以下对本系统或本论文做出了贡献的人。Brain Bershad（我们的指导者）和给我我们珍贵的评论和建议的匿名评审员。Anurag Acharya、Jeff Dean和David Desjardins为系统的早期设计做出了贡献。Fay Chang致力于chunkserver间副本比较的研究。Guy Edjlali致力于存储配额的研究。Markus Gutschke致力于测试框架与安全性增强的研究。Fay Chang、Urs Hoelzle、Max Ibel、Sharon Perl、Rob Pike和Debby Wallach对本论文早期的草稿做出了评论。我们在Google的许多勇敢的同事，他们信任这个新文件系统并给我们提出了很多很有用的反馈。Yoshka在早期的测试中提供了帮助。
 
