@@ -1,7 +1,7 @@
 ---
 title: "《MapReduce: Simplified Data Processing on Large Clusters》论文翻译（MapReduce-OSDI04）"
 date: 2020-08-08T12:21:45+08:00
-lastmod: 2020-08-08T12:21:45+08:00
+lastmod: 2020-08-14T17:08:45+08:00
 draft: false
 keywords: []
 description: ""
