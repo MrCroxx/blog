@@ -8,6 +8,9 @@ description: ""
 tags: ["MapReduce", "Translation"]
 categories: ["Paper Reading"]
 author: ""
+resources:
+- name: featured-image
+  src: figure-1.png
 ---
 
 *本篇文章是对论文[MapReduce-OSDI04](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/mapreduce-osdi04.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
@@ -31,7 +34,7 @@ MapReduce是一个用来处理和生成大型数据集的编程模型和相关�
 
 本工作的主要贡献为一个简单且功能强大的能实现自动并行化、高伸缩性分布式计算的的接口，和该接口在大型商用PC集群上的高性能的实现。
 
-[第二章](#2-)描述了基本编程模型，并给出了几个例子。[第三章](#3-)描述了为我们基于集群的计算环境定制的MapReduce接口实现。[第四章](#4-)描述了该编程模型中我们认为有帮助的细节。[第五章](#5-)我们的实现在各种任务重的性能测试。[第六章](#6-)探究了MapReduce在Google中的使用，其中包括了我们以MapReduce为基础重写我们产品索引系统的经历。[第七章](#7-)探讨了相关工作与未来的工作。
+[第二章](#编程模型)描述了基本编程模型，并给出了几个例子。[第三章](#3-实现)描述了为我们基于集群的计算环境定制的MapReduce接口实现。[第四章](#4-改进)描述了该编程模型中我们认为有帮助的细节。[第五章](#5-性能)我们的实现在各种任务重的性能测试。[第六章](#6-研发经历)探究了MapReduce在Google中的使用，其中包括了我们以MapReduce为基础重写我们产品索引系统的经历。[第七章](#7-相关工作)探讨了相关工作与未来的工作。
 
 ## 2. 编程模型
 
@@ -63,7 +66,7 @@ reduce(String key, Iterator values):
 
 *map*计算出每个单词与其（译注：在每个文档中的）出现的次数（在本例中为“1”）。*reduce*函数会求出每个单词出现次数的和。
 
-另外，用户编写代码来一个*mapreduce specification（规格/规范）*对象，填写输入输出文件名和可选的调节参数。随后，用户调用MapReduce函数，将*mapreduce specification*对象作为参数传入。用户代码会被与MapReduce库（C++实现）链接到一起。[附录A](#)包含本示例的完整程序。
+另外，用户编写代码来一个*mapreduce specification（规格/规范）*对象，填写输入输出文件名和可选的调节参数。随后，用户调用MapReduce函数，将*mapreduce specification*对象作为参数传入。用户代码会被与MapReduce库（C++实现）链接到一起。[附录A](#附录a-词频统计)包含本示例的完整程序。
 
 ### 2.2 类型
 
@@ -92,13 +95,13 @@ reduce  (k2,list(v2))  ->  list(v2)
 
 - 倒排索引：*map*函数对每篇文档进行提取，输出一个$<词,文档ID>$的序列。*reduce*函数接受给定词的所有键值对，并按照$文档ID$排序。输出一个$<词,list(文档ID)>$键值对。所有输出的键值对的集合组成了一个简单的倒排索引。如果需要持续跟踪词的位置，仅需简单的增量计算。
 
-- 分布式排序：*map*提取每条记录中的键，输出一个$<键,记录>$的键值对。*reduce*函数不对中间变量作修改直接输出所有的键值对。排序计算依赖[章节4.1](#41-)中介绍的分区机制和[章节4.2](#42-)介绍的排序属性。
+- 分布式排序：*map*提取每条记录中的键，输出一个$<键,记录>$的键值对。*reduce*函数不对中间变量作修改直接输出所有的键值对。排序计算依赖[章节4.1](#分区函数)中介绍的分区机制和[章节4.2](#42-有序性保证)介绍的排序属性。
 
 ## 3. 实现
 
 MapReduce接口可能有很多不同的实现。如何作出正确的选择取决于环境。例如，一种实现可能适合小型的共享内存的机器，一种实现可能适合大型NUMA多处理器主机，或者一种实现可能适合更大型的通过网络连接的机器集群。
 
-本节中，我们将介绍一个中面向Google中常用的计算环境的实现。Google的常用计算环境为彼此通过以太网交换机连接的大型商用PC集群。在我们的环境中：
+本节中，我们将介绍一个中面向Google中常用的计算环境的实现。Google的常用计算环境为彼此通过交换机以太网<sup>\[4\]</sup>连接的大型商用PC集群。在我们的环境中：
 
 1. 机器通常使用双核x86处理器，2-4GB内存，运行Linux系统。
 
@@ -106,7 +109,7 @@ MapReduce接口可能有很多不同的实现。如何作出正确的选择取�
 
 3. 一个集群由成百上千的机器组成，因此机器故障是常态。
 
-4. 存储由直接连接到独立的机器上IDE（译注：本文IDE指集成设备电路Intergated Drive Electronics）磁盘提供。我们为了管理这些磁盘上的数据，开发了一个内部的分布式文件系统。该文件系统使用副本的方式在不可靠的硬件上提供了可用性和可靠性。
+4. 存储由直接连接到独立的机器上IDE（译注：本文IDE指集成设备电路Intergated Drive Electronics）磁盘提供。我们为了管理这些磁盘上的数据，开发了一个内部的分布式文件系统<sup>\[8\]</sup>。该文件系统使用副本的方式在不可靠的硬件上提供了可用性和可靠性。
 
 5. 用户将工作（job）提交到一个调度系统中。每个工作由一系列的任务（task）组成，这些任务被*scheduler（调度器）*映射到集群中一系列可用的机器上。
 
@@ -172,7 +175,7 @@ MapReduce可以弹性处理大规模worker故障。例如，在MapReduce操作�
 
 ### 3.4 位置分配
 
-在我们的计算环境中，网络带宽是相对稀缺的资源。为了节约网络带宽，我们将输入数据（由GFS管理）存储在集群中机器的本地磁盘中。GFS将每个文件分割为若干个64MB的块，并为每个块存储在不同机器上若干个副本（通常为3个）。MapReduce的master会考虑输入文件的位置信息，并试图在持有输入文件的副本的机器上分配相应的*map*任务。如果分配失败，master会试图将*map*任务分配在离其输入文件的副本较近的机器上（例如，在与持有输入数据副本的机器在相同交换机下的机器上分配）。在集群中较大比例的机器上运行大型MapReduce操作时，大部分输入数据都是从本地读取，不消耗网络带宽。
+在我们的计算环境中，网络带宽是相对稀缺的资源。为了节约网络带宽，我们将输入数据（由GFS管理<sup>\[8\]</sup>）存储在集群中机器的本地磁盘中。GFS将每个文件分割为若干个64MB的块，并为每个块存储在不同机器上若干个副本（通常为3个）。MapReduce的master会考虑输入文件的位置信息，并试图在持有输入文件的副本的机器上分配相应的*map*任务。如果分配失败，master会试图将*map*任务分配在离其输入文件的副本较近的机器上（例如，在与持有输入数据副本的机器在相同交换机下的机器上分配）。在集群中较大比例的机器上运行大型MapReduce操作时，大部分输入数据都是从本地读取，不消耗网络带宽。
 
 ### 3.5 任务粒度
 
@@ -202,11 +205,11 @@ MapReduce的用户可以自定义其需要的*reduce*的*任务*或输出文件�
 
 ### 4.3 合并函数
 
-在一些情况下，*map*任务会产出很多键相同的*中间键值对*，且用户定义的*reduce*函数服从交换律和结合律。[章节2.1](#21-)中的单词计数就是一个很好的例子。因为词频往往服从*Zipf*分布（齐夫定律），每个*map*任务会产出成百上千条$<the,1>$的记录。所有的这些计数记录会被通过网络发送到同一个*reduce*任务，并随后被*reduce*函数加在一起得到一个总数。我们允许用户自定义一个可选的合并函数（combiner function），在数据通过网络发送前对这部分数据进行合并。
+在一些情况下，*map*任务会产出很多键相同的*中间键值对*，且用户定义的*reduce*函数服从交换律和结合律。[章节2.1](#21-示例)中的单词计数就是一个很好的例子。因为词频往往服从*Zipf*分布（齐夫定律），每个*map*任务会产出成百上千条$<the,1>$的记录。所有的这些计数记录会被通过网络发送到同一个*reduce*任务，并随后被*reduce*函数加在一起得到一个总数。我们允许用户自定义一个可选的合并函数（combiner function），在数据通过网络发送前对这部分数据进行合并。
 
 合并函数会在每个执行*map*任务的机器上执行。通常，实现合并函数和*reduce*函数的代码是相同的。合并函数和*reduce*函数唯一的区别是MapReduce库处理函数输出的方式。*reduce*函数的输出会被写入最终输出文件。合并函数的输出会被写入中间文件，随后中间文件会被发送给*reduce*任务。
 
-部分数据的合并显著地提高了某些类型的MapReduce操作的速度。[附录A](#)包含了一个使用了合并函数的例子。
+部分数据的合并显著地提高了某些类型的MapReduce操作的速度。[附录A](#附录a-词频统计)包含了一个使用了合并函数的例子。
 
 ### 4.4 输入输出类型
 
@@ -220,7 +223,7 @@ MapReduce库提供了以多种格式读取输入数据的支持。例如，“te
 
 在一些情况下，MapReduce的用户可以很方便地通过*map*和（或）*reduce*操作生成附属输出文件作为额外的输出。我们依赖应用程序的*writer*来使这种操作具有原子性（atomic）与幂等性（idempotent）。通常，应用程序将数据写入到一个临时文件，并在该文件完全生成完成后原子性地将该文件重命名。
 
-我们没有对一个*任务*生产多个输出文件提供原子性的两段提交协议（two-phase commits，2PC）支持。因此，产生多个输出文件且有跨文件一致性需求的*任务*应该具有“确定性（译注，如[章节3.3.3](#333-)）”。但在实际环境中，这一限制并不是什么问题。
+我们没有对一个*任务*生产多个输出文件提供原子性的两段提交协议（two-phase commits，2PC）支持。因此，产生多个输出文件且有跨文件一致性需求的*任务*应该具有“确定性（译注，如[章节3.3.3](#333-故障出现时的语义)）”。但在实际环境中，这一限制并不是什么问题。
 
 ### 4.6 跳过损坏的记录
 
@@ -285,7 +288,7 @@ map(String name, String contents):
 
 ### 5.3 sort
 
-*sort*程序会对$10^{10}$条100B的记录进行排序（大约1TB的数据）。这个程序是模仿*TeraSort*的*benchmark*程序构建的。
+*sort*程序会对$10^{10}$条100B的记录进行排序（大约1TB的数据）。这个程序是模仿*TeraSort*的*benchmark*程序<sup>\[10\]</sup>构建的。
 
 排序程序的用户代码少于50行。三行的*map*函数从一行文本中提取一个10字节的排序用的键，并将这个键与原始文本作为*中间键值对*输出。我们使用了一个内建的恒等函数作为*reduce*操作。这个函数不对*中间键值对*就行修改，直接作为*输出键值对*传递。最终排序的输出被写入一系列2副本的GFS文件中（即，程序输出总计写入了2TB）。
 
@@ -297,9 +300,9 @@ map(String name, String contents):
 
 左侧中间的图表展示了数据通过网络从*map*任务发送到*reduce*任务的速率。该数据转移（shuffle）在第一个*map*任务完成时便开始。图表中第一个峰中的数据转移是为了第一批约1700个*reduce*任务（整个MapReduce被分配到1700台机器上，每台机器同时最多执行1个*reduce*任务）。在整个计算任务的大概第300秒时，部分第一批*reduce*任务完成了，并开始为剩余的*reduce*任务转移数据。所有的数据转移在整个计算的大概第600秒是完成。
 
-左下角的图表展示了排好序的数据被*reduce*任务写入最终输出文件的速率。在第一个数据转移阶段和数据开始被*reduce*任务写入到最终文件间有一段延时，这是因为这期间机器都在忙于排序中间数据。写入操作以2~4GB/s的速率持续了一段时间，在整个计算过程的大概第850秒时完成了数据写入。算上启动的开销，整个计算过程消耗了891秒。这与目前在TeraSort benchmark中报道的最佳结果1057秒非常接近。
+左下角的图表展示了排好序的数据被*reduce*任务写入最终输出文件的速率。在第一个数据转移阶段和数据开始被*reduce*任务写入到最终文件间有一段延时，这是因为这期间机器都在忙于排序中间数据。写入操作以2~4GB/s的速率持续了一段时间，在整个计算过程的大概第850秒时完成了数据写入。算上启动的开销，整个计算过程消耗了891秒。这与目前在TeraSort benchmark中报道的最佳结果1057秒非常接近<sup>\[18\]</sup>。
 
-这有一些需要注意的点：由于我们的局部性优化，大部分数据直接从本地磁盘读取，绕过了带宽相对受限的玩过，所以数据输入速率比数据转移速率高。由于数据输出阶段写入了两份排好序的数据的副本，所以数据转移的速率比输出的速率高（为了可靠性和可用性，我们为输出数据设置了两份副本）。我们的下层文件系统为了可靠性和可用性的考虑而写入了两份副本。如果我们使用擦除编码（erasure code）的方式而不是副本的方式，写入数据时网络带宽的需求会减少。
+这有一些需要注意的点：由于我们的局部性优化，大部分数据直接从本地磁盘读取，绕过了带宽相对受限的玩过，所以数据输入速率比数据转移速率高。由于数据输出阶段写入了两份排好序的数据的副本，所以数据转移的速率比输出的速率高（为了可靠性和可用性，我们为输出数据设置了两份副本）。我们的下层文件系统为了可靠性和可用性的考虑而写入了两份副本。如果我们使用擦除编码（erasure code）<sup>\[14\]</sup>的方式而不是副本的方式，写入数据时网络带宽的需求会减少。
 
 ![图3 排序程序不同种执行方式中数据传输速率随时间的变化图](figure-3.png "图3 排序程序不同种执行方式中数据传输速率随时间的变化图")
 
@@ -369,23 +372,23 @@ map(String name, String contents):
 
 ## 7. 相关工作
 
-许多系统提供了受限制的编程模型，并通过这些限制来进行自动化并行计算。例如，使用并行前缀和计算（parallel prefix computation），可以使用$N$个处理器上在$O(logN)$的时间内计算有$N$个元素的数组中所有前缀和。MapReduce可被看做是对一些这类模型基于我们在现实世界中对大型计算的经验做出的简化和升华。更重要的是，我们提供了适用于大规模的数千个处理器的带有容错机制的实现。相反，大部分并行处理系统仅被小规模使用，且将处理机器故障的细节留给了开发者。
+许多系统提供了受限制的编程模型，并通过这些限制来进行自动化并行计算。例如，使用并行前缀和计算（parallel prefix computation）<sup>\[6, 9, 13\]</sup>，可以使用$N$个处理器上在$O(logN)$的时间内计算有$N$个元素的数组中所有前缀和。MapReduce可被看做是对一些这类模型基于我们在现实世界中对大型计算的经验做出的简化和升华。更重要的是，我们提供了适用于大规模的数千个处理器的带有容错机制的实现。相反，大部分并行处理系统仅被小规模使用，且将处理机器故障的细节留给了开发者。
 
-BSP模型（Bulk Synchronous Programming）和一些MPI（Message Passing Interface，消息传递接口）原语提供了让开发者编写并行程序更简单的高层抽象。这些系统和MapReduce的关键区别在于MapReduce提供了一个受限的编程模型，以自动地并行化用户程序，并提供了透明的容错机制。
+BSP模型（Bulk Synchronous Programming）<sup>\[17\]</sup>和一些MPI（Message Passing Interface，消息传递接口）<sup>\[11\]</sup>原语提供了让开发者编写并行程序更简单的高层抽象。这些系统和MapReduce的关键区别在于MapReduce提供了一个受限的编程模型，以自动地并行化用户程序，并提供了透明的容错机制。
 
-我们的局部性优化的灵感来自于如活动磁盘（active disk）技术，即计算程序被推送到靠近本地磁盘的处理设备中，这减少了I/O子系统或者网络的总数据发送量。我们在直连少量磁盘的商用处理器上运行程序，而不是直接在磁盘控制处理器上运行，但最终目的都是一样的。
+我们的局部性优化的灵感来自于如活动磁盘（active disk）<sup>\[12, 15\]</sup>技术，即计算程序被推送到靠近本地磁盘的处理设备中，这减少了I/O子系统或者网络的总数据发送量。我们在直连少量磁盘的商用处理器上运行程序，而不是直接在磁盘控制处理器上运行，但最终目的都是一样的。
 
-我们的任务副本机制类似Charlotte System中使用的Eager调度机制。简单的Eager调度的一个缺点是，当一个任务反复故障时，整个计算都无法完成。我们通过跳过损坏记录的方式来解决导致该问题的一些情况。
+我们的任务副本机制类似Charlotte System<sup>\[3\]</sup>中使用的Eager调度机制。简单的Eager调度的一个缺点是，当一个任务反复故障时，整个计算都无法完成。我们通过跳过损坏记录的方式来解决导致该问题的一些情况。
 
-MapReduce的实现依赖了一个内部的集群管理系统，该系统负责在大量共享的机器上分配并运行用户任务。该系统比较神似如Condor的其他系统，但这并不是本文的重点。
+MapReduce的实现依赖了一个内部的集群管理系统，该系统负责在大量共享的机器上分配并运行用户任务。该系统比较神似如Condor<sup>\[16\]</sup>的其他系统，但这并不是本文的重点。
 
-MapReduce中的排序机制在操作上类似NOW-Sort。源机器（*map* worker）将待排序的数据分区，并将其发送到$R$个*reduce* worker之一。每个*reduce* worker将其数据在本地排序（如果可以，会在内存中执行）。当然，NOW-Sort不支持用户自定义*map*和*reduce*函数，这让我们的库适用范围更广。
+MapReduce中的排序机制在操作上类似NOW-Sort<sup>\[1\]</sup>。源机器（*map* worker）将待排序的数据分区，并将其发送到$R$个*reduce* worker之一。每个*reduce* worker将其数据在本地排序（如果可以，会在内存中执行）。当然，NOW-Sort不支持用户自定义*map*和*reduce*函数，这让我们的库适用范围更广。
 
-River提供了一个通过分布式队列发送数据来处理程序间交互的编程模型。就像MapReduce，River系统试图在存在由异构硬件或系统干扰导致的性能不均匀的情况下提供良好的平均性能。River通过小心地调度磁盘和网络传输以使计算时间平衡的方式实现这一点。而MapReduce框架通过对编程模型进行限制，将问题划分为大量更细致的任务。这些任务在可用的worker间动态调度，以让更快的worker处理更多任务。这种受限的编程模型还允许在工作末期调度冗余执行的任务，这样可以大大缩减离群机器（如慢速或者卡死的worker）中的计算时间。
+River<sup>\[2\]</sup>提供了一个通过分布式队列发送数据来处理程序间交互的编程模型。就像MapReduce，River系统试图在存在由异构硬件或系统干扰导致的性能不均匀的情况下提供良好的平均性能。River通过小心地调度磁盘和网络传输以使计算时间平衡的方式实现这一点。而MapReduce框架通过对编程模型进行限制，将问题划分为大量更细致的任务。这些任务在可用的worker间动态调度，以让更快的worker处理更多任务。这种受限的编程模型还允许在工作末期调度冗余执行的任务，这样可以大大缩减离群机器（如慢速或者卡死的worker）中的计算时间。
 
-BAD-FS采用了和MapReduce区别非常大的编程模型。与MapReduce不同，BAD-FS的目标是在广域网中执行工作。然而，有两个基本点很相似。（1）二者都使用了冗余执行的方式恢复因故障丢失的数据。（2）二者都使用了有位置感知（locality-aware）调度方式来减少拥堵的网络连接中数据发送的总量。
+BAD-FS<sup>\[5\]</sup>采用了和MapReduce区别非常大的编程模型。与MapReduce不同，BAD-FS的目标是在广域网中执行工作。然而，有两个基本点很相似。（1）二者都使用了冗余执行的方式恢复因故障丢失的数据。（2）二者都使用了有位置感知（locality-aware）调度方式来减少拥堵的网络连接中数据发送的总量。
 
-TACC是一个为简化高可用网络服务设计的系统。像MapReduce一样，TACC依赖重新执行的方式作为容错机制。
+TACC<sup>\[7\]</sup>是一个为简化高可用网络服务设计的系统。像MapReduce一样，TACC依赖重新执行的方式作为容错机制。
 
 ## 8. 结论
 
@@ -394,3 +397,135 @@ MapReduce编程模型被成功应用于Google中的很多目标。我们将这�
 我们从这项工作中学习到了很多事。第一，对编程模型进行限制可以让并行化、分布式计算、容错等更加简单。第二，网络带宽是非常稀缺的资源。我们系统中的大量优化都是为了减少网络发送的数据量：局部性优化允许我们从本地磁盘读取数据，在本地磁盘中写单个中间数据的副本同样节约了网络带宽。第三，冗余执行可以用来减少缓慢的机器带俩的影响，并可以用来处理机器故障和数据丢失。
 
 ## 致谢
+
+Josh Levenberg在修订和扩展用户级MapReduce API方面提供了很大帮助，他根据自己对MapReduce的使用经验和其他人对功能增强的建议，提供了很多新特性。MapReduce从GFS<sup>\[8\]</sup>读取输入并写入输出。感谢Mohit Aron, Howard Gobioff, Markus Gutschke, David Kramer, Shun-Tak Leung和Josh Redstone在开发GFS中做出做出的工作。同样感谢Percy Liang和Olcan Sercinoglu在MapReduce使用的集群管理系统中做出的工作。Mike Burrows, Wilson Hsieh, Josh Levenberg, Sharon Perl, Rob Pike和Debby Wallach为本文的早期草稿提供了有帮助的评论。OSDI的匿名审稿者和我们的领导者Eric Brewer对本文的改进提供了帮助。最后，我们希望感谢来自Google工程师的MapReduce使用者，他们给出了很多有帮助的反馈、建议和bug报告。
+
+## 参考文献
+
+[1] Andrea C. Arpaci-Dusseau, Remzi H. Arpaci-Dusseau, David E. Culler, Joseph M. Hellerstein, and David A. Patterson. High-performance sorting on networks of workstations. In Proceedings of the 1997 ACM SIGMOD International Conference on Management of Data, Tucson, Arizona, May 1997.
+
+[2] Remzi H. Arpaci-Dusseau, Eric Anderson, Noah Treuhaft, David E. Culler, Joseph M. Hellerstein, David Patterson, and Kathy Yelick. Cluster I/O with River: Making the fast case common. In Proceedings of the Sixth Workshop on Input/Output in Parallel and Distributed Systems (IOPADS ’99), pages 10–22, Atlanta, Georgia, May 1999.
+
+[3] Arash Baratloo, Mehmet Karaul, Zvi Kedem, and Peter Wyckoff. Charlotte: Metacomputing on the web. In Proceedings of the 9th International Conference on Parallel and Distributed Computing Systems, 1996.
+
+[4] Luiz A. Barroso, Jeffrey Dean, and Urs Holzle. ¨ Web search for a planet: The Google cluster architecture. IEEE Micro, 23(2):22–28, April 2003.
+
+[5] John Bent, Douglas Thain, Andrea C.Arpaci-Dusseau, Remzi H. Arpaci-Dusseau, and Miron Livny. Explicit control in a batch-aware distributed file system. In Proceedings of the 1st USENIX Symposium on Networked Systems Design and Implementation NSDI, March 2004.
+
+[6] Guy E. Blelloch. Scans as primitive parallel operations. IEEE Transactions on Computers, C-38(11), November 1989.
+
+[7] Armando Fox, Steven D. Gribble, Yatin Chawathe, Eric A. Brewer, and Paul Gauthier. Cluster-based scalable network services. In Proceedings of the 16th ACM Symposium on Operating System Principles, pages 78–91, Saint-Malo, France, 1997.
+
+[8] Sanjay Ghemawat, Howard Gobioff, and Shun-Tak Leung. The Google file system. In 19th Symposium on Operating Systems Principles, pages 29–43, Lake George, New York, 2003.
+
+[9] S. Gorlatch. Systematic efficient parallelization of scan and other list homomorphisms. In L. Bouge, P. Fraigniaud, A. Mignotte, and Y. Robert, editors, Euro-Par’96. Parallel Processing, Lecture Notes in Computer Science 1124, pages 401–408. Springer-Verlag, 1996.
+
+[10] Jim Gray. Sort benchmark home page. http://research.microsoft.com/barc/SortBenchmark/. [11] William Gropp, Ewing Lusk, and Anthony Skjellum. Using MPI: Portable Parallel Programming with the Message-Passing Interface. MIT Press, Cambridge, MA, 1999.
+
+[12] L. Huston, R. Sukthankar, R. Wickremesinghe, M. Satyanarayanan, G. R. Ganger, E. Riedel, and A. Ailamaki. Diamond: A storage architecture for early discard in interactive search. In Proceedings of the 2004 USENIX File and Storage Technologies FAST Conference, April 2004.
+
+[13] Richard E. Ladner and Michael J. Fischer. Parallel prefix computation. Journal of the ACM, 27(4):831–838, 1980.
+
+[14] Michael O. Rabin. Efficient dispersal of information for security, load balancing and fault tolerance. Journal of the ACM, 36(2):335–348, 1989.
+
+[15] Erik Riedel, Christos Faloutsos, Garth A. Gibson, and David Nagle. Active disks for large-scale data processing. IEEE Computer, pages 68–74, June 2001.
+
+[16] Douglas Thain, Todd Tannenbaum, and Miron Livny. Distributed computing in practice: The Condor experience. Concurrency and Computation: Practice and Experience, 2004.
+
+[17] L. G. Valiant. A bridging model for parallel computation. Communications of the ACM, 33(8):103–111, 1997.
+
+[18] Jim Wyllie. Spsort: How to sort a terabyte quickly. http://alme1.almaden.ibm.com/cs/spsort.pdf.
+
+## 附录A 词频统计
+
+本节包含了一个对通过命令行指定的一系列输入文件中每个单词出现次数技术的程序。
+
+```cpp
+
+#include "mapreduce/mapreduce.h"
+
+// User’s map function
+class WordCounter : public Mapper {
+  public:
+    virtual void Map(const MapInput& input) {
+      const string& text = input.value();
+      const int n = text.size();
+      for (int i = 0; i < n; ) {
+        // Skip past leading whitespace
+        while ((i < n) && isspace(text[i]))
+          i++;
+
+        // Find word end
+        int start = i;
+        while ((i < n) && !isspace(text[i]))
+          i++;
+        
+        if (start < i)
+          Emit(text.substr(start,i-start),"1");
+      }
+  }
+};
+REGISTER_MAPPER(WordCounter);
+
+// User’s reduce function
+class Adder : public Reducer {
+  virtual void Reduce(ReduceInput* input) {
+    // Iterate over all entries with the
+    // same key and add the values
+    int64 value = 0;
+    while (!input->done()) {
+      value += StringToInt(input->value());
+      input->NextValue();
+    }
+
+    // Emit sum for input->key()
+    Emit(IntToString(value));
+  }
+};
+REGISTER_REDUCER(Adder);
+
+int main(int argc, char** argv) {
+  ParseCommandLineFlags(argc, argv);
+
+  MapReduceSpecification spec;
+
+  // Store list of input files into "spec"
+  for (int i = 1; i < argc; i++) {
+    MapReduceInput* input = spec.add_input();
+    input->set_format("text");
+    input->set_filepattern(argv[i]);
+    input->set_mapper_class("WordCounter");
+  }
+
+  // Specify the output files:
+  // /gfs/test/freq-00000-of-00100
+  // /gfs/test/freq-00001-of-00100
+  // ...
+  MapReduceOutput* out = spec.output();
+  out->set_filebase("/gfs/test/freq");
+  out->set_num_tasks(100);
+  out->set_format("text");
+  out->set_reducer_class("Adder");
+
+  // Optional: do partial sums within map
+  // tasks to save network bandwidth
+  out->set_combiner_class("Adder");
+
+  // Tuning parameters: use at most 2000
+  // machines and 100 MB of memory per task
+  spec.set_machines(2000);
+  spec.set_map_megabytes(100);
+  spec.set_reduce_megabytes(100);
+
+  // Now run it
+  MapReduceResult result;
+  if (!MapReduce(spec, &result)) abort();
+
+  // Done: ’result’ structure contains info
+  // about counters, time taken, number of
+  // machines used, etc.
+
+  return 0;
+}
+
+```
