@@ -5,6 +5,10 @@ draft: false
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
 math: true
+
+resources:
+- name: featured-image
+  src: ccf-csp.jpg
 ---
 
 # CCF CSP 201312 T5 I'm stuck!

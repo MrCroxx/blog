@@ -5,6 +5,10 @@ draft: false
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
 
+resources:
+- name: featured-image
+  src: ccf-csp.jpg
+
 ---
 
 # CCF CSP 201312 T2 ISBN号码

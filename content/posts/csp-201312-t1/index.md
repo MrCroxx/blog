@@ -4,6 +4,10 @@ date: 2019-07-10T15:10:30+08:00
 draft: false
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
+
+resources:
+- name: featured-image
+  src: ccf-csp.jpg
 ---
 
 # CCF CSP 201312 T1 出现次数最多的数
