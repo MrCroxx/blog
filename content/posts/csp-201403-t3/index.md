@@ -4,6 +4,10 @@ date: 2019-07-30T13:36:30+08:00
 draft: false
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
+
+resources:
+- name: featured-image
+  src: ccf-csp.jpg
 ---
 
 # CCF CSP 201403 T3 命令行选项

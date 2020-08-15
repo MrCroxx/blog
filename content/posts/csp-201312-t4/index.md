@@ -5,7 +5,9 @@ draft: false
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
 
-
+resources:
+- name: featured-image
+  src: ccf-csp.jpg
 ---
 
 # CCF CSP 201312 T4 有趣的数

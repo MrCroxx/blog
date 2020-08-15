@@ -4,6 +4,10 @@ date: 2019-08-12T13:36:30+08:00
 draft: true
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
+
+resources:
+- name: featured-image
+  src: ccf-csp.jpg
 ---
 
 # CSP 201903 T1 小中大
