@@ -16,6 +16,8 @@ resources:
 
 *本篇文章是对论文[GFS-SOSP2003](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/gfs-sosp2003.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
+<!--more-->
+
 ## 摘要
 
 GFS（Google File System）是由我们设计并实现的为大规模分布式数据密集型应用程序设计的可伸缩（scalable）的分布式文件系统。GFS为在廉价商用设备上运行提供了容错能力，并可以在有大量客户端的情况下提供较高的整体性能。
@@ -25,8 +27,6 @@ GFS的设计来自于我们对我们的应用负载与技术环境的观察。�
 GFS很好地满足了我们的存储需求。GFS在Google被广泛地作为存储平台部署，用于生成、处理我们服务所使用的数据或用于需要大规模数据集的研发工作。到目前为止，最大的GFS集群有上千台机器、上千块磁盘，并提供了上百TB的存储能力。
 
 在本文中，我们介绍了为支持分布式应用程序而设计的文件系统接口的扩展，还从多方面讨论了我们的设计，并给出了小批量的benchmark与在现实场景中的使用表现。
-
-<!--more-->
 
 ## 1. 引言
 
