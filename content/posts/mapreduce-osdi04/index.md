@@ -10,7 +10,7 @@ categories: ["Paper Reading"]
 author: ""
 resources:
 - name: featured-image
-  src: figure-1.png
+  src: paper-reading.jpg
 ---
 
 *本篇文章是对论文[MapReduce-OSDI04](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/mapreduce-osdi04.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
