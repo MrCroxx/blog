@@ -1,15 +1,29 @@
 
+// .content {
+//     p {
+//         text-indent: 2rem;
+//     }
+
+//     li p {
+//         text-indent: 0;
+//     }
+
+//     no-indent p {
+//         text-indent: 0;
+//     }
+
+//     code {
+//         text-indent: 0;
+//     }
+
+// }
+
 .content {
-    p {
+    > p {
         text-indent: 2rem;
     }
 
-    li p {
+    & * {
         text-indent: 0;
     }
-
-    no-indent p {
-        text-indent: 0;
-    }
-
 }
