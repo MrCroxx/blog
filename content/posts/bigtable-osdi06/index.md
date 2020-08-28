@@ -32,7 +32,7 @@ Bigtable在很多方面都很像一个数据库：Bigtable和数据库的很多�
 
 ## 2. 数据模型
 
-Bigtable是一个稀疏的、分布式的、持久化的多维排序映射（map）。该映射通过行键（row key）、列键（column）和时间戳（timestamp）索引，映射中的每个值都是字节数组。
+Bigtable是一个稀疏的、分布式的、持久化的多维排序字典（map）。该字典通过行键（row key）、列键（column）和时间戳（timestamp）索引，字典中的每个值都是字节数组。
 
 
 $$(row:string, column:string, time:int64) \rightarrow string$$
@@ -82,3 +82,66 @@ Bigtable可在MapReduce中使用。MapReduce是一个Google开发的运行大规
 
 ## 4. 块的构建
 
+Bigtable构建一些Google的其他基础架构之上。Bigtable使用了分布式的Google File System（GFS）来存储日志和数据文件。Bigtable集群通常在运行着各式各样的分布式程序的共享的主机池上运行，且Bigtable进程经常与其他程序的进程在同一机器上运行。Bigtable依赖集群管理系统来调度任务、管理共享机器的资源、处理机器故障和监控机器状态。
+
+我们内部使用Google SSTable文件格式来存储Bigtable的数据。SSTable提供了持久化的、按照键-值的顺序排序的不可变字典，其键值可以使任意的字节型字符串。SSTable提供了按照指定的键查找值和在指定键的范围内遍历键值对的操作。每个SSTable内部都包含一个块（block）的序列（块大小可通过配置修改，通常为64KB）。SSTable通过块索引（block index，存储在SSTable的结尾）来定位块，当SSTable被打开时，块索引会被载入到内存中。查找可通过一次磁盘*seek*操作实现：首先对内存中的块索引使用二分查找来查找指定块的位置，接着从磁盘读取该块。SSTable还可以可选地被完全映射的内存，这可以使查找和扫描不需要访问磁盘。
+
+Bigtable依赖高可用、持久化的锁——Chubby。一个Chubby服务包含5个活动的副本，这些副本中的一份被选举为master并处理请求。当这些副本中的大部分副本可以相互通信时，该服务即为可用的。Chubby使用Paxos算法维护副本一致性，以应对故障情况。Chubby提供了由目录和小文件组成的命名空间机制。每个目录或文件都可以用作锁，对文件的读写都是原子性的。Chubby的client库提供了对Chubby文件的一致性缓存。如果client在租约过期时间内没能更新session的租约，那么该session会过期。当session过期时，client会失去所有的锁和已经打开的句柄（handle）。Chubby的client还可以对Chubby的文件和目录注册回调（callback），当其被修改或session过期时会通知client。
+
+Bigtable在很多任务中使用了Chubby，如：确保忍一时客服最多只有一个活动的master、存储Bigtable数据引导（bootstrap）位置（[章节5.1](#51-)）、发现tablet服务器并认定tablet服务器死亡（[章节5.2](#52-)）、存储Bigtable的schema信息（每张表的列族信息）、存储访问控制列表。如果Chubby在较长的一段时间内不可用，那么Bigtable也会变得不可用。我们最近测量了跨11个Chubby实例的14个Bigtable集群中的效果。其中，由于Chubby（因Chubby停机或网络问题导致）不可用而导致的某些Bigtable中的数据不可用的时间平均占0.0047%。单个集群因Chubby不可用受影响占比为0.0326。
+
+## 5. 实现
+
+Bigtable的实现包含了三个主要的组件：链接到每个client中的库、一个master server、若干tablet server。tablet server可随着负载的变化动态被添加或删除到集群。
+
+master负责将tablet分配到tablet server、检测tablet server的加入或过期、均衡tablet server的负载、回收GFS中的文件。除此之外，master还处理shcema变化，如表和列族的创建。
+
+每个tablet server都管理一系列的tablet（通常每个tablet server管理大概十到一千个tablet）。tablet server处理对其加载的tablet读写请求，并在tablet增长得过大时分割tablet。
+
+与其他单master的分布式存储系统类似，client的数据不直接发送到master，而是由client直接与tablet server通信来读写数据。因为Bigtable的client不依赖master查找tablet的位置信息，大部分的client从不与master通信。这样，master在实际环境中的负载非常低。
+
+Bigtable集群可以存储大量的表。每个表都由一系列tablet组成。当表增长时会被自动分割成多个tablet，每个tablet默认大小约为100~200MB。
+
+### 5.1 tablet位置
+
+我们采用类似B+树的三层的数据结构存储tablet位置信息（如**图4**所示）。
+
+![图4 tablet位置层级](figure-4.png "图4 tablet位置层级")
+
+第一层是一个存储在Chubby中的文件，其包含了root tablet的位置信息。root tablet中特殊的`METADATA`表包含了所有tablet的位置信息。每个`METADATA` tablet包含了一系列用户tablet的位置信息。虽然root tablet只是`METADATA`表的第一个tablet，但其被处理的方式比较特殊：root tablet永远不会被分割，这样可以保证tablet位置层级不超过三层。
+
+`METADATA`表在一个行键下存储一个tablet的位置信息，该行键由这个tablet的标识符和其末行编码而得。`METADATA`表中每行在内存中大约占1KB。`METADATA`表大小限制为128MB，该三层位置信息结构能够提供$2^{34}$个tablet的寻址能力。
+
+client库会缓存tablet位置信息。如果client不知道tablet的位置或者其发现缓存的位置信息不正确，其会递归地向上查询。如果client的缓存为空，那么位置算法需要3轮网络交互，其中包括一次从Chubby中读取数据的网络交互。如果client的缓存数据较旧，那么其需要最多6轮网络交互，因为陈旧的缓存条目仅在失配时才会被发现（假设`METADATA` tablet不会频繁移动）。尽管因tablet位置信息被存储在内存中而不需要访问GFS，我们还是通过令client的库预拉取tablet位置信息的方式进一步削减了大多数场景下的开销。当client的读取`METADATA`表时，其会读取不止1个tablet的元数据。
+
+我们还在`METADATA`表中存储了次要的信息，包括每个tablet的相关事件（如服务器为其提供服务的时间等）。这些信息对调试和性能分析非常有帮助。
+
+### 5.2 tablet分配
+
+每个tablet在同一时刻仅会被分配到一个tablet server。master会持续记录存活的tablet server和该tablet server中当前的tablet分配情况。当一个tablet未被分配且有空间足以容纳该tablet的tablet server可用时，master会通过向该tablet server发送一个tablet装载请求来分配tablet。
+
+Bigtable使用Chubby来跟踪记录tablet server。当tablet server启动时，其会在指定Chubby目录下创建一个唯一命名的文件，并在该文件上获取排他锁。master监控这个目录（服务器目录）来发现tablet server。如果tablet server失去了其排他锁（例如因网络分区导致服务器失去了其访问Chubby的session），该tablet server会停止提供其tablet的服务。（Chubby提供了一个高效的机制使tablet server能够检查其是否仍持有持有锁且不会导致网络拥堵。）只要tablet server创建的文件还存在，tablet server就会试图新获取其文件的排他锁。如果这个文件不再存在，那么tablet server永远不会再次提供服务，因此其会杀死自己的进程。当一个tablet server终止时（例如由于集群管理系统将该tablet server所在的机器移出了集群），其会试图释放它持有的锁，这样master可以更快地重新分配tablet。
+
+master需要检测到tablet server不再对其tablet提供服务的情况，并尽快地重新分配那些tablet。为了检测tablet server不再对其tablet提供服务的情况，master会间歇地询问每个tablet server的锁的状态。如果tablet server报告其失去了它的锁或者master在几次重试后仍无法访问tablet server，那么master会试图在该tablet server创建的文件上获取排他锁。如果master能够获取到锁，那么说明Chubby存活且tablet server可能死亡或无法访问Chubby，master会删除该tablet server的文件以确保该tablet server永远无法再次提供服务。一旦tablet server创建的文件被删除，master便可以将之前分配到该tablet server上的tablet转变为一系列未分配的tablet。为了确保Bigtable集群在master和Chubby间网络出现问题的情况下的健壮性，master会在其Chubby session过期时杀死自己的进程。然而，如上文所述，master故障不会改变tablet在tablet server中的分配情况。
+
+当master被集群管理系统启动时，它需要在对tablet的分配进行修改前发现当前tablet的分配情况。master会在启动时执行以下步骤：（1）master在Chubby中取得一个唯一的master锁以防止并发的master实例化。（2）master扫描Chubby中tablet server目录来寻找存活的tablet server。（3）master与每个存活的tablet server通信来发现每个tablet server中已分配的tablet情况。（4）master扫描`METADATA`表以了解tablet的状态。一旦扫描时遇到了未分配的tablet，master会将其加入到未分配的tablet的集合，使其符合tablet分配的条件。
+
+这样，只有当`METADATA`的tablet被分配完成后才能扫描`METADATA`表。因此，在扫描开始前（步骤（4）），如果master在步骤（3）中没有找到root tablet的分配情况，master先将root tablet加入到未分配的tablet的集合中。这保证了root tablet会被分配。因为root tablet包含所有`METADATA`的tablet的名称，master会在扫描root tablet后获取到所有`METADATA`的tablet的信息。
+
+已存在的tablet集合仅当有tablet被创建或删除、两个已存在的tablet合并为一个更大的tablet、或一个已存在的tablet被分割为来两个小tablet时被修改。除了最后一种修改，其他均由master启动，因此master可以追踪这些修改。而由于tablet的分割是由tablet server启动的，因此其处理方式不同。tablet server通过在`METADATA`表中记录新的tablet的信息的方式提交tablet分割。当分割被提交后，其会通知master。如果分割通知丢失（可能因tablet server或master死亡造成），master会在其要求tablet server加载已经被分割的tablet时检测到新的tablet。此时，tablet server会将tablet分割信息告知master，因为master在`METADATA`表中找到的tablet条目仅为该tablet中被要求加载的部分（译注：master无法在`METADATA`表中找到tablet被分割的新的部分）。
+
+### 5.3 tablet服务
+
+如**图5**所示，tablet的持久化状态被存储在GFS中。更新会被提交到存储着redo记录的commit log。其中，最近提交的更新会被存储在内存中被称为`memtable`的缓冲区中，较旧的更新会被存储在SSTable文件序列中。为了恢复一个tablet，tablet server会从`METADATA`表中读取其元数据。元数据包含了由tablet和一系列redo point（指向任何可能包括该tablet数据的指针）组成的SSTable列表。tablet server会将SSTable的索引读入内存，并通过应用所有redo point后的更新的方式重建`memtable`。
+
+![图5 tablet的表示](figure-5.png "图5 tablet的表示")
+
+当写操作到达tablet server时，tablet server会检查其是否格式正确且其sender是否被授权执行该变更。鉴权通过从一个Chubby文件（大多数情况下总是会命中Chubby client的缓存）中读取被允许的writer列表来实现。合法的变更会被写入到commit log中。tablet server使用了分组提交的方式来提高多个小变更的吞吐量。在写入操作被提交后，其内容会被插入到`memtable`中。
+
+当读操作到达tablet server时，同样会检查格式是否和权限是否正确。合法的读操作会在SSTable序列和`memtable`的合并的视图上执行。因为SSTable和`memtable`是按照字典序排序的数据结构，所以可以高效地生成合并视图。
+
+在tablet分割或合并时，到达的读写操作仍可继续执行。
+
+### 5.4 压缩
+
+执行写操作时，`memtable`的大小会增加。
