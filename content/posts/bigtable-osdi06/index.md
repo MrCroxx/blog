@@ -88,7 +88,7 @@ Bigtable构建一些Google的其他基础架构之上。Bigtable使用了分布�
 
 Bigtable依赖高可用、持久化的锁——Chubby。一个Chubby服务包含5个活动的副本，这些副本中的一份被选举为master并处理请求。当这些副本中的大部分副本可以相互通信时，该服务即为可用的。Chubby使用Paxos算法维护副本一致性，以应对故障情况。Chubby提供了由目录和小文件组成的命名空间机制。每个目录或文件都可以用作锁，对文件的读写都是原子性的。Chubby的client库提供了对Chubby文件的一致性缓存。如果client在租约过期时间内没能更新session的租约，那么该session会过期。当session过期时，client会失去所有的锁和已经打开的句柄（handle）。Chubby的client还可以对Chubby的文件和目录注册回调（callback），当其被修改或session过期时会通知client。
 
-Bigtable在很多任务中使用了Chubby，如：确保忍一时客服最多只有一个活动的master、存储Bigtable数据引导（bootstrap）位置（[章节5.1](#51-)）、发现tablet服务器并认定tablet服务器死亡（[章节5.2](#52-)）、存储Bigtable的schema信息（每张表的列族信息）、存储访问控制列表。如果Chubby在较长的一段时间内不可用，那么Bigtable也会变得不可用。我们最近测量了跨11个Chubby实例的14个Bigtable集群中的效果。其中，由于Chubby（因Chubby停机或网络问题导致）不可用而导致的某些Bigtable中的数据不可用的时间平均占0.0047%。单个集群因Chubby不可用受影响占比为0.0326。
+Bigtable在很多任务中使用了Chubby，如：确保忍一时客服最多只有一个活动的master、存储Bigtable数据引导（bootstrap）位置（[章节5.1](#51-)）、发现tablet服务器并认定tablet服务器挂掉（[章节5.2](#52-)）、存储Bigtable的schema信息（每张表的列族信息）、存储访问控制列表。如果Chubby在较长的一段时间内不可用，那么Bigtable也会变得不可用。我们最近测量了跨11个Chubby实例的14个Bigtable集群中的效果。其中，由于Chubby（因Chubby停机或网络问题导致）不可用而导致的某些Bigtable中的数据不可用的时间平均占0.0047%。单个集群因Chubby不可用受影响占比为0.0326。
 
 ## 5. 实现
 
@@ -122,13 +122,13 @@ client库会缓存tablet位置信息。如果client不知道tablet的位置或�
 
 Bigtable使用Chubby来跟踪记录tablet server。当tablet server启动时，其会在指定Chubby目录下创建一个唯一命名的文件，并在该文件上获取排他锁。master监控这个目录（服务器目录）来发现tablet server。如果tablet server失去了其排他锁（例如因网络分区导致服务器失去了其访问Chubby的session），该tablet server会停止提供其tablet的服务。（Chubby提供了一个高效的机制使tablet server能够检查其是否仍持有持有锁且不会导致网络拥堵。）只要tablet server创建的文件还存在，tablet server就会试图新获取其文件的排他锁。如果这个文件不再存在，那么tablet server永远不会再次提供服务，因此其会杀死自己的进程。当一个tablet server终止时（例如由于集群管理系统将该tablet server所在的机器移出了集群），其会试图释放它持有的锁，这样master可以更快地重新分配tablet。
 
-master需要检测到tablet server不再对其tablet提供服务的情况，并尽快地重新分配那些tablet。为了检测tablet server不再对其tablet提供服务的情况，master会间歇地询问每个tablet server的锁的状态。如果tablet server报告其失去了它的锁或者master在几次重试后仍无法访问tablet server，那么master会试图在该tablet server创建的文件上获取排他锁。如果master能够获取到锁，那么说明Chubby存活且tablet server可能死亡或无法访问Chubby，master会删除该tablet server的文件以确保该tablet server永远无法再次提供服务。一旦tablet server创建的文件被删除，master便可以将之前分配到该tablet server上的tablet转变为一系列未分配的tablet。为了确保Bigtable集群在master和Chubby间网络出现问题的情况下的健壮性，master会在其Chubby session过期时杀死自己的进程。然而，如上文所述，master故障不会改变tablet在tablet server中的分配情况。
+master需要检测到tablet server不再对其tablet提供服务的情况，并尽快地重新分配那些tablet。为了检测tablet server不再对其tablet提供服务的情况，master会间歇地询问每个tablet server的锁的状态。如果tablet server报告其失去了它的锁或者master在几次重试后仍无法访问tablet server，那么master会试图在该tablet server创建的文件上获取排他锁。如果master能够获取到锁，那么说明Chubby存活且tablet server可能挂掉或无法访问Chubby，master会删除该tablet server的文件以确保该tablet server永远无法再次提供服务。一旦tablet server创建的文件被删除，master便可以将之前分配到该tablet server上的tablet转变为一系列未分配的tablet。为了确保Bigtable集群在master和Chubby间网络出现问题的情况下的健壮性，master会在其Chubby session过期时杀死自己的进程。然而，如上文所述，master故障不会改变tablet在tablet server中的分配情况。
 
 当master被集群管理系统启动时，它需要在对tablet的分配进行修改前发现当前tablet的分配情况。master会在启动时执行以下步骤：（1）master在Chubby中取得一个唯一的master锁以防止并发的master实例化。（2）master扫描Chubby中tablet server目录来寻找存活的tablet server。（3）master与每个存活的tablet server通信来发现每个tablet server中已分配的tablet情况。（4）master扫描`METADATA`表以了解tablet的状态。一旦扫描时遇到了未分配的tablet，master会将其加入到未分配的tablet的集合，使其符合tablet分配的条件。
 
 这样，只有当`METADATA`的tablet被分配完成后才能扫描`METADATA`表。因此，在扫描开始前（步骤（4）），如果master在步骤（3）中没有找到root tablet的分配情况，master先将root tablet加入到未分配的tablet的集合中。这保证了root tablet会被分配。因为root tablet包含所有`METADATA`的tablet的名称，master会在扫描root tablet后获取到所有`METADATA`的tablet的信息。
 
-已存在的tablet集合仅当有tablet被创建或删除、两个已存在的tablet合并为一个更大的tablet、或一个已存在的tablet被分割为来两个小tablet时被修改。除了最后一种修改，其他均由master启动，因此master可以追踪这些修改。而由于tablet的分割是由tablet server启动的，因此其处理方式不同。tablet server通过在`METADATA`表中记录新的tablet的信息的方式提交tablet分割。当分割被提交后，其会通知master。如果分割通知丢失（可能因tablet server或master死亡造成），master会在其要求tablet server加载已经被分割的tablet时检测到新的tablet。此时，tablet server会将tablet分割信息告知master，因为master在`METADATA`表中找到的tablet条目仅为该tablet中被要求加载的部分（译注：master无法在`METADATA`表中找到tablet被分割的新的部分）。
+已存在的tablet集合仅当有tablet被创建或删除、两个已存在的tablet合并为一个更大的tablet、或一个已存在的tablet被分割为来两个小tablet时被修改。除了最后一种修改，其他均由master启动，因此master可以追踪这些修改。而由于tablet的分割是由tablet server启动的，因此其处理方式不同。tablet server通过在`METADATA`表中记录新的tablet的信息的方式提交tablet分割。当分割被提交后，其会通知master。如果分割通知丢失（可能因tablet server或master挂掉造成），master会在其要求tablet server加载已经被分割的tablet时检测到新的tablet。此时，tablet server会将tablet分割信息告知master，因为master在`METADATA`表中找到的tablet条目仅为该tablet中被要求加载的部分（译注：master无法在`METADATA`表中找到tablet被分割的新的部分）。
 
 ### 5.3 tablet服务
 
@@ -142,6 +142,58 @@ master需要检测到tablet server不再对其tablet提供服务的情况，并�
 
 在tablet分割或合并时，到达的读写操作仍可继续执行。
 
-### 5.4 压缩
+### 5.4 精简数据
 
-执行写操作时，`memtable`的大小会增加。
+执行写操作时，`memtable`的大小会增加。当`memtable`的大小达到临界值时，该`memtable`会被冻结，并创建一个新的`memtable`，被冻结的`memtable`会被转换成一个SSTable并写入到GFS中。该minor compaction进程有两个目标：其会较小tablet server的内存占用，并减小当server挂掉后恢复时需要读取的commit log的总数据量。当触发minor compaction时，到达的读写操作可以继续执行。
+
+每次minor compaction会创建一个新的SSTable。如果该行为不受约束地持续执行，读操作可能需要合并来自任意数量的SSTable中的数据更新以获取数据。因此，通过间歇性地在后台执行merging compaction以限制这种文件的数量。merging compaction时会读取一些SSTable和`memtable`中的内容，并将其写入到一个新的SSTable中。一旦mergin compaction完成后即可丢弃输入的SSTable和`memtable`。
+
+将所有的SSTable写入到恰好一个SSTable中的merging compaction被称为major compaction。非major compaction生产的SSTable可能包含特殊的删除操作项，删除操作项用来阻止对被删除的但仍在活动的数据的操作。（译注：当删除的数据正在活动时，Bigtable不会立刻删除这些数据，而是写入这个删除操作项。这样，使用了这些待删除的数据的活动可以继续正常执行，而后续的活动无法再访问这些待删除的数据。）而major compaction则相反，其创建的SSTable中不包含删除操作的信息或被删除的数据。Bigtable会循环遍历其tablet并周期性地对它们执行major compaction。major compaction允许Bigtable回收被删除的数据占用的资源，并使Bigtable能够确保被删除的数据能够及时地从系统中移除，这对存储敏感型数据服务来说十分重要。
+
+## 6 改进
+
+在上一章中描述的数显需要很多改进才能满足我们的用户需要的高性能、高可用、高可靠性。本章将更详细地讲述各部分实现的改进。
+
+### 6.1 局部组
+
+client可以将多个列族组合为一个局部组（locality group）。每个tablet中的每个局部组会生成一个独立的SSTable。通常，可以将不在一起访问的列族放到不同的局部组中，以提高读取效率。例如Webtable中的页面元数据（如语言和校验和）可以放在一个局部组中，页面的内容可以放在不同的局部组中。这样，想要读取元数据的应用程序就不需要读取所有页面内容了。
+
+除此之外，还可以为每个局部组指定不同的调优参数。例如，局部组可被声明为仅使用内存。仅内存的局部组的SSTable会被懒式加载到tablet server的内存中。一旦加载完成，对这种局部组中的列族的访问就不需要访问磁盘。这个特性对被频繁访问的小规模数据非常有用。我们的`METADATA`表的位置列族的内部就使用了这一特性。
+
+### 6.2 压缩
+
+client可以控制是否要压缩局部组的SSTable及使用哪种压缩格式。用户指定的压缩格式会被应用到SSTable的每个块（其大小可通过局部组调参控制）。尽管分别压缩每个block会损失一些空间，但是当我们需要读取一个SSTable的一小部分时不需要解压缩整个文件。许多client采用自定义的二次压缩（two-pass compression）策略。第一次压缩使用Bentley and McIlroy算法，其会压缩跨大窗口的相同的长字符串。第二次压缩使用更快的压缩算法，在16KB的小窗口周查找重复的数据。两次压缩都非常快，在现在机器上，可以以100~200MB/s的速度编码，以400~1000MB/s的速度解码。
+
+尽管我们在选择压缩算法时强调速度而不是空间的减少，这种二次压缩的策略实际表现还是出奇的好。例如，在Webtable中，我们使用这种压缩策略来存储网页的内容。在一次实验中，我们在一个局部组中存储了大量的文档。为了达到实验目的，我们限制仅对每个文档存储一个版本而不是所有可用的版本。通过这种策略压缩后仅占用原来的十分之一的空间。而通常使用的Gzip仅能将空间压缩到原来的三分之一到四分之一。对于HTML页面，二次压缩策略比Gzip的表现好很多，这归功于Webtable的行的布局：所有来自同一个主机的页面被就近存储。这使Bentley-McIlroy算法能够在同一主机下识别到大量的相同的模式。不只是Webtable，对很多应用程序来说，都可以通过挑选它们的行名的方式来使相似的数据聚堆，这样可以得到非常好的压缩比例。当我们在Bigtable中存储同一个值的多个版本时，压缩比例甚至会更好。
+
+### 6.3 读取缓存
+
+为了提高读取性能，tablet server使用了二级缓存。Scan Cache是高层缓存，其将SSTable接口返回的键值对缓存到tablet server的代码中。Block Cache是低层缓存，其缓存从GFS读取的SSTable的块。对于更倾向于反复读取相同数据的应用程序来说，Scan Cache的作用更大。对更倾向于读取其最近读取的位置附近数据的应用程序来说，Block Cache的作用更大（例如，顺序读取、某个局部组的热点行中对不同列的随机读取）。
+
+### 6.4 布隆过滤器
+
+正如[章节5.3](#53-)中描述的那样，读操作必须读取所有组成了tablet状态的SSTable。如果这些SSTable不在内存中，会造成大量的磁盘访问。为了减少磁盘访问，我们允许client为特定的局部组创建布隆过滤器（Bloom filter）。布隆过滤器让我们能够询问SSTable是否可能包含指定行或列的数据。对特定的应用程序来说，在tablet server中仅使用少量内存来存储布隆过滤器即可大大减少读操作所需的磁盘寻道次数。使用布隆过滤器意味着大多数对不存在的行或列的查找不需要访问磁盘。
+
+### 6.5 commit log的实现
+
+如果我们为每个tablet单独保存一个commit log，将会有大量的文件在GFS中并发写入。由于GFS服务器的下层存储系统实现方式，这些写入操作会导致大量的磁盘寻道次数以写入不同的物理上的日志文件。此外，因为局部组经常很小，为每个tablet分别存储日志文件会削弱分组提交的优化效果。为了解决这些问题，我们将对每个tablet server上的tablet的变更追加到同一个commit log中，同一个物理日志文件中包含了来自不同tablet的变更。
+
+使用同一个日志文件在执行一般操作时能够提供大幅的性能提高，但是复杂化了恢复操作。当一个tablet server挂掉时，其提供服务的tablet将会被移动到很多其他的tablet server上，每个tablet server通常仅加载原tablet server中少量的tablet。为了恢复tablet的状态，新的tablet server需要重新应用原tablet server上该tablet的commit log中的变更。然而，这些tablet的变更在同一个物理日志文件中。恢复的其中一种方法是，每个tablet server读取完整的commit log并进应用其需要恢复的tablet的日志条目。然而，在这种策略下，如果100台机器中每台机器都分到了一个来自故障tablet server的tablet，那么日志文件将要被读取100次（每台tablet server一次）。
+
+为了避免多次读取commit log，首先会对commit log中的条目按照$<表, 行名, 日志序号>$的键排序。在排序的输出中，每个特定的tablet的变更条目是连续的，这样就可以通过一次寻道和随后的顺序读取来高效地读取日志。为了并行化排序过程，我们将日志文件划分为64MB的段，并将每个段在不同的tablet server上并行地排序。排序进程由master协调，并在tablet server表名其需要从某个commit log文件中恢复变更时启动。
+
+在将commit log写入到GFS是会因很多种原因导致性能波动（例如，涉及写操作的GFS机器崩溃，或者到涉及写操作的特定三台GFS服务器的网络拥塞、或者负载过高）。为了笔辩变更受GFS峰值时延的影响，每个tablet server实际上有两个日志写入线程，每个线程写各自的日志文件，在同一时刻二者中仅有一个线程被激活使用。如果写入到活动的日志文件的性能表现较差，那么日志的写入会切换到另一个线程，且在commit log队列中的变更会被新激活的日志写入线程写入。日志条目包含一个序号，这使恢复进程可以忽略因切换线程而产生的重复的日志条目。
+
+### 6.6 加速tablet恢复
+
+如果master将一个tablet从一个tablet server移动到了另一个tablet server，源tablet server首先会对该tablet应用一次minor compaction。该操作会通过减少tablet server中的commit log中未压缩状态的的总量来减少恢复时间。当minor compaction完成后，tablet server会停止对该tablet提供服务。在其实际卸载该tablet之前，tablet server还会再进行一次minor compaction（通常很快）来消除任何在执行第一次minor compaction时到来的操作造成的剩余的未压缩的状态。在第二次minor compaction完成后，tablet可以被另一台tablet server装载且不需要恢复任何的日志条目。
+
+### 6.7 不变性的利用
+
+因为我们生成的SSTable是不变的，所以除了SSTable的缓存，Bigtable系统的各种其他部分都可以被简化。例如，在我们为读取SSTable而访问文件系统时，不需要做任何的同步。这样，行的并发控制可以被高效实现。唯一的会同时被读写操作访问的可变数据结构是`memtable`。为了减少读取`memtable`的竞态，我们使`memtable`的每一行都在写入时复制（copy-on-write），并允许读写操作并行执行。
+
+因为SSTable是不可变的，永久移除已删除的数据问题被转化成了对过时的SSTable的垃圾回收问题。每个tablet的SSTable都被会注册到`METADATA`表中。master对`METADATA`表的root tablet中记录的SSTable集合中的过时的SSTable集合应用“标记-清除（mark-and-sweep）”算法进行垃圾回收。
+
+最后，SSTable的不可变性可以让我们快速分割tablet。我们让子tablet共享父tablet，而不是为每个子tablet生成新的tablet。
+
+## 7. 性能评估
