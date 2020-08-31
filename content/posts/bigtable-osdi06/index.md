@@ -26,7 +26,7 @@ Bigtable是一个为管理大规模可伸缩的结构化数据而设计的的分
 
 在过去的两年半的时间里，我们在Google设计、实现并部署了一个用来管理结构化数据的分布式存储系统——Bigtable。Bigtable为可靠地适用于PB级数据和上千台机器而设计。Bigtable已经完成了几个目标：适用性广、可伸缩、高性能和高可用。Bigtable在超过60余个Google的产品和项目中被使用，包括Google Analytics、Google Finance、Orkut、个性化搜索、Writely和Google Earth。这些产品使用Bigtable以应对变化多样的负载需求，从吞吐量敏感的批处理程序到面相终端用户的延迟敏感的数据服务。这些产品使用的Bigtable集群配置也变化多样，从几台服务器到数千台服务器，最多的可以存储几百TB的数据。
 
-Bigtable在很多方面都很像一个数据库：Bigtable和数据库的很多实现策略都是相同的。并行数据库和内存数据库已经做到了可伸缩和高性能，但是Bigtable提供了与这类系统不同的接口。Bigtable不支持完整的关系数据模型，取而代之的是，Bigtable提供了一个简单地数据模型，该模型允许客户端动态控制数据布局和格式，且允许客户端参与决策层数据在下层存储中的位置属性。数据通过可用任意字符串命名的行名和列名来索引。Bigtable将数据视为普通字符串且不关注其内容。客户端可以将不同格式的结构化或半结构化数据序列化为字符串。cnt可以小心地选择数据的schema来控制数据的位置。最后欧，Bigtable的schema参数允许客户端动态控制将数据放在内存中还是磁盘中使用。
+Bigtable在很多方面都很像一个数据库：Bigtable和数据库的很多实现策略都是相同的。并行数据库<sup>[14]</sup>和内存数据库<sup>[13]</sup>已经做到了可伸缩和高性能，但是Bigtable提供了与这类系统不同的接口。Bigtable不支持完整的关系数据模型，取而代之的是，Bigtable提供了一个简单地数据模型，该模型允许客户端动态控制数据布局和格式，且允许客户端参与决策层数据在下层存储中的位置属性。数据通过可用任意字符串命名的行名和列名来索引。Bigtable将数据视为普通字符串且不关注其内容。客户端可以将不同格式的结构化或半结构化数据序列化为字符串。cnt可以小心地选择数据的schema来控制数据的位置。最后欧，Bigtable的schema参数允许客户端动态控制将数据放在内存中还是磁盘中使用。
 
 [第二章](#2-)更详细地介绍了数据模型。[第三章](#3-)给出了客户端API的概览。[第四章](#4-)简要描述了Bigtable依赖的Google的下层基础设施。[第五章](#5-)描述了Bigtable的基本实现。[第六章](#6-)我们为Bigtable的性能做出的改进。[第七章](#7-)提供了Bigtable的性能测试。在[第八章](#8-)中，我们描述了一些关于Bigtable在Google中被如何使用的例子。在[第九章](#9-)中，我们讨论了我们在设计和支持Bigtable时认识到的一些问题。最后，[第十章](#10-)讨论了相关工作，[第十一章](#-)给出了我们的结论。
 
@@ -76,17 +76,17 @@ Bigtable的API提供了用于创建、删除表和列族的函数。还提供了
 
 ![图3 从Bigtable读取](figure-3.png "图3 从Bigtable读取")
 
-Bigtable支持其他的一些允许用户通过更复杂的方式操作数据的特性。第一，Bigtable支持单行事务（single-row transaction），该特性可用作原子性地对一个行键下的数据串行地读、改、写。尽管Bigtable的客户端提供了跨行键的批量写入的接口，但是Bigtable目前不支持跨行键的事务。第二，Bigtable允许单元格被用作整型计数器。最后，Bigtable支持服务器的地址空间中执行用户提供的脚本。这些脚本通过Google开发的用于数据处理的Sawzall语言编写。目前，基于Sawzall的API不允许客户端脚本将数据写回Bigtable，但支持多种形式的数据转换、基于任意表达式的数据过滤、使用多种操作符运算。
+Bigtable支持其他的一些允许用户通过更复杂的方式操作数据的特性。第一，Bigtable支持单行事务（single-row transaction），该特性可用作原子性地对一个行键下的数据串行地读、改、写。尽管Bigtable的客户端提供了跨行键的批量写入的接口，但是Bigtable目前不支持跨行键的事务。第二，Bigtable允许单元格被用作整型计数器。最后，Bigtable支持服务器的地址空间中执行用户提供的脚本。这些脚本通过Google开发的用于数据处理的Sawzall语言<sup>[28]</sup>编写。目前，基于Sawzall的API不允许客户端脚本将数据写回Bigtable，但支持多种形式的数据转换、基于任意表达式的数据过滤、使用多种操作符运算。
 
-Bigtable可在MapReduce中使用。MapReduce是一个Google开发的运行大规模并行计算的框架。我们已经编写了一系列的封装，来使Bigtable可以作为MapReduce任务的输入或输出。
+Bigtable可在MapReduce<sup>[12]</sup>中使用。MapReduce是一个Google开发的运行大规模并行计算的框架。我们已经编写了一系列的封装，来使Bigtable可以作为MapReduce任务的输入或输出。
 
 ## 4. 块的构建
 
-Bigtable构建一些Google的其他基础架构之上。Bigtable使用了分布式的Google File System（GFS）来存储日志和数据文件。Bigtable集群通常在运行着各式各样的分布式程序的共享的主机池上运行，且Bigtable进程经常与其他程序的进程在同一机器上运行。Bigtable依赖集群管理系统来调度任务、管理共享机器的资源、处理机器故障和监控机器状态。
+Bigtable构建一些Google的其他基础架构之上。Bigtable使用了分布式的Google File System（GFS）<sup>[17]</sup>来存储日志和数据文件。Bigtable集群通常在运行着各式各样的分布式程序的共享的主机池上运行，且Bigtable进程经常与其他程序的进程在同一机器上运行。Bigtable依赖集群管理系统来调度任务、管理共享机器的资源、处理机器故障和监控机器状态。
 
 我们内部使用Google SSTable文件格式来存储Bigtable的数据。SSTable提供了持久化的、按照键-值的顺序排序的不可变字典，其键值可以使任意的字节型字符串。SSTable提供了按照指定的键查找值和在指定键的范围内遍历键值对的操作。每个SSTable内部都包含一个块（block）的序列（块大小可通过配置修改，通常为64KB）。SSTable通过块索引（block index，存储在SSTable的结尾）来定位块，当SSTable被打开时，块索引会被载入到内存中。查找可通过一次磁盘*seek*操作实现：首先对内存中的块索引使用二分查找来查找指定块的位置，接着从磁盘读取该块。SSTable还可以可选地被完全映射的内存，这可以使查找和扫描不需要访问磁盘。
 
-Bigtable依赖高可用、持久化的锁——Chubby。一个Chubby服务包含5个活动的副本，这些副本中的一份被选举为master并处理请求。当这些副本中的大部分副本可以相互通信时，该服务即为可用的。Chubby使用Paxos算法维护副本一致性，以应对故障情况。Chubby提供了由目录和小文件组成的命名空间机制。每个目录或文件都可以用作锁，对文件的读写都是原子性的。Chubby的client库提供了对Chubby文件的一致性缓存。如果client在租约过期时间内没能更新session的租约，那么该session会过期。当session过期时，client会失去所有的锁和已经打开的句柄（handle）。Chubby的client还可以对Chubby的文件和目录注册回调（callback），当其被修改或session过期时会通知client。
+Bigtable依赖高可用、持久化的锁——<sup>[8]</sup>。一个Chubby服务包含5个活动的副本，这些副本中的一份被选举为master并处理请求。当这些副本中的大部分副本可以相互通信时，该服务即为可用的。Chubby使用Paxos算法<sup>[9, 23]</sup>维护副本一致性，以应对故障情况。Chubby提供了由目录和小文件组成的命名空间机制。每个目录或文件都可以用作锁，对文件的读写都是原子性的。Chubby的client库提供了对Chubby文件的一致性缓存。如果client在租约过期时间内没能更新session的租约，那么该session会过期。当session过期时，client会失去所有的锁和已经打开的句柄（handle）。Chubby的client还可以对Chubby的文件和目录注册回调（callback），当其被修改或session过期时会通知client。
 
 Bigtable在很多任务中使用了Chubby，如：确保忍一时客服最多只有一个活动的master、存储Bigtable数据引导（bootstrap）位置（[章节5.1](#51-)）、发现tablet服务器并认定tablet服务器挂掉（[章节5.2](#52-)）、存储Bigtable的schema信息（每张表的列族信息）、存储访问控制列表。如果Chubby在较长的一段时间内不可用，那么Bigtable也会变得不可用。我们最近测量了跨11个Chubby实例的14个Bigtable集群中的效果。其中，由于Chubby（因Chubby停机或网络问题导致）不可用而导致的某些Bigtable中的数据不可用的时间平均占0.0047%。单个集群因Chubby不可用受影响占比为0.0326。
 
@@ -98,13 +98,13 @@ master负责将tablet分配到tablet server、检测tablet server的加入或过
 
 每个tablet server都管理一系列的tablet（通常每个tablet server管理大概十到一千个tablet）。tablet server处理对其加载的tablet读写请求，并在tablet增长得过大时分割tablet。
 
-与其他单master的分布式存储系统类似，client的数据不直接发送到master，而是由client直接与tablet server通信来读写数据。因为Bigtable的client不依赖master查找tablet的位置信息，大部分的client从不与master通信。这样，master在实际环境中的负载非常低。
+与其他单master的分布式存储系统<sup>[17, 21]</sup>类似，client的数据不直接发送到master，而是由client直接与tablet server通信来读写数据。因为Bigtable的client不依赖master查找tablet的位置信息，大部分的client从不与master通信。这样，master在实际环境中的负载非常低。
 
 Bigtable集群可以存储大量的表。每个表都由一系列tablet组成。当表增长时会被自动分割成多个tablet，每个tablet默认大小约为100~200MB。
 
 ### 5.1 tablet位置
 
-我们采用类似B+树的三层的数据结构存储tablet位置信息（如**图4**所示）。
+我们采用类似B+树<sup>[10]</sup>的三层的数据结构存储tablet位置信息（如**图4**所示）。
 
 ![图4 tablet位置层级](figure-4.png "图4 tablet位置层级")
 
@@ -136,7 +136,7 @@ master需要检测到tablet server不再对其tablet提供服务的情况，并�
 
 ![图5 tablet的表示](figure-5.png "图5 tablet的表示")
 
-当写操作到达tablet server时，tablet server会检查其是否格式正确且其sender是否被授权执行该变更。鉴权通过从一个Chubby文件（大多数情况下总是会命中Chubby client的缓存）中读取被允许的writer列表来实现。合法的变更会被写入到commit log中。tablet server使用了分组提交的方式来提高多个小变更的吞吐量。在写入操作被提交后，其内容会被插入到`memtable`中。
+当写操作到达tablet server时，tablet server会检查其是否格式正确且其sender是否被授权执行该变更。鉴权通过从一个Chubby文件（大多数情况下总是会命中Chubby client的缓存）中读取被允许的writer列表来实现。合法的变更会被写入到commit log中。tablet server使用了分组提交的方式来提高多个小变更<sup>[13, 16]</sup>的吞吐量。在写入操作被提交后，其内容会被插入到`memtable`中。
 
 当读操作到达tablet server时，同样会检查格式是否和权限是否正确。合法的读操作会在SSTable序列和`memtable`的合并的视图上执行。因为SSTable和`memtable`是按照字典序排序的数据结构，所以可以高效地生成合并视图。
 
@@ -162,7 +162,7 @@ client可以将多个列族组合为一个局部组（locality group）。每个
 
 ### 6.2 压缩
 
-client可以控制是否要压缩局部组的SSTable及使用哪种压缩格式。用户指定的压缩格式会被应用到SSTable的每个块（其大小可通过局部组调参控制）。尽管分别压缩每个block会损失一些空间，但是当我们需要读取一个SSTable的一小部分时不需要解压缩整个文件。许多client采用自定义的二次压缩（two-pass compression）策略。第一次压缩使用Bentley and McIlroy算法，其会压缩跨大窗口的相同的长字符串。第二次压缩使用更快的压缩算法，在16KB的小窗口周查找重复的数据。两次压缩都非常快，在现在机器上，可以以100~200MB/s的速度编码，以400~1000MB/s的速度解码。
+client可以控制是否要压缩局部组的SSTable及使用哪种压缩格式。用户指定的压缩格式会被应用到SSTable的每个块（其大小可通过局部组调参控制）。尽管分别压缩每个block会损失一些空间，但是当我们需要读取一个SSTable的一小部分时不需要解压缩整个文件。许多client采用自定义的二次压缩（two-pass compression）策略。第一次压缩使用Bentley and McIlroy<sup>[6]</sup>算法，其会压缩跨大窗口的相同的长字符串。第二次压缩使用更快的压缩算法，在16KB的小窗口周查找重复的数据。两次压缩都非常快，在现在机器上，可以以100~200MB/s的速度编码，以400~1000MB/s的速度解码。
 
 尽管我们在选择压缩算法时强调速度而不是空间的减少，这种二次压缩的策略实际表现还是出奇的好。例如，在Webtable中，我们使用这种压缩策略来存储网页的内容。在一次实验中，我们在一个局部组中存储了大量的文档。为了达到实验目的，我们限制仅对每个文档存储一个版本而不是所有可用的版本。通过这种策略压缩后仅占用原来的十分之一的空间。而通常使用的Gzip仅能将空间压缩到原来的三分之一到四分之一。对于HTML页面，二次压缩策略比Gzip的表现好很多，这归功于Webtable的行的布局：所有来自同一个主机的页面被就近存储。这使Bentley-McIlroy算法能够在同一主机下识别到大量的相同的模式。不只是Webtable，对很多应用程序来说，都可以通过挑选它们的行名的方式来使相似的数据聚堆，这样可以得到非常好的压缩比例。当我们在Bigtable中存储同一个值的多个版本时，压缩比例甚至会更好。
 
@@ -172,11 +172,11 @@ client可以控制是否要压缩局部组的SSTable及使用哪种压缩格式�
 
 ### 6.4 布隆过滤器
 
-正如[章节5.3](#53-)中描述的那样，读操作必须读取所有组成了tablet状态的SSTable。如果这些SSTable不在内存中，会造成大量的磁盘访问。为了减少磁盘访问，我们允许client为特定的局部组创建布隆过滤器（Bloom filter）。布隆过滤器让我们能够询问SSTable是否可能包含指定行或列的数据。对特定的应用程序来说，在tablet server中仅使用少量内存来存储布隆过滤器即可大大减少读操作所需的磁盘寻道次数。使用布隆过滤器意味着大多数对不存在的行或列的查找不需要访问磁盘。
+正如[章节5.3](#53-)中描述的那样，读操作必须读取所有组成了tablet状态的SSTable。如果这些SSTable不在内存中，会造成大量的磁盘访问。为了减少磁盘访问，我们允许client为特定的局部组创建布隆过滤器（Bloom filter）<sup>[7]</sup>。布隆过滤器让我们能够询问SSTable是否可能包含指定行或列的数据。对特定的应用程序来说，在tablet server中仅使用少量内存来存储布隆过滤器即可大大减少读操作所需的磁盘寻道次数。使用布隆过滤器意味着大多数对不存在的行或列的查找不需要访问磁盘。
 
 ### 6.5 commit log的实现
 
-如果我们为每个tablet单独保存一个commit log，将会有大量的文件在GFS中并发写入。由于GFS服务器的下层存储系统实现方式，这些写入操作会导致大量的磁盘寻道次数以写入不同的物理上的日志文件。此外，因为局部组经常很小，为每个tablet分别存储日志文件会削弱分组提交的优化效果。为了解决这些问题，我们将对每个tablet server上的tablet的变更追加到同一个commit log中，同一个物理日志文件中包含了来自不同tablet的变更。
+如果我们为每个tablet单独保存一个commit log，将会有大量的文件在GFS中并发写入。由于GFS服务器的下层存储系统实现方式，这些写入操作会导致大量的磁盘寻道次数以写入不同的物理上的日志文件。此外，因为局部组经常很小，为每个tablet分别存储日志文件会削弱分组提交的优化效果。为了解决这些问题，我们将对每个tablet server上的tablet的变更追加到同一个commit log中，同一个物理日志文件中包含了来自不同tablet的变更<sup>[18, 20]</sup>。
 
 使用同一个日志文件在执行一般操作时能够提供大幅的性能提高，但是复杂化了恢复操作。当一个tablet server挂掉时，其提供服务的tablet将会被移动到很多其他的tablet server上，每个tablet server通常仅加载原tablet server中少量的tablet。为了恢复tablet的状态，新的tablet server需要重新应用原tablet server上该tablet的commit log中的变更。然而，这些tablet的变更在同一个物理日志文件中。恢复的其中一种方法是，每个tablet server读取完整的commit log并进应用其需要恢复的tablet的日志条目。然而，在这种策略下，如果100台机器中每台机器都分到了一个来自故障tablet server的tablet，那么日志文件将要被读取100次（每台tablet server一次）。
 
@@ -192,7 +192,7 @@ client可以控制是否要压缩局部组的SSTable及使用哪种压缩格式�
 
 因为我们生成的SSTable是不变的，所以除了SSTable的缓存，Bigtable系统的各种其他部分都可以被简化。例如，在我们为读取SSTable而访问文件系统时，不需要做任何的同步。这样，行的并发控制可以被高效实现。唯一的会同时被读写操作访问的可变数据结构是`memtable`。为了减少读取`memtable`的竞态，我们使`memtable`的每一行都在写入时复制（copy-on-write），并允许读写操作并行执行。
 
-因为SSTable是不可变的，永久移除已删除的数据问题被转化成了对过时的SSTable的垃圾回收问题。每个tablet的SSTable都被会注册到`METADATA`表中。master对`METADATA`表的root tablet中记录的SSTable集合中的过时的SSTable集合应用“标记-清除（mark-and-sweep）”算法进行垃圾回收。
+因为SSTable是不可变的，永久移除已删除的数据问题被转化成了对过时的SSTable的垃圾回收问题。每个tablet的SSTable都被会注册到`METADATA`表中。master对`METADATA`表的root tablet中记录的SSTable集合中的过时的SSTable集合应用“标记-清除（mark-and-sweep）”算法<sup>[25]</sup>进行垃圾回收。
 
 最后，SSTable的不可变性可以让我们快速分割tablet。我们让子tablet共享父tablet，而不是为每个子tablet生成新的tablet。
 
@@ -291,3 +291,115 @@ Google运营者一系列的服务。通过Google Maps接口（maps.google.com）
 我们学到的最重要的知识是简单的设计的价值。考虑到我们系统的大小（不包括测试大概有10万行代码）和代码会随着时间无法预料的变化，我们发现代码和设计的清晰对代码维护和调试有巨大的帮助。其中一个例子是我们的tablet server成员协议。我们的最初的协议非常简单：master每隔一段时间会向tablet server发出租约，如果tablet server的租约过期，它们会杀死自己的进程。不幸的是，这个协议会在出现网络故障时大大削弱系统的可用性，同时该协议对master的恢复时间非常敏感。我们重新设计了几次协议，知道我们得到了一个表现良好的协议。然而，最终的协议太过复杂并依赖Chubby中很少被其他应用程序使用的特性。我们发现我们花费了过多的时间在Bigtable的代码中甚至在Chubby的代码中调试模糊的情况。最终，我们不再使用该协议并转向了新的更简单的协议，新的协议仅依赖Chubby中被广泛应用的的特性。
 
 ## 10. 相关工作
+
+项目Boxwood<sup>[24]</sup>中有与Chubby、GFS和Bigtable在某些方面功能重叠的组件，其提供了分布式协议、锁、分布式块（chunk）存储、和分布式B树存储。虽然Boxwood在这些方面都有重叠，但其组件的目标定位似乎比Google的服务要较底层。Boxwood项目的目标是提供构建高层服务（如文件系统或数据库）的基础设施，而Bigtable的目标是直接支持client应用程序的数据存储需求。
+
+许多近期的项目都解决了提供分布式存储或在广域网下（通常在Internet的范围下）提供高层服务的问题。包括从CAN<sup>[29]</sup>、Chord<sup>[32]</sup>、Tapestry<sup>[37]</sup>和Pastry<sup>[30]</sup>之类的项目开始的分布式哈希表的工作。这些系统解决了在Bigtable中不会出现的问题，如高度可变的带宽、不受信的参与者、频繁地修改配置等。去中心化的控制和拜占庭容错不是Bigtable的目标。
+
+我们认为对于应用程序开发者来说，分布式的B树或分布式哈希表的模型过于受限。键值对的模型是十分有用的构建模块，但我们也不应该仅向开发者提供这一种模块。我们选择的模型比普通的键值对更加丰富，且支持稀疏的半结构化数据。而且该模型仍保持的足够的简单性，可用于非常高效的扁平化的文件表示；且其足够透明（通过局部组），用户可以对系统的重要行为进行调优。
+
+一些数据库的供应商已经开发了能够存储大量数据的并行数据库。Oracle的Real Application Cluster数据库<sup>[27]</sup>使用了共享磁盘来存储数据（Bigtable使用GFS）并使用一个分布式的锁管理器（Bigtable使用Chubby）。IBM的DB2 Parallel Edition<sup>[4]</sup>基于类似Bigtable的shared-nothing<sup>[33]</sup>架构。每个DB2服务器负责管理一张表的行的一个子集，这个子集被存储在本地的关系型数据库中。这两个产品都提供了带事务的完整的关系模型。
+
+相比于其他在磁盘上基于列而不是基于行组织数据的存储系统（包括C-Store<sup>[1, 34]</sup>和商业产品如Sybase IQ<sup>[15, 36]</sup>、Sensage<sup>[31]</sup>、KDB+<sup>[22]</sup>和MonetDB/X100的ColumnBM存储层<sup>[38]</sup>），Bigtable的局部组实现了类似的压缩和磁盘读优化。另一个可以将数据横向或纵向分区到扁平化的文件中并有良好压缩率的系统是AT&T的Daytona数据库<sup>[19]</sup>。Bigtable的局部组不支持CPU缓存级别的优化，如Ailamaki<sup>[2]</sup>中描述的那种优化。
+
+Bigtable使用`memtable`和SSTable将更新存储到tablet的方式与Log-Structured Merge Tree<sup>[26]</sup>中将更新存储到索引数据中的方式类似。在二者中，排好序的数据在写入磁盘前都会在内存中缓冲，读操作必须合并内存和磁盘中的数据。
+
+C-Store和Bigtable有很多相同的特性：二者都使用shared-nothing架构，且都有两种不同的数据结构，其中之一被最近的写入使用，另一个用来长期存储数据，并有将数据从一种格式转移到另一种格式的方法。但这连个系统的API有着很大的区别：C-Store像是一个关系型数据库，而Bigtable提供了较为底层的读写接口且被设计支持每台服务器每秒钟处理几千个这种请求。C-Store还是一个有读优化的关系型DBMS，而Bigtable为读敏感和写敏感的应用程序都提供了很好的性能。
+
+Bigtable的负载均衡器解决了一些在同类型的shared-nothing数据库的负载均衡和内存均衡问题（例如参考文献<sup>[11, 35]</sup>）。我们的问题与之相比更简单一些：（1）我们不需要考虑可能由于视图或索引导致的相同数据有多个副本的情况；（2）我们让用户界定数据应该存储在内存中还是在磁盘中昂，而不是试图自动地为其做决策；（3）我们不需要执行或优化复杂的查询。
+
+## 11. 结论
+
+我们描述了Bigtale，其是一个Google中用来存储结构化数据的分布式系统。Bigtable集群从2005年4月开始一直使用至今，我们在那之前大概花费了7人年的时间来设计并实现它。知道2006年8月，已经有超过60个项目使用了Bigtable。我们的用户喜欢Bigtable的实现提供了性能和高可用性，也因此用户可以在资源需求随时间变化时能够简单地通过在系统中添加更多机器的方式来提高集群的容量。
+
+考虑到Bigtable的接口不太常见，我们的用户适配该系统的难度也是一个有趣的问题。新用户有时不确定怎样使用Bigtable的接口才能获得最好的效果，特别是当他们习惯使用支持通用事务的关系型数据库时。不过，事实上Google中使用Bigtable的很多产品的成功印证了在实际环境中我们的设计非常良好。
+
+我们正在实现一些Bigtable的额外的特性，比如支持二级索引和构建具有多master副本的跨数据中心备份的Bigtable的基础设施。我们还开始将Bigtable作为产品服务部署，这样独立的团队就不需要维护自己的集群。随着我们的服务集群变大，我们需要解决更多Bigtable自身的资源共享问题<sup>[3, 5]</sup>。
+
+最后，我们发现在Google构建自己的存储方案有很大的优势。在为Bigtable设计自己的数据模型时，我们有很大的灵活性。此外，我们对Bigtable实现的控制权和对Bigtable依赖的其他Google的基础设施的控制权意味着当效率低下时我们能够移除性能瓶颈。
+
+## 致谢
+
+感谢匿名的审稿者、David Nagle和我们的领导者Brad Calder为本篇论文提供的反馈。Bigtable系统收到了很多Google内用户的反馈。另外，感谢以下的人为Bigtable做出的贡献：Dan Aguayo、Sameer Ajmani、Zhifeng Chen、Bill Coughran、Mike Epstein、Healfdene Goguen、Robert Griesemer、Jeremy Hylton、Josh Hyman、Alex Khesin、Joanna Kulik、Alberto Lerner、Sherry Listgarten、Mike Maloney、Eduardo Pinheiro、Kathy Polizzi、Frank Yellin、Arthur Zwiegincew。
+
+## 参考文献
+
+<div class="reference">
+
+[1] ABADI, D. J., MADDEN, S. R., AND FERREIRA, M. C. Integrating compression and execution in columnoriented database systems. Proc. of SIGMOD (2006).
+
+[2] AILAMAKI, A., DEWITT, D. J., HILL, M. D., AND SKOUNAKIS, M. Weaving relations for cache performance. In The VLDB Journal (2001), pp. 169–180.
+
+[3] BANGA, G., DRUSCHEL, P., AND MOGUL, J. C. Resource containers: A new facility for resource management in server systems. In Proc. of the 3rd OSDI (Feb. 1999), pp. 45–58.
+
+[4] BARU, C. K., FECTEAU, G., GOYAL, A., HSIAO, H., JHINGRAN, A., PADMANABHAN, S., COPELAND, G. P., AND WILSON, W. G. DB2 parallel edition. IBM Systems Journal 34, 2 (1995), 292–322.
+
+[5] BAVIER, A., BOWMAN, M., CHUN, B., CULLER, D., KARLIN, S., PETERSON, L., ROSCOE, T., SPALINK, T., AND WAWRZONIAK, M. Operating system support for planetary-scale network services. In Proc. of the 1st NSDI (Mar. 2004), pp. 253–266.
+
+[6] BENTLEY, J. L., AND MCILROY, M. D. Data compression using long common strings. In Data Compression Conference (1999), pp. 287–295.
+
+[7] BLOOM, B. H. Space/time trade-offs in hash coding with allowable errors. CACM 13, 7 (1970), 422–426.
+
+[8] BURROWS, M. The Chubby lock service for looselycoupled distributed systems. In Proc. of the 7th OSDI (Nov. 2006).
+
+[9] CHANDRA, T., GRIESEMER, R., AND REDSTONE, J. Paxos made live — An engineering perspective. In Proc. of PODC (2007).
+
+[10] COMER, D. Ubiquitous B-tree. Computing Surveys 11, 2 (June 1979), 121–137.
+
+[11] COPELAND, G. P., ALEXANDER, W., BOUGHTER, E. E., AND KELLER, T. W. Data placement in Bubba. In Proc. of SIGMOD (1988), pp. 99–108.
+
+[12] DEAN, J., AND GHEMAWAT, S. MapReduce: Simplified data processing on large clusters. In Proc. of the 6th OSDI (Dec. 2004), pp. 137–150.
+
+[13] DEWITT, D., KATZ, R., OLKEN, F., SHAPIRO, L., STONEBRAKER, M., AND WOOD, D. Implementation techniques for main memory database systems. In Proc. of SIGMOD (June 1984), pp. 1–8.
+
+[14] DEWITT, D. J., AND GRAY, J. Parallel database systems: The future of high performance database systems. CACM 35, 6 (June 1992), 85–98.
+
+[15] FRENCH, C. D. One size fits all database architectures do not work for DSS. In Proc. of SIGMOD (May 1995), pp. 449–450.
+
+[16] GAWLICK, D., AND KINKADE, D. Varieties of concurrency control in IMS/VS fast path. Database Engineering Bulletin 8, 2 (1985), 3–10.
+
+[17] GHEMAWAT, S., GOBIOFF, H., AND LEUNG, S.-T. The Google file system. In Proc. of the 19th ACM SOSP (Dec. 2003), pp. 29–43.
+
+[18] GRAY, J. Notes on database operating systems. In Operating Systems — An Advanced Course, vol. 60 of Lecture Notes in Computer Science. Springer-Verlag, 1978.
+
+[19] GREER, R. Daytona and the fourth-generation language Cymbal. In Proc. of SIGMOD (1999), pp. 525–526.
+
+[20] HAGMANN, R. Reimplementing the Cedar file system using logging and group commit. In Proc. of the 11th SOSP (Dec. 1987), pp. 155–162.
+
+[21] HARTMAN, J. H., AND OUSTERHOUT, J. K. The Zebra striped network file system. In Proc. of the 14th SOSP (Asheville, NC, 1993), pp. 29–43.
+
+[22] KX.COM. kx.com/products/database.php. Product page.
+
+[23] LAMPORT, L. The part-time parliament. ACM TOCS 16, 2 (1998), 133–169.
+
+[24] MACCORMICK, J., MURPHY, N., NAJORK, M., THEKKATH, C. A., AND ZHOU, L. Boxwood: Abstractions as the foundation for storage infrastructure. In Proc. of the 6th OSDI (Dec. 2004), pp. 105–120.
+
+[25] MCCARTHY, J. Recursive functions of symbolic expressions and their computation by machine. CACM 3, 4 (Apr. 1960), 184–195.
+
+[26] O’NEIL, P., CHENG, E., GAWLICK, D., AND O’NEIL, E. The log-structured merge-tree (LSM-tree). Acta Inf. 33, 4 (1996), 351–385.
+
+[27] ORACLE.COM. www.oracle.com/technology/products/- database/clustering/index.html. Product page.
+
+[28] PIKE, R., DORWARD, S., GRIESEMER, R., AND QUINLAN, S. Interpreting the data: Parallel analysis with Sawzall. Scientific Programming Journal 13, 4 (2005), 227–298.
+
+[29] RATNASAMY, S., FRANCIS, P., HANDLEY, M., KARP, R., AND SHENKER, S. A scalable content-addressable network. In Proc. of SIGCOMM (Aug. 2001), pp. 161–172.
+
+[30] ROWSTRON, A., AND DRUSCHEL, P. Pastry: Scalable, distributed object location and routing for largescale peer-to-peer systems. In Proc. of Middleware 2001 (Nov. 2001), pp. 329–350.
+
+[31] SENSAGE.COM. sensage.com/products-sensage.htm. Product page.
+
+[32] STOICA, I., MORRIS, R., KARGER, D., KAASHOEK, M. F., AND BALAKRISHNAN, H. Chord: A scalable peer-to-peer lookup service for Internet applications. In Proc. of SIGCOMM (Aug. 2001), pp. 149–160.
+
+[33] STONEBRAKER, M. The case for shared nothing. Database Engineering Bulletin 9, 1 (Mar. 1986), 4–9.
+
+[34] STONEBRAKER, M., ABADI, D. J., BATKIN, A., CHEN, X., CHERNIACK, M., FERREIRA, M., LAU, E., LIN, A., MADDEN, S., O’NEIL, E., O’NEIL, P., RASIN, A., TRAN, N., AND ZDONIK, S. C-Store: A columnoriented DBMS. In Proc. of VLDB (Aug. 2005), pp. 553–564.
+
+[35] STONEBRAKER, M., AOKI, P. M., DEVINE, R., LITWIN, W., AND OLSON, M. A. Mariposa: A new architecture for distributed data. In Proc. of the Tenth ICDE (1994), IEEE Computer Society, pp. 54–65.
+
+[36] SYBASE.COM. www.sybase.com/products/databaseservers/sybaseiq. Product page.
+
+[37] ZHAO, B. Y., KUBIATOWICZ, J., AND JOSEPH, A. D. Tapestry: An infrastructure for fault-tolerant wide-area location and routing. Tech. Rep. UCB/CSD-01-1141, CS Division, UC Berkeley, Apr. 2001.
+
+[38] ZUKOWSKI, M., BONCZ, P. A., NES, N., AND HEMAN, S. MonetDB/X100 — A DBMS in the CPU cache. IEEE Data Eng. Bull. 28, 2 (2005), 17–22.
+
+</div>
