@@ -1,5 +1,5 @@
 ---
-title: "《XORing Elephants: Novel Erasure Codes for Big Data》论文翻译（arXiv:1301.3791v1）[龟速更新？？？？？？]"
+title: "《XORing Elephants: Novel Erasure Codes for Big Data》论文翻译（arXiv:1301.3791v1）"
 date: 2020-09-03T12:01:45+08:00
 lastmod: 2020-09-03T12:01:45+08:00
 draft: false
@@ -30,13 +30,13 @@ resources:
 
 MapReduce架构因其高伸缩性而在大数据管理中心变得越来越流行。在Facebook中，大型分析集群存储了PB级信息并使用Hadoop MapReduce处理很多的分析任务。其标准实现依赖一个通过利用了三副本的块来提供可靠性的分布式文件系统。副本策略的主要缺点在于其需要高达200%的额外存储开销，这一开销会反映在集群的开销上。当管理的数据快速增长时，这一开销会取代数据中心基础设施成为主要的瓶颈。
 
-因此，Facebook和许多其他厂商正在切换到纠删码技术（通常指RS码）来在节约存储的同时引入冗余，特别对于那些更像是归档的数据。在本文中，我们展示了传统的编码在分布式的MapReduce架构中离最优有很大差距。我们介绍了新的编码方式，以解决分布式系统可靠性和信息论约束的主要挑战，这也显示了我们的结构是最优的。本文依赖于对一个使用了Hadoop MapReduce来做数据分析的大型Facebook生产集群（超过3000个节点、30PB的逻辑数据存储）的测量。Facebook最近开始部署一个依赖RS码的叫做HDFS RAID的开源HDFS模块。在HDFS RAID中，“cold（即很少被访问的）”文件的副本因子被降为1，并为其创建一个包含奇偶块的新的奇偶文件。
+因此，Facebook和许多其他厂商正在切换到纠删码技术（通常指RS码）来在节约存储<sup>[4, 19]</sup>的同时引入冗余，特别对于那些更像是归档的数据。在本文中，我们展示了传统的编码在分布式的MapReduce架构中离最优有很大差距。我们介绍了新的编码方式，以解决分布式系统可靠性和信息论约束的主要挑战，这也显示了我们的结构是最优的。本文依赖于对一个使用了Hadoop MapReduce来做数据分析的大型Facebook生产集群（超过3000个节点、30PB的逻辑数据存储）的测量。Facebook最近开始部署一个依赖RS码的叫做HDFS RAID<sup>[2, 8]</sup>的开源HDFS模块。在HDFS RAID中，“cold（即很少被访问的）”文件的副本因子被降为1，并为其创建一个包含奇偶块的新的奇偶文件。
 
-Facebook集群中使用的参数为，每个大文件的数据块被分组为10个条带（stripe），并对每个条带创建了4个奇偶校验块。太系统（被称为RS）可以容错任意4个块的故障，且其额外开销仅为40%。因此，RS码能提供比副本更强的健壮性和存储性能。事实上，该方案存储的额外开销对于该级别的可靠性来说是最小的。实现了这种最佳的存储和可靠性折衷的编码被称作是Maximum Distance Separable（MDS）的，RS码就是MDS族中被最广泛使用的编码方式。
+Facebook集群中使用的参数为，每个大文件的数据块被分组为10个条带（stripe），并对每个条带创建了4个奇偶校验块。太系统（被称为RS）可以容错任意4个块的故障，且其额外开销仅为40%。因此，RS码能提供比副本更强的健壮性和存储性能。事实上，该方案存储的额外开销对于该级别的可靠性来说是最小的<sup>[7]</sup>。实现了这种最佳的存储和可靠性折衷的编码被称作是Maximum Distance Separable（MDS）<sup>[31]</sup>的，RS码就<sup>[27]</sup>是MDS族中被最广泛使用的编码方式。
 
-传统的纠删码在分布式环境中不是最优的，这时由于修复问题（Repair problem）：当一个节点故障时，通常每个条带中被存储在该节点上的一个块会丢失。即使仅有一个块丢失，RS码通常会使用需要传输10个块并重建这10个数据块的原始数据的方式的简单方案来修复，这导致了在修复时产生了10倍的对带宽和磁盘I/O的额外负载。
+传统的纠删码在分布式环境中不是最优的，这时由于修复问题（Repair problem）：当一个节点故障时，通常每个条带中被存储在该节点上的一个块会丢失。即使仅有一个块丢失，RS码通常会使用需要传输10个块并重建这10个数据块的原始数据的方式的简单方案来修复<sup>[28]</sup>，这导致了在修复时产生了10倍的对带宽和磁盘I/O的额外负载。
 
-最近，信息论的研究结果表明，和这种朴素方式相比，能够使用更少的网络带宽来修复纠错码。最近已经有大量关于设计这种高效的可修复的编码的工作，在[第六章](#6-)中有对这些文献的概览。
+最近，信息论的研究结果表明，和这种朴素方式<sup>[6]</sup>相比，能够使用更少的网络带宽来修复纠错码。最近已经有大量关于设计这种高效的可修复的编码的工作，在[第六章](#6-)中有对这些文献的概览。
 
 **我们的贡献：**我们介绍一个新的擦除码族——Locally Repairable Codes（LRCs），其可以在网络带宽和磁盘I/O方面进行高效修复。分析表明，我们的编码方案在局部性方面，从信息论的角度是最优的。即，修复单块故障所需的其他块数量是最优的。我们从广义的RS奇偶校验触发，提出了随机化和显式LRC结构的两种方案。
 
@@ -52,13 +52,13 @@ Facebook集群中使用的参数为，每个大文件的数据块被分组为10�
 
 ![图1 Facebook中由3000个节点组成的生产集群中一个月内节点故障数量](figure-1.png "图1 Facebook中由3000个节点组成的生产集群中一个月内节点故障数量")
 
-高效的可修复的编码方案在编码存储系统中变得越来越重要的原因还有4点。原因一，是读取降级（degraded read）问题。无永久性数据丢失的瞬时错误占数据中心错误事件的90%。当瞬时性错误发生时，如果一个编码了的条带的相关数据块不可用时，对该块的读取会被降级（degraded）。在这种情况下，丢失的数据块可以被修复进程重建，其目的并不在于容错，而是为了更高的数据可用性。这与标准的数据修复的区别在于，为了可用性而重建的块不需要被写入磁盘。因此，高效且快速的修复可以大幅提高数据可用性。
+高效的可修复的编码方案在编码存储系统中变得越来越重要的原因还有4点。原因一，是读取降级（degraded read）问题。无永久性数据丢失的瞬时错误占数据中心错误事件的90%<sup>[9, 19]</sup>。当瞬时性错误发生时，如果一个编码了的条带的相关数据块不可用时，对该块的读取会被降级（degraded）。在这种情况下，丢失的数据块可以被修复进程重建，其目的并不在于容错，而是为了更高的数据可用性。这与标准的数据修复的区别在于，为了可用性而重建的块不需要被写入磁盘。因此，高效且快速的修复可以大幅提高数据可用性。
 
 原因二，是高效节点退役（node decommissioning）问题。Hadoop提供了退役特性来使一个故障的数据节点退出。在该节点退役前，需要将基本数据拷贝出该节点，这个过程复杂且耗时。快速修复像对待计划性的修复一样来对待节点退役的情况，并启动一个MapReduce任务在不造成大量网络流量的情况下重新创建块。
 
-原因三，是修复操作对其它并发的MapReduce任务的影响。一些研究表明MapReduce的主要瓶颈是网络。正如我们提到的那样，修复占用的网络流量会在集群目前的网络带宽中占用客观的比例。使用的存储空间比数据中心的网络带宽增长得快得多，因此修复的网络占用问题会变得更加严重。存储密度的增长趋势让使用编码时能够局部修复变得更加重要。
+原因三，是修复操作对其它并发的MapReduce任务的影响。一些研究表明MapReduce的主要瓶颈是网络<sup>[5]</sup>。正如我们提到的那样，修复占用的网络流量会在集群目前的网络带宽中占用客观的比例。使用的存储空间比数据中心的网络带宽增长得快得多，因此修复的网络占用问题会变得更加严重。存储密度的增长趋势让使用编码时能够局部修复变得更加重要。
 
-最后，局部修复是促进跨数据中心的地理性（geographically）分布式文件系统的关键因素。多地（Geo-diversity）已被认为是未来改善时延和可靠性的关键方向之一。在传统方式中，站点通过副本的方式跨数据中心来分布式存储数据。然而，这种方式显著地增加了总存储开销。因为这种规模下跨地理位置的RS码需要大量的广域网带宽，所以这是完全不切实际的。我们的工作能在稍微提高存储额外开销的情况下使局部修复成为可能。
+最后，局部修复是促进跨数据中心的地理性（geographically）分布式文件系统的关键因素。多地（Geo-diversity）已被认为是未来改善时延和可靠性的关键方向之一<sup>[13]</sup>。在传统方式中，站点通过副本的方式跨数据中心来分布式存储数据。然而，这种方式显著地增加了总存储开销。因为这种规模下跨地理位置的RS码需要大量的广域网带宽，所以这是完全不切实际的。我们的工作能在稍微提高存储额外开销的情况下使局部修复成为可能。
 
 显然，采用副本的方式优化以上四个问题会更好，但是其需要更大的额外存储开销。相反，MDS码能够在给定的可靠性需求下使用最少的存储开销，但是会在修复方面和以上提到的问题中很困难。一种审视这篇文章的贡献的方式为：本文提出了该问题的一个新的中间权衡点，其牺牲了一定的存储效率以获取其他的指标。
 
@@ -66,7 +66,7 @@ Facebook集群中使用的参数为，每个大文件的数据块被分组为10�
 
 ## 2. 理论贡献
 
-极大距离可分码（Maximun distance sparable codes， MDS codes）经常在各种应用程序的通信和存储系统中被使用。一个比例为$R=\frac{k}{n}$的$(k,n-k)$-MDS码将一个大小为$M$的文件划分为$k$个大小相等的块，并随后将其编码为$n$个每个大小为$\frac{M}{k}$的编码块。这里我们假设我们的文件大小和$k$个数据块的大小恰好相等以简化形式；大文件会被划分为多个条带，每个条带中有$k$个数据块，且每个条带都会被分别编码。
+极大距离可分码（Maximun distance sparable codes， MDS codes）经常在各种应用程序的通信和存储系统中被使用<sup>[31]</sup>。一个比例为$R=\frac{k}{n}$的$(k,n-k)$-MDS码将一个大小为$M$的文件划分为$k$个大小相等的块，并随后将其编码为$n$个每个大小为$\frac{M}{k}$的编码块。这里我们假设我们的文件大小和$k$个数据块的大小恰好相等以简化形式；大文件会被划分为多个条带，每个条带中有$k$个数据块，且每个条带都会被分别编码。
 
 $(k,n-k)$-MDS码可以保证$n$个编码块中的任意$k$个都可以被用来重建整个文件。易证，这是该冗余级别下可能实现的最佳容错条件：任意$k$个块的集合总大小为$M$，因此没有能够覆盖该文件的更小的块的集合。
 
@@ -80,7 +80,7 @@ $(k,n-k)$-MDS码可以保证$n$个编码块中的任意$k$个都可以被用来�
 
 **定义 2 （块的局部性，BLOCK LOCALITY）：** 当每个被编码的块是最多$r$个使用了该编码的其他被编码的块的函数时，那么这个$(k,n-k)$编码的块局部性为$r$。（译注：即对于一种编码，如果被编码的每个块都可以被最多$r$个使用了该编码的其他块通过运算表示，那么这个编码的局部性为$r$。）
 
-有局部性$r$的编码有这样的属性：当任意一个块被擦除时，可以通过计算$r$个存在的使用该编码的块来快速修复丢失的编码块。这一概念最近在[10, 22, 24]中引入。
+有局部性$r$的编码有这样的属性：当任意一个块被擦除时，可以通过计算$r$个存在的使用该编码的块来快速修复丢失的编码块。这一概念最近在<sup>[10, 22, 24]</sup>中引入。
 
 当我们需要较小的局部性时，每一个编码块需要可以通过已存在的编码块的较小的子集来修复。即，即使$n$,$k$增大，仍需要$r \ll k$。以下事实显示了局部性和较好的距离冲突：
 
@@ -100,7 +100,7 @@ $$ \lim\limits_{k\to\infty}\frac{d_{LRC}}{d_{MDS}}=1 $$
 
 LRCs构建在MDS编码之上（最常见的选择为RS码）。
 
-将MDS编码的块分为对数大小的集合然后组合在一起后，可以得到有着对数的度（degree）的奇偶检验块。由于我们建立的信息论的权衡，我们证明了LRCs对给定的局部性有着最优的编码距离。我们的局部性-编码距离折衷十分普遍，因为其覆盖了线性编码和非线性编码，且其是对Gopalan等人最近的成果的推广，他们的成果为线性的编码建立了一个相似的边界。我们证明的方法基于建立了一个类似Dimakis等人的工作中信息流图。我们的分析可在附录中找到。
+将MDS编码的块分为对数大小的集合然后组合在一起后，可以得到有着对数的度（degree）的奇偶检验块。由于我们建立的信息论的权衡，我们证明了LRCs对给定的局部性有着最优的编码距离。我们的局部性-编码距离折衷十分普遍，因为其覆盖了线性编码和非线性编码，且其是对Gopalan等人最近的成果的推广<sup>[10]</sup>，他们的成果为线性的编码建立了一个相似的边界。我们证明的方法基于建立了一个类似Dimakis等人的工作中信息流图<sup>[6, 7]</sup>。我们的分析可在附录中找到。
 
 ### 2.1 Xorbas中LRC的实现
 
@@ -124,7 +124,7 @@ $$ P_{2}=( c_{2} ' )^{-1}(-S_{1}-S_{2}-c_{1} ' P_{1}-c_{3} ' P_{3}-c_{4} ' P_{4}
 
 ## 3. 系统描述
 
-HDFS-RAID是一个在Apache Hadoop上实现了RS编码和解码的开源模块。其提供了一个运行在HDFS之上的分布式RAID文件系统（Distributed Raid File System，DRFS）。存储在DRFS上的文件被划分为条带，即多个块的组。其对于每个条带都计算了一些奇偶校验块，且将其作为与原始文件对应的单独的奇偶校验文件存储。HDFS-RAID通过Java实现（大约12000行代码），且目前在包括Facebook的多个组织的生产环境中使用。
+HDFS-RAID是一个在Apache Hadoop<sup>[2]</sup>上实现了RS编码和解码的开源模块。其提供了一个运行在HDFS之上的分布式RAID文件系统（Distributed Raid File System，DRFS）。存储在DRFS上的文件被划分为条带，即多个块的组。其对于每个条带都计算了一些奇偶校验块，且将其作为与原始文件对应的单独的奇偶校验文件存储。HDFS-RAID通过Java实现（大约12000行代码），且目前在包括Facebook的多个组织的生产环境中使用。
 
 该模块由多个部件组成，其中最相关的是RaidNode和BlockFixer：
 
@@ -144,23 +144,23 @@ HDFS-Xorbas被设计为可以在大型Hadoop数据仓库中部署，如Facebook�
 
 一旦RaidNode（根据配置文件中设置的参数）检测到一个文件适合RAID，，它会启动该文件的编码器。编码器首先将文件划分为多个每个中有10个块的条带，并为其计算出4个RS奇偶校验块。其中，最后一个条带中可能包含少于10个块，这取决于文件的大小。对奇偶计算来说，不完整的条带会被看作是被0填充了的满的条带。
 
-HDFS-Xorbas为每个条带的总计16个块计算2个额外的奇偶校验块（即10个数据块，4个RS奇偶校验块和2个本地XOR奇偶校验块），如**图2**所示。与RS奇偶校验块的计算类似，Xorbas通过分布式的方式计算所有的奇偶校验块，即MapReduce编码任务。所有的块会根据Hadoop中配置的块放置策略（block placement policy）被分散到集群中。默认的策略为随机将块放置到DataNode上，并避免同一条带上的块分配到同一个DataNode上。
+HDFS-Xorbas为每个条带的总计16个块计算2个额外的奇偶校验块（即10个数据块，4个RS奇偶校验块和2个局部XOR奇偶校验块），如**图2**所示。与RS奇偶校验块的计算类似，Xorbas通过分布式的方式计算所有的奇偶校验块，即MapReduce编码任务。所有的块会根据Hadoop中配置的块放置策略（block placement policy）被分散到集群中。默认的策略为随机将块放置到DataNode上，并避免同一条带上的块分配到同一个DataNode上。
 
 #### 3.1.2 解码与修复
 
 当检测到损坏的文件时，RaidNode会启动一个解码进程。Xorbas使用了两个解码器：轻量级的解码器用来处理每个条带中单个块的故障，重量级的解码器会在轻量级解码器处理失败时被使用。
 
-当BlockFixer检测到丢失（或损坏）的块时，它会根据LRC的结构决定使用哪5个块来重建该块。之后会分配一个特殊的MapReduce任务来进行轻量级的解码：单个map任务向包含所需的块的节点打开并发的流，并下载这些块，再执行一个简单的XOR操作。对于多块故障，所需的5个块可能不可用。在这种情况下，轻量级解码器会失败并启动重量级解码器。重量级解码器使用与RS相同的操作：打开对该条带所有块的流，并通过等价于解一个线性方程组的方式解码。RS线性系统具有Vandermonde（范德蒙）结构，这可以减少对CPU的利用。被恢复的块会按照集群块放置策略最终被发送并存储到一个Datanode中。
+当BlockFixer检测到丢失（或损坏）的块时，它会根据LRC的结构决定使用哪5个块来重建该块。之后会分配一个特殊的MapReduce任务来进行轻量级的解码：单个map任务向包含所需的块的节点打开并发的流，并下载这些块，再执行一个简单的XOR操作。对于多块故障，所需的5个块可能不可用。在这种情况下，轻量级解码器会失败并启动重量级解码器。重量级解码器使用与RS相同的操作：打开对该条带所有块的流，并通过等价于解一个线性方程组的方式解码。RS线性系统具有Vandermonde（范德蒙）结构<sup>[31]</sup>，这可以减少对CPU的利用。被恢复的块会按照集群块放置策略最终被发送并存储到一个Datanode中。
 
-在当前部署的HDFS-RS的实现中，及时当仅有一个块损坏时，BlockFixer也会打开到该条带中其他的所有13个块的流（在更高效的实现中也可以将这个数量减少到10个）。因此，Xorbas的优势十分明显：对于所有单块故障和许多两个块故障（即两个丢失的块属于不同的本地XOR组中时）的情况，网络和磁盘I/O的开销会小的多。
+在当前部署的HDFS-RS的实现中，及时当仅有一个块损坏时，BlockFixer也会打开到该条带中其他的所有13个块的流（在更高效的实现中也可以将这个数量减少到10个）。因此，Xorbas的优势十分明显：对于所有单块故障和许多两个块故障（即两个丢失的块属于不同的局部XOR组中时）的情况，网络和磁盘I/O的开销会小的多。
 
 ## 4. 可靠性分析
 
 在本章中，我们会通过标准的马尔科夫模型估算平均数据丢失时间（MTTDL）来提供可靠性分析。我们通过上述的指标和模型将RS、LRCs与副本的方式进行了对比。影响MTTDL的主要因素有两个： $i)$在数据丢失前我们能够容忍的故障块的数量和 $ii)$修复块的速度。容错能力越强，MTTDL越高，修复块所需的时间越短。接下来，我们将探索这些因素的相互影响及它们对MTTDL的影响。
 
-在不同策略的对比中，副本策略能够在较低的容错开销下提供最快的修复速度。另一方面，RS码和LRCs能够容忍更多故障，但相比需要更长的修复时间，其中LRC比RS需要的修复时间短。在[9]中，作者展示了Google集群中的数据，并报告说在他们的参数下，$(9,4)$-RS码能够提供比3副本策略高出约6个数量级的可靠性。同样，在这我们也将看到编码的方式如何在我们关注的可靠性方面由于副本策略。
+在不同策略的对比中，副本策略能够在较低的容错开销下提供最快的修复速度。另一方面，RS码和LRCs能够容忍更多故障，但相比需要更长的修复时间，其中LRC比RS需要的修复时间短。在<sup>[9]</sup>中，作者展示了Google集群中的数据，并报告说在他们的参数下，$(9,4)$-RS码能够提供比3副本策略高出约6个数量级的可靠性。同样，在这我们也将看到编码的方式如何在我们关注的可靠性方面由于副本策略。
 
-正如[9]中所述，目前有大量分析了副本、RAID存储和纠删码的可靠性的工作。这些文献的主要部分采用了标准的马尔科夫模型分析推导各种存储设置的MTTDL。和这些文献一样，我们也采用了一个类似的方法估算我们对比的策略的可靠性。这里得到的数据孤立地看可能没有意义，但在对比不同策略时非常有用（参见[12]）。
+正如<sup>[9]</sup>中所述，目前有大量分析了副本、RAID存储<sup>[32]</sup>和纠删码<sup>[11]</sup>的可靠性的工作。这些文献的主要部分采用了标准的马尔科夫模型分析推导各种存储设置的MTTDL。和这些文献一样，我们也采用了一个类似的方法估算我们对比的策略的可靠性。这里得到的数据孤立地看可能没有意义，但在对比不同策略时非常有用（参见<sup>[12]</sup>）。
 
 在我们的分析中，$C$表示集群中总数据量，$S$表示条带大小。我们设磁盘节点数量$N=3000$，数据存储总量$C=30PB$。每个磁盘节点的平均故障时间为4年（$=1/ \lambda $），块大小$B=256MB$（Facebook数据仓库的默认值）。基于对Facebook集群的测量，我们限制修复时跨机架的通信速率$ \gamma = 1Gbps $。添加这一限的目的是模拟现实中Facebook集群跨机架通信的带宽限制。在我们的条件下，跨机架通信来自于同一个条带所有不同的编码块都被放置在了不同的机架上，以提高容错能力。这意味着当修复单个块时，参与修复的所有的块都会被从不同的机架下载。
 
@@ -172,17 +172,17 @@ $$ MTTDL = \frac{MTTDL_{stripe}}{C/nB} \tag {3} $$
 
 ![图3 用来计算$(10,4)$RS和$(10,6,5)$LRC的$MTTDL_{stripe}$的马尔科夫模型。](figure-3.png "图3 用来计算$(10,4)$RS和$(10,6,5)$LRC的$MTTDL_{stripe}$的马尔科夫模型。")
 
-我们接下来计算状态转移概率。？？？？？？假设故障间隔时间呈指数分布。修复时间也是如此。通常，修复时间可能不服从指数分布，然而，这样假设可以简化我们的分析。当条带中还有$i$个块时（即，当状态为$n-1$时），失去一个块的概率$ \lambda _{i} = i \lambda $，因为这$i$个块分布在不同节点上，且每个节点故障事件是独立的，其概率为$\lambda$。块被修复的概率取决于修复需要下载多少个块、块大小和下载速率$\gamma$。例如，对于3副本策略，修复单个块需要下载一个块，因此我们假设$\rho _{i} = \gamma / B $，其中$i=1,2$。对于编码策略，我们需要额外考虑使用轻量级和重量级编码器的影响。以LRC为例，如果两个相同条带的块丢失，我们决定调用轻量级和重量级编码器的概率，然后计算需要下载的块数的期望。受篇幅所限，我们跳过详细的推导。相似的做法可参见[9]。条带的MTTDL等于其从状态0到数据丢失状态的平均时间。在以上的假设和状态转移概率下，我们来计算条带的MTTDL，这样就可以通过**公式(3)**计算系统的MTTDL。
+我们接下来计算状态转移概率。？？？？？？假设故障间隔时间呈指数分布。修复时间也是如此。通常，修复时间可能不服从指数分布，然而，这样假设可以简化我们的分析。当条带中还有$i$个块时（即，当状态为$n-1$时），失去一个块的概率$ \lambda _{i} = i \lambda $，因为这$i$个块分布在不同节点上，且每个节点故障事件是独立的，其概率为$\lambda$。块被修复的概率取决于修复需要下载多少个块、块大小和下载速率$\gamma$。例如，对于3副本策略，修复单个块需要下载一个块，因此我们假设$\rho _{i} = \gamma / B $，其中$i=1,2$。对于编码策略，我们需要额外考虑使用轻量级和重量级编码器的影响。以LRC为例，如果两个相同条带的块丢失，我们决定调用轻量级和重量级编码器的概率，然后计算需要下载的块数的期望。受篇幅所限，我们跳过详细的推导。相似的做法可参见<sup>[9]</sup>。条带的MTTDL等于其从状态0到数据丢失状态的平均时间。在以上的假设和状态转移概率下，我们来计算条带的MTTDL，这样就可以通过**公式(3)**计算系统的MTTDL。
 
 ![表1 对比三种策略的总结。MTTDL假设节点故障是独立事件](table-1.png "表1 对比三种策略的总结。MTTDL假设节点故障是独立事件")
 
-我们在马尔可夫模型下计算得到的副本策略、HDFS-RS和Xorbas的MTTDL的值如**表1**所示。我们观察到，在可靠性方面，LRC较高的修复速度弥补了需要额外存储的不足。这让Xorbas LRC$(10,6,5)$比$(10,6)$RS码的可靠性多出了两个0。三副本策略的可靠性比两种编码策略的可靠性低得多，这与相关工作[0]中观测到的结果相似。
+我们在马尔可夫模型下计算得到的副本策略、HDFS-RS和Xorbas的MTTDL的值如**表1**所示。我们观察到，在可靠性方面，LRC较高的修复速度弥补了需要额外存储的不足。这让Xorbas LRC$(10,6,5)$比$(10,6)$RS码的可靠性多出了两个0。三副本策略的可靠性比两种编码策略的可靠性低得多，这与相关工作<sup>[9]</sup>中观测到的结果相似。
 
 另一个有趣的指标是数据可用性。可用性是数据可用时间的比例。需要注意的是，在三副本策略中，如果一个块丢失，该块的其它副本之一会立刻变得可用。相反，无论对于RS还是LRC来说，需要丢失了块的任务必须等修复任务执行完成。因为LRCs在读取降级后读取速率相对更快，所以能更快地完成这些任务，因此它们有更高的可用性。对编码存储系统权衡可用性的详细研究仍是未来中有趣的研究方向。
 
 ## 5. 性能评估
 
-在本章中，我们提供了我们为了在两个环境下（Amazon's Elastic Compute Cloud (EC2) 和Facebook中的一个测试集群）评估HDFS-Xorbas的性能的而开展的一系列实验的详细情况。
+在本章中，我们提供了我们为了在两个环境下（Amazon's Elastic Compute Cloud (EC2)<sup>[1]</sup> 和Facebook中的一个测试集群）评估HDFS-Xorbas的性能的而开展的一系列实验的详细情况。
 
 ### 5.1 评估指标
 
@@ -217,7 +217,7 @@ $$ MTTDL = \frac{MTTDL_{stripe}}{C/nB} \tag {3} $$
 
 **图4c**描述了整个恢复过程的时间（即从第一个块的修复任务开始到最后一个块修复任务终止的时间 ）。**图6c**结合了所有实验中的测量值结果，其展示了修复时间和修复的块的数量的关系。这些图显示Xorbas完成时间比HDFS-RS快了25%~45%。
 
-这两个系统的流量峰值不同的这一事实，表明了实验中可用的带宽没有完全饱和。在大规模MapReduce任务中，网络通常是瓶颈。在Facebook的生产集群中大规模修复发生时，也会观测到相似的情况。这是因为数百台机器可能共享同一个顶层交换机，且该交换机饱和了。由于LRC传输的数据量少得多，我们预计网络瓶颈会导致大规模的RS修复完成时间进一步推迟，也因此LRC在恢复时间上有比RS更大的优势。
+这两个系统的流量峰值不同的这一事实，表明了实验中可用的带宽没有完全饱和。在大规模MapReduce任务中<sup>[5, 14, 15]</sup>，网络通常是瓶颈。在Facebook的生产集群中大规模修复发生时，也会观测到相似的情况。这是因为数百台机器可能共享同一个顶层交换机，且该交换机饱和了。由于LRC传输的数据量少得多，我们预计网络瓶颈会导致大规模的RS修复完成时间进一步推迟，也因此LRC在恢复时间上有比RS更大的优势。
 
 从CPU利用率的图表中我们可以得出结论：HDFS-RS和Xorbas有着相似的CPU需求，且这似乎不会影响修复时间。
 
@@ -243,5 +243,97 @@ $$ MTTDL = \frac{MTTDL_{stripe}}{C/nB} \tag {3} $$
 
 ## 6. 相关工作
 
-为了高效修复的代码设计优化是最近备受关注的主题，因为其与分布式系统有关。这里面有大量的工作要做，这里我们只视图给出一个高层的高数。惯性取得读者可以参考[7]和其中的参考文献。
+为了实现高效修复而需要的编码优化问题是最近备受关注的主题，因为其与分布式系统有关。这里面有大量的工作要做，这里我们只视图给出一个高层的高数。感兴趣的读者可以参考<sup>[7]</sup>和其中的参考文献。
 
+本文与文献<sup>[7]</sup>的第一个重要区别是功能性（functional）和精确（exact）修复的区别。功能性修复的意思是，当一个块丢失时，会创建一个不同的块来维持编码中指定的$(n,k)$的容错能力。函数性修复的主要问题在于，当一个系统块丢失时，它会被一个奇偶校验块替代。当纠错码的全局容错能力仍为$n-k$时，读取一个块的操作会变为需要访问$k$个块。尽管这样可能对很少被读取的归档系统很有用，但是这不适合我们的工作负载。因此，我们仅对能精确修复的编码感兴趣，这样我们可以系统地维护编码。
+
+Dimakis等人<sup>[6]</sup>表明了通过比朴素的策略（读并传输$k$个块）更小的网络流量来修复是可行的。最初的再生成（regenerating）编码<sup>[6]</sup>仅提供了功能性修复，匹配信息论边界点值的精确再生成编码的存在性仍是一个开放的问题。
+
+随后，大量的工作（如<sup>[7, 25, 30]</sup>和其中的参考文献）表明，精确修复是可行的，其符合信息论<sup>[6]</sup>的边界限制。精确修复编码被分为低比例的（$k/n<1/2$）和高比例的（$k/n>1/2$）。对于低比例的精确修复编码（例如存储额外开销大于2倍的），最近已经发现了合并了再生成编码的优美的结构实现<sup>[26, 29]</sup>。副本策略有三倍的存储开销，而我们的应用程序最感兴趣的是存储负载在1.4~1.8的策略，这与使用低比例的精确再生成编码相违背。
+
+目前，我们对于高比例的精确修复编码的理解还不够完整。这一编码是否存在性曾一直是开放问题，直到两组团队<sup>[3]</sup>分别独立使用了干扰对齐（Interference Alignment）（一种为无线信息论开发的渐进技术，其表明比例高于$1/2$的精确再生成编码时存在的）。不幸的是，这一构造只具有理论意义，因为其需要指数的字段大小却仅在渐进状态下才能表现良好。显式的高比例再生成编码是研究热点课题，但是目前我们还不知道有可实际构建的方法。这些编码的第二个问题是这些编码中很多都减小了修复时的网络流量，但是有更高的磁盘I/O开销。目前还不知道高磁盘I/O是否是必需的，也不知道是否存在可实现的同时有较小的磁盘I/O和修复流量的编码存在。
+
+另一族对修复做出优化的编码致力于放宽MDS的要求来改进修复的磁盘I/O和网络带宽（如<sup>[17, 20, 10]</sup>）。这些结构中使用了局部性（locality）这一指标，即重建一个丢失的块时需要读取的块的数量。我们介绍的这些编码在局部性方面是最优的，它们符合在<sup>[10]</sup>中给出的边界。在我们最近的先做出的工作中<sup>[23]</sup>，我们推广了这一边界，并证明了它符合信息论（例如，其也适用于线性和非线性的向量编码）。我们发现最优的局部性对于最优磁盘I/O或最优修复时网络流量来说不是必须的，这些量的基本联系仍是开放的问题。
+
+本文的主要理论进步是：一个依赖RS全局奇偶校验的有最优局部性的心得编码结构。我们展示了隐式奇偶校验的概念如何节约存储，并展示了如果全局奇偶校验法是RS时，如何显式地实现奇偶校验校准。
+
+## 7. 结论
+
+现代存储系统转向了纠删码技术。我们介绍了一个叫做Locally Repairable Codes（LRCs）的新的编码族，其在存储方面略逊于最佳水平，但修复时磁盘I/O和网络带宽需求明显更小。在我们的实现中，我们观测到其减少了2倍的磁盘I/O，并仅需14%的额外存储开销，这一代价在很多场景下是合理的。
+
+我们认为局部可修复编码能产生重大影响的相关领域是纯归档集群。在这一情况下，我们可以部署大型LRCs（即条带大小为50或100个块），其会同时提高容错能力并减小存储额外开销。因为修复所需的流量随条带的大小线性增长，因此在这一情况下使用RS码是不现实的。局部修复还会减少磁盘旋转<sup>[21]</sup>，因为很少需要修复单个块。
+
+总之，我们相信LRCs创建了一个新的操作点，其与大规模存储系统息息相关，特别是当网络带宽成为主要性能瓶颈时。
+
+## 8. 参考文献
+
+<div class="reference">
+[1] Amazon EC2. http://aws.amazon.com/ec2/.
+
+[2] HDFS-RAID wiki. http://wiki.apache.org/hadoop/HDFS-RAID.
+
+[3] V. Cadambe, S. Jafar, H. Maleki, K. Ramchandran, and C. Suh. Asymptotic interference alignment for optimal repair of mds codes in distributed storage. Submitted to IEEE Transactions on Information Theory, Sep. 2011 (consolidated paper of arXiv:1004.4299 and arXiv:1004.4663).
+
+[4] B. Calder, J. Wang, A. Ogus, N. Nilakantan, A. Skjolsvold, S. McKelvie, Y. Xu, S. Srivastav, J. Wu, H. Simitci, et al. Windows azure storage: A highly available cloud storage service with strong consistency. In Proceedings of the Twenty-Third ACM Symposium on Operating Systems Principles, pages 143–157, 2011.
+
+[5] M. Chowdhury, M. Zaharia, J. Ma, M. I. Jordan, and I. Stoica. Managing data transfers in computer clusters with orchestra. In SIGCOMM-Computer Communication Review, pages 98–109, 2011.
+
+[6] A. Dimakis, P. Godfrey, Y. Wu, M. Wainwright, and K. Ramchandran. Network coding for distributed storage systems. IEEE Transactions on Information Theory, pages 4539–4551, 2010.
+
+[7] A. Dimakis, K. Ramchandran, Y. Wu, and C. Suh. A survey on network codes for distributed storage. Proceedings of the IEEE, 99(3):476–489, 2011.
+
+[8] B. Fan, W. Tantisiriroj, L. Xiao, and G. Gibson. Diskreduce: Raid for data-intensive scalable computing. In Proceedings of the 4th Annual Workshop on Petascale Data Storage, pages 6–10. ACM, 2009.
+
+[9] D. Ford, F. Labelle, F. Popovici, M. Stokely, V. Truong, L. Barroso, C. Grimes, and S. Quinlan. Availability in globally distributed storage systems. In Proceedings of the 9th USENIX conference on Operating systems design and implementation, pages 1–7, 2010.
+
+[10] P. Gopalan, C. Huang, H. Simitci, and S. Yekhanin. On the locality of codeword symbols. CoRR, abs/1106.3625, 2011.
+
+[11] K. Greenan. Reliability and power-efficiency in erasure-coded storage systems. PhD thesis, University of California, Santa Cruz, December 2009.
+
+[12] K. Greenan, J. Plank, and J. Wylie. Mean time to meaningless: MTTDL, Markov models, and storage system reliability. In HotStorage, 2010.
+
+[13] A. Greenberg, J. Hamilton, D. A. Maltz, and P. Patel. The cost of a cloud: Research problems in data center networks. Computer Communications Review (CCR), pages 68–73, 2009.
+
+[14] A. Greenberg, J. R. Hamilton, N. Jain, S. Kandula, C. Kim, P. Lahiri, D. A. Maltz, P. Patel, and S. Sengupta. VL2: A scalable and flexible data center network. SIGCOMM Comput. Commun. Rev., 39:51–62, Aug. 2009.
+
+[15] C. Guo, H. Wu, K. Tan, L. Shi, Y. Zhang, and S. Lu. DCell: a scalable and fault-tolerant network structure for data centers. SIGCOMM Comput. Commun. Rev., 38:75–86, August 2008.
+
+[16] T. Ho, M. M´edard, R. Koetter, D. Karger, M. Effros, J. Shi, and B. Leong. A random linear network coding approach to multicast. IEEE Transactions on Information Theory, pages 4413–4430, October 2006.
+
+[17] C. Huang, M. Chen, and J. Li. Pyramid codes: Flexible schemes to trade space for access efficiency in reliable data storage systems. NCA, 2007.
+
+[18] S. Jaggi, P. Sanders, P. A. Chou, M. Effros, S. Egner, K. Jain, and L. Tolhuizen. Polynomial time algorithms for multicast network code construction. Information Theory, IEEE Transactions on, 51(6):1973–1982, 2005.
+
+[19] O. Khan, R. Burns, J. Plank, W. Pierce, and C. Huang. Rethinking erasure codes for cloud file systems: Minimizing I/O for recovery and degraded reads. In FAST 2012.
+
+[20] O. Khan, R. Burns, J. S. Plank, and C. Huang. In search of I/O-optimal recovery from disk failures. In HotStorage ’11: 3rd Workshop on Hot Topics in Storage and File Systems, Portland, June 2011. USENIX.
+
+[21] D. Narayanan, A. Donnelly, and A. Rowstron. Write off-loading: Practical power management for enterprise storage. ACM Transactions on Storage (TOS), 4(3):10, 2008.
+
+[22] F. Oggier and A. Datta. Self-repairing homomorphic codes for distributed storage systems. In INFOCOM, 2011 Proceedings IEEE, pages 1215 –1223, april 2011.
+
+[23] D. Papailiopoulos and A. G. Dimakis. Locally repairable codes. In ISIT 2012.
+
+[24] D. Papailiopoulos, J. Luo, A. Dimakis, C. Huang, and J. Li. Simple regenerating codes: Network coding for cloud storage. Arxiv preprint arXiv:1109.0264, 2011.
+
+[25] K. Rashmi, N. Shah, and P. Kumar. Optimal exact-regenerating codes for distributed storage at the msr and mbr points via a product-matrix construction. Information Theory, IEEE Transactions on, 57(8):5227 –5239, aug. 2011.
+
+[26] K. Rashmi, N. Shah, and P. Kumar. Optimal exact-regenerating codes for distributed storage at the msr and mbr points via a product-matrix construction. Information Theory, IEEE Transactions on, 57(8):5227–5239, 2011.
+
+[27] I. Reed and G. Solomon. Polynomial codes over certain finite fields. In Journal of the SIAM, 1960.
+
+[28] R. Rodrigues and B. Liskov. High availability in dhts: Erasure coding vs. replication. Peer-to-Peer Systems IV, pages 226–239, 2005.
+
+[29] N. Shah, K. Rashmi, P. Kumar, and K. Ramchandran. Interference alignment in regenerating codes for distributed storage: Necessity and code constructions. Information Theory, IEEE Transactions on, 58(4):2134–2158, 2012.
+
+[30] I. Tamo, Z. Wang, and J. Bruck. MDS array codes with optimal rebuilding. CoRR, abs/1103.3737, 2011.
+
+[31] S. B. Wicker and V. K. Bhargava. Reed-solomon codes and their applications. In IEEE Press, 1994.
+
+[32] Q. Xin, E. Miller, T. Schwarz, D. Long, S. Brandt, and W. Litwin. Reliability mechanisms for very large storage systems. In MSST, pages 146–156. IEEE, 2003.
+
+</div>
+
+## 附录
+
+### 附录A 
