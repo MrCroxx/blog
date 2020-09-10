@@ -1,7 +1,7 @@
 ---
-title: "《Resilient Distributed Datasets: A Fault-Tolerant Abstraction for In-Memory Cluster Computing》论文翻译（RDD-NSDI12-FINAL138）[持续更新中]"
+title: "《Resilient Distributed Datasets: A Fault-Tolerant Abstraction for In-Memory Cluster Computing》论文翻译（RDD-NSDI12-FINAL138）"
 date: 2020-09-07T11:14:45+08:00
-lastmod: 22020-09-07T11:14:45+08:00
+lastmod: 22020-09-10T14:29:45+08:00
 draft: false
 keywords: []
 description: ""
@@ -38,7 +38,7 @@ resources:
 
 与这些系统不同，RDD提供了基于粗粒度（coarse-grained）的变换（如map、filter和join）接口，其对许多数据项应用相同的操作。这使它们能够通过记录构建数据集（它的普系统）使用的变换而不是对实际数据使用的变换的方式，来高效地提供容错<sup>注1</sup>。如果RDD的一个分区丢失，RDD有足够的关于它如何被从其它RDD导出的信息，来重新计算仅这一分区。因此，丢失的数据可被恢复，数据恢复速度通常非常快，且不需要开销高昂的副本。
 
-> 注1：在一些RDD中，当数据的延伸链增长得很大时，对数据建立检查点非常有用。我们将在[章节5.4](#54-)中讨论如何操作。
+> 注1：在一些RDD中，当数据的延伸链增长得很大时，对数据建立检查点非常有用。我们将在[章节5.4](#54-对检查点的支持)中讨论如何操作。
 
 尽管基于粗粒度变换的接口最初似乎非常有限，但RDD仍非常适用于许多并行程序，因为这些程序本身就对许多数据项应用相同的操作。事实上，我们发现RDD可以高效地表示很多集群编程模型，目前这些模型被不同的系统分别提出，其包括MapReduce、DryadLINQ、SQL、Pregel和HaLoop，以及新式应用程序中无法表示的模型，如交互式数据挖掘。RDD的这种仅通过引入新的框架就能适配过去已经满足了的计算需求的能力，在我们看来是RDD抽象能力最令人信服的证据。
 
@@ -46,11 +46,11 @@ resources:
 
 我们通过小批量benchmark和在我们的应用程序中测量的方式来评估RDD和Spark的性能。我们发现Spark在迭代式应用程序中比Hadoop快了20倍，在真实的数据分析报告中快了40倍，且可在交互时以5~7秒的延时来扫描1TB的数据集。更重要的是，为了说明RDD通用性，我们在Spark之上实现了Pregel和HaLoop编程模型作为相对小的库（每个200行代码），包括他们使用的位置优化。
 
-本文从RDD（[第二章](#2-)）和Spark（[第三章](#3-)）的概览开始。接着我们讨论了RDD的内部表示法（[第四章](#4-)）、我们的实现（[第五章](#5-)）和实验结果（[第六章](#6-)）。最后，我们讨论了RDD如何实现现有的几个集群编程模型（[第七章](#7-)），调查了相关工作（[第八章](#8-)）并进行总结。
+本文从RDD（[第二章](#2-resilient-distributed-datasetsrdd)）和Spark（[第三章](#3-spark编程接口)）的概览开始。接着我们讨论了RDD的内部表示法（[第四章](#4-rdd的表示)）、我们的实现（[第五章](#5-实现)）和实验结果（[第六章](#6-性能评估)）。最后，我们讨论了RDD如何实现现有的几个集群编程模型（[第七章](#7-讨论)），调查了相关工作（[第八章](#8-相关工作)）并进行总结。
 
 ## 2. Resilient Distributed Datasets（RDD）
 
-本章提供了RDD的概览。首先，我们定义了RDD（[章节2.1](#21-)），然后介绍了它们在Spark中的编程接口（[章节2.2](#22-)）。接着，我们将RDD与细粒度的共享内存抽象进行了对比（[章节2.3](#23-)）。最后，我们讨论了RDD模型的限制（[章节2.4](#24-)）。
+本章提供了RDD的概览。首先，我们定义了RDD（[章节2.1](#21-rdd抽象)），然后介绍了它们在Spark中的编程接口（[章节2.2](#22-spark编程接口)）。接着，我们将RDD与细粒度的共享内存抽象进行了对比（[章节2.3](#23-rdd模型的优势)）。最后，我们讨论了RDD模型的限制（[章节2.4](#24-不适用于rdd的应用程序)）。
 
 ### 2.1 RDD抽象
 
@@ -168,7 +168,7 @@ RDD和DSM的主要区别是，RDD只能通过粗粒度的变换创建（“写�
 
 > 注3：需要注意的是，RDD的读操作仍可以使细粒度的。例如，应用程序将RDD当做大型只读查找表来对待。
 
-> 注4：在一些应用程序中，其仍可以对谱系图链较长的RDD创建检查点，我们将在[章节5.4](#54-)中讨论。然而，因为RDD是不可变的，这一操作可造后台执行，并且不需要像DSM一样对整个应用程序进行快照。
+> 注4：在一些应用程序中，其仍可以对谱系图链较长的RDD创建检查点，我们将在[章节5.4](#54-对检查点的支持)中讨论。然而，因为RDD是不可变的，这一操作可造后台执行，并且不需要像DSM一样对整个应用程序进行快照。
 
 RDD的第二个好处是它们本身不可变的性质让系统能够通过备份较慢的任务的方式缓解较慢的节点（掉队者），就像MapReduce中的那样<sup>[10]</sup>。备份任务在DSM中很难实现，因为一个任务的两份副本会访问内存中相同的位置，并干扰彼此的更新。
 
@@ -186,7 +186,7 @@ Spark在Scala<sup>[2]</sup>（一种运行在Java VM上的静态类型函数式�
 
 ![图2 Spark Runtime。用户的驱动程序启动了多个worker，worker从分布式文件系统中读取数据块并将计算出的RDD分区在内存中持久保存。](figure-2.png "图2 Spark Runtime。用户的驱动程序启动了多个worker，worker从分布式文件系统中读取数据块并将计算出的RDD分区在内存中持久保存。")
 
-正如我们在[章节2.2.1](#221-)中的日志挖掘样例一样，用户提供通过传递闭包（字面函数，function literals）的方式为像*map*之类的RDD操作提供参数。Scala将每个闭包表示为一个Java对象，这些对象可被序列化，以通过网络床底该闭包并在另一个节点上载入。Scala还会将任何绑定在闭包中的变量作为Java对象的字段保存。例如，用户可以编写如`var x=5; rdd.map(_ + x)`的代码来将RDD中的每个元素加5.<sup>注5</sup>
+正如我们在[章节2.2.1](#221-样例终端日志挖掘)中的日志挖掘样例一样，用户提供通过传递闭包（字面函数，function literals）的方式为像*map*之类的RDD操作提供参数。Scala将每个闭包表示为一个Java对象，这些对象可被序列化，以通过网络床底该闭包并在另一个节点上载入。Scala还会将任何绑定在闭包中的变量作为Java对象的字段保存。例如，用户可以编写如`var x=5; rdd.map(_ + x)`的代码来将RDD中的每个元素加5.<sup>注5</sup>
 
 > 我们在每个闭包被创建时保存，因此在这个*map*的例子中，尽管$x$改变了，也会被加5。
 
@@ -206,7 +206,7 @@ RDD本身是由元素类型确定的静态类型对象。例如，`RDD[Int]`是�
 
 ### 3.2 应用程序样例
 
-我们用两个迭代式应用程序补充了[章节2.2.1](#221-)中的数据挖掘样例：逻辑回归和PageRank。后者还展示了如何控制RDD的分区来提高性能。
+我们用两个迭代式应用程序补充了[章节2.2.1](#221-样例终端日志挖掘)中的数据挖掘样例：逻辑回归和PageRank。后者还展示了如何控制RDD的分区来提高性能。
 
 #### 3.2.1 逻辑回归
 
@@ -332,11 +332,11 @@ links = spark.textFile(...).map(...)
 
 Spark可以使用Hadoop现有的输入插件API从任意Hadoop输入源（如HDFS或HBase）读取数据，并运行原版的Scala。
 
-现在我们将概括该系统中在技术上有趣的部分：作业调度器（[章节5.1](#51-)）、允许交互式使用的Spark解释器（[章节5.2](#52-)）、内存管理（[章节5.3](#53-)）和对检查点的支持（[章节5.4](#54-)）。
+现在我们将概括该系统中在技术上有趣的部分：作业调度器（[章节5.1](#51-作业调度)）、允许交互式使用的Spark解释器（[章节5.2](#52-集成解释器)）、内存管理（[章节5.3](#53-内存管理)）和对检查点的支持（[章节5.4](#54-对检查点的支持)）。
 
 ### 5.1 作业调度
 
-Spark作业（译注：本文从此处开始区分作业`job`和任务`task`）调度器使用了在[第四章](#4-)中描述的RDD的表示法。
+Spark作业（译注：本文从此处开始区分作业`job`和任务`task`）调度器使用了在[第四章](#4-rdd的表示)中描述的RDD的表示法。
 
 总的来看，我们的调度器与Dryad<sup>[19]</sup>的很像，但它会额外考虑被在被持久化的RDD中哪些分区在内存中可用。当用户在一个RDD上运行action（例如*count*或*save*）时，调度器会查阅RDD的谱系图并建立stage的DAG（Directed Acyclic Graph，有向无环图），如**图5**中的样例那样。每个stage包含尽可能多的能被流水线化的窄依赖变换。stage的便捷是宽依赖需要的shuffle操作，或任何可以缩短父RDD计算的已被计算过的分区。调度器会为每个stage启动task来计算缺失的分区，知道计算出目标RDD。
 
@@ -382,7 +382,7 @@ Spark为提供了3个存储持久化的RDD的选项：作为反序列化的Java�
 
 尽管在发生故障后，总是可以使用谱系图来恢复RDD，但是当RDD的谱系图关系链很长时，这种方式会非常耗时。因此，将一些RDD在稳定存储中建立检查点是很有用的。
 
-通常，检查点对有很长的宽依赖谱系图的RDD很有帮助，如在我们PageRake样例中的`ranks`数据集（[章节3.2.2](#322-)）。在这些情况下，集群中一个节点的故障可能会导致其每个祖先RDD中都有一些数据分片丢失，如要完整地重新计算<sup>[20]</sup>。相反，对于在稳定存储的窄依赖RDD，如我们逻辑回归样例中的`points`（[章节3.2.1](#321-)）和PageRank样例中的`links`（[章节3.2.2](#322-)），不值得使用检查点。如果一个节点故障，这些RDD中丢失的分区可以在其他节点中并行地重新计算，与复制整个RDD的开销相比仅占很小的比例。
+通常，检查点对有很长的宽依赖谱系图的RDD很有帮助，如在我们PageRake样例中的`ranks`数据集（[章节3.2.2](#322-pagerank)）。在这些情况下，集群中一个节点的故障可能会导致其每个祖先RDD中都有一些数据分片丢失，如要完整地重新计算<sup>[20]</sup>。相反，对于在稳定存储的窄依赖RDD，如我们逻辑回归样例中的`points`（[章节3.2.1](#321-逻辑回归)）和PageRank样例中的`links`（[章节3.2.2](#322-pagerank)），不值得使用检查点。如果一个节点故障，这些RDD中丢失的分区可以在其他节点中并行地重新计算，与复制整个RDD的开销相比仅占很小的比例。
 
 目前，Spark提供了检查点API（`persist`参数的`REPLICATE`标识符），但将对哪些数据建立检查点的决定权留给了用户。然而，我们也在研究如何自动创建检查点。因为我们的调度器知道每个数据集的大小即第一次计算它使用的时间，调度器应该能够选择出一组最优的需要建立检查点的RDD来最小化系统恢复时间<sup>[30]</sup>。
 
@@ -400,7 +400,7 @@ Spark为提供了3个存储持久化的RDD的选项：作为反序列化的Java�
 
 - Spark可在5~7秒内交互式查询1TB的数据集。
 
-首先，我们我们给出了迭代式机器学习程序（[章节6.1](#61-)）和PageRank（[章节6.2](#62-)）中的benchmark，并与Hadoop进行对比。接着，我们评估了Spark中的故障恢复（[章节6.3](#63-)）和数据集无法放入内存时的行为（[章节6.4](#64-)）最后，我们用户应用程序的实验结果（[章节6.5](#65-)）和交互式数据挖掘（[章节6.6](#66-)）。
+首先，我们我们给出了迭代式机器学习程序（[章节6.1](#61-迭代式机器学习应用程序)）和PageRank（[章节6.2](#62-pagerank)）中的benchmark，并与Hadoop进行对比。接着，我们评估了Spark中的故障恢复（[章节6.3](#63-故障恢复)）和数据集无法放入内存时的行为（[章节6.4](#64-内存不足时的行为)）最后，我们用户应用程序的实验结果（[章节6.5](#65-使用spark构建的用户应用程序)）和交互式数据挖掘（[章节6.6](#66-交互式数据挖掘)）。
 
 除非提到的另外情况，我们在测试中使用的都是m1.xlarge EC2节点，有4核和15GB的RAM。我们使用HDFS进行存储，块大小为256MB。在每个测试前，我们清理了OS缓冲区缓存以精确测量IO开销。
 
@@ -446,11 +446,11 @@ Spark为提供了3个存储持久化的RDD的选项：作为反序列化的Java�
 
 ### 6.2 PageRank
 
-我们比较了Spark与Hadoop在54GB Wikipedia数据转储上运行PageRank的性能。我们运行了10轮PageRank算法的迭代，以处理约4,000,000篇文章组成的连通图。**图10**显示了，在30个节点上，仅使用内存存储的Spark就比Hadoop快了2.4倍。另外，通过控制RDD的分区使其在多轮迭代间保持，正如我们在[章节3.2.2](#322-)中讨论的那样，让速度进一步提升到了7.4倍。其结果在伸缩到60台节点时接近线性增长。
+我们比较了Spark与Hadoop在54GB Wikipedia数据转储上运行PageRank的性能。我们运行了10轮PageRank算法的迭代，以处理约4,000,000篇文章组成的连通图。**图10**显示了，在30个节点上，仅使用内存存储的Spark就比Hadoop快了2.4倍。另外，通过控制RDD的分区使其在多轮迭代间保持，正如我们在[章节3.2.2](#322-pagerank)中讨论的那样，让速度进一步提升到了7.4倍。其结果在伸缩到60台节点时接近线性增长。
 
 ![图10 Hadoop和Spark上PageRank的性能表现。](figure-10.png "图10 Hadoop和Spark上PageRank的性能表现。")
 
-我们还评估了一个使用了我们在Spark上实现的Pregel来编写的PageRank版本的性能，我们在[章节7.1](#71-)中描述了它。其迭代次数与**图10**中的相似，但是时间长了大概4秒，因为Pregel需要在每轮迭代时运行额外的操作以让节点（vertice）“投票”是否完成作业。
+我们还评估了一个使用了我们在Spark上实现的Pregel来编写的PageRank版本的性能，我们在[章节7.1](#71-表示已存在的编程模型)中描述了它。其迭代次数与**图10**中的相似，但是时间长了大概4秒，因为Pregel需要在每轮迭代时运行额外的操作以让节点（vertice）“投票”是否完成作业。
 
 ### 6.3 故障恢复
 
@@ -474,7 +474,7 @@ Spark为提供了3个存储持久化的RDD的选项：作为反序列化的Java�
 
 **交通建模：** Berkeley的Mobile Millennium项目<sup>[18]</sup>研究并行化了一个通过稀疏的汽车GPS测量数据推断道路交通堵塞情况的算法。其源数据是一个大都市区域的有10,000个连接的道路网络，和600,000个来自装有GPS车辆的点到点旅程的时间样本（每个旅程的路径可能包含多条道路网络）。使用交通模型，该系统可以估算通过每条道路连接所需的时间。该研究使用了最大期望算法（expectation maximization，EM）来训练这个模型，该算法会循环迭代*map*和*reduceByKey*两步。该应用程序在4核机器上，从20个节点伸缩到80个节点时，其性能近似是线性增长的，如**图13(a)** 所示。
 
-**Twitter垃圾邮件分类：** Berkeley的Monarch项目<sup>[29]</sup>使用Spark来识别Twitter消息中的垃圾连接。他们在Spark上实现了一个类似[章节6.1](#61-)中样例的逻辑回归分类器，但是他们使用了一个分布式的*reduceByKey*来对梯度向量并行地求和。在**图13(b)** 中，我们给出了在250,000个URL和$10^7$个与每个URL的网络和页面内容中的属性相关的特征（维度）数据的50GB子集训练分类器的比例结果。这个比例不接近线性，因为每次迭代需要很高的固定的通信开销。
+**Twitter垃圾邮件分类：** Berkeley的Monarch项目<sup>[29]</sup>使用Spark来识别Twitter消息中的垃圾连接。他们在Spark上实现了一个类似[章节6.1](#61-迭代式机器学习应用程序)中样例的逻辑回归分类器，但是他们使用了一个分布式的*reduceByKey*来对梯度向量并行地求和。在**图13(b)** 中，我们给出了在250,000个URL和$10^7$个与每个URL的网络和页面内容中的属性相关的特征（维度）数据的50GB子集训练分类器的比例结果。这个比例不接近线性，因为每次迭代需要很高的固定的通信开销。
 
 ![图13 两个通过Spark实现的用户程序每轮查询的运行时间。误差条表示标准差。](figure-13.png "图13 两个通过Spark实现的用户程序每轮查询的运行时间。误差条表示标准差。")
 
@@ -488,7 +488,7 @@ Spark为提供了3个存储持久化的RDD的选项：作为反序列化的Java�
 
 ## 7. 讨论
 
-尽管RDD因为其不可变的性质和粗粒度的变换，而似乎提供的接口受限，我们发现其适合很广泛的程序类型。特别地，RDD可以表示惊人多的集群编程模型，这些模型目前在各种独立的框架中被提出，这使用户可以将这些模型组合在一个程序中（例如，运行MapReduce操作来建一个图，再在Pregel上运行它）并在这些模型间共享数据。在本章中，我们将讨论RDD可以表示哪些编程模型与为什么RDD适用范围这么广（[章节7.1](#71-)）另外，我们讨论RDD中谱系图信息的我们追求的另一个好处，这有助于跨这些模型进行调试（[章节7.2](#72-)）。
+尽管RDD因为其不可变的性质和粗粒度的变换，而似乎提供的接口受限，我们发现其适合很广泛的程序类型。特别地，RDD可以表示惊人多的集群编程模型，这些模型目前在各种独立的框架中被提出，这使用户可以将这些模型组合在一个程序中（例如，运行MapReduce操作来建一个图，再在Pregel上运行它）并在这些模型间共享数据。在本章中，我们将讨论RDD可以表示哪些编程模型与为什么RDD适用范围这么广（[章节7.1](#71-表示已存在的编程模型)）另外，我们讨论RDD中谱系图信息的我们追求的另一个好处，这有助于跨这些模型进行调试（[章节7.2](#72-利用rdd进行调试)）。
 
 ### 7.1 表示已存在的编程模型
 
@@ -522,12 +522,102 @@ RDD可以*高效*地表示大量集群编程模型，这些模型目前被相互
 
 **集群编程模型：** 集群编程模型中的相关工作分为几类。第一，如MapReduce<sup>[10]</sup>、Dryad<sup>[19]</sup>和Ciel<sup>[23]</sup>之类的数据流模型，它们支持丰富的数据处理操作，但是通过稳定存储共享数据。RDD提出了一个比使用稳定存储更高效的数据共享抽象，因为RDD避免了数据备份、I/O和序列化的开销。<sup>注10</sup>
 
-> 注10：主要注意的是，像RAMCloud<sup>[25]</sup>等在内存式数据库之上运行MapReduce/Dryad，仍需要备份数据和序列化，这对一些应用程序来说开销很大，如[章节6.1](#61-)中所示。
+> 注10：主要注意的是，像RAMCloud<sup>[25]</sup>等在内存式数据库之上运行MapReduce/Dryad，仍需要备份数据和序列化，这对一些应用程序来说开销很大，如[章节6.1](#61-迭代式机器学习应用程序)中所示。
 
 第二，一些数据流系统的高层编程接口（包括DryadLINQ<sup>[31]</sup>和FlumeJava<sup>[8]</sup>）提供了集成在语言中的API，用户通过像*map*、*join*这样的操作操作“并行集合（parallel collection）”。然而，在这些系统中，并行集合既可以表示磁盘上的文件也可以表示用来表达查询计划的暂时性的数据集。尽管系统会将数据在同一个查询的操作间流水线化（例如在*map*后再进行一次*map*），但它们不能在查询间高效地共享数据。因为并行集合模型的方便性，Spark的API也基于它，且语言集成的编程接口没有新奇的特性，但是使用RDD作为该接口下的存储抽象。这样，我们就使其能够支持广泛类型的应用程序。
 
 第三，系统为需要数据共享的特殊类型的应用程序提供了高层的接口。例如，Pregel<sup>[22]</sup>支持迭代式图应用程序、Twister<sup>[11]</sup>和HaLoop<sup>[7]</sup>是迭代式MapReduce运行时。然而，这些框架为他们支持的计算执行隐式数据共享，且没有提供能让用户在他们选择的操作中共享他们选择的数据的通用抽象。例如，用户不能使用Pregel或Twister将数据集加载到内存然后决定在其上执行哪些查询。RDD提供了显式的分布式存储抽象，从而满足专用系统无法满足的应用程序的需求，如交互式数据挖掘。
 
-最后，一些系统暴露了共享的可变状态，使用户可以执行内存式计算。例如，Piccolo<sup>[27]</sup>让用户可以运行并行函数来读取和更新分布式哈希表的单元格。分布式共享内存（DSM）系统<sup>[24]</sup>和类似RAMCloud<sup>[25]</sup>的键值存储提供了相似的模型。RDD与这些系统在两方面不同。第一，RDD提供了基于如*map*、*sort*和*join*等操作的高层编程接口，而Piccolo和DSM中的接口只能读取或更新表的单元格。第二，Piccolo和DSM系统通过检查点和回滚实现恢复，这比RDD的基于谱系图的方式在许多应用程序中开销更昂贵。最后，正如[章节2.3](#23-)中讨论的那样，RDD还比DSM提供了其他的优势，如掉队者缓解等。
+最后，一些系统暴露了共享的可变状态，使用户可以执行内存式计算。例如，Piccolo<sup>[27]</sup>让用户可以运行并行函数来读取和更新分布式哈希表的单元格。分布式共享内存（DSM）系统<sup>[24]</sup>和类似RAMCloud<sup>[25]</sup>的键值存储提供了相似的模型。RDD与这些系统在两方面不同。第一，RDD提供了基于如*map*、*sort*和*join*等操作的高层编程接口，而Piccolo和DSM中的接口只能读取或更新表的单元格。第二，Piccolo和DSM系统通过检查点和回滚实现恢复，这比RDD的基于谱系图的方式在许多应用程序中开销更昂贵。最后，正如[章节2.3](#23-rdd模型的优势)中讨论的那样，RDD还比DSM提供了其他的优势，如掉队者缓解等。
 
-**缓存系统：** 
+**缓存系统：** Nectar<sup>[12]</sup>可以通过分析程序来识别公用子表达式<sup>[16]</sup>的方式在DryadLINQ作业间复用中间结果。如果在基于RDD的系统中添加这种能力将会很诱人。然而，Nectar不提供内存缓存（其将数据放置在分布式文件系统中），也不允许用户显式控制对哪些数据集持久化或如何对数据分区。Ciel<sup>[23]</sup>和FlumeJava<sup>[8]</sup>同样可以缓存任务结果，但是不提供内存缓存或显式控制缓存哪些数据。
+
+Ananthanarayanan等人提出在分布式文件系统中加入内存缓存来利用数据访问的时间与空间位置<sup>[3]</sup>。尽管这种方法为已经在文件系统中的数据提供了更快的访问速度，但它在应用程序中共享中间结果的性能仍没有RDD好，因为它还是需要应用程序在不同阶段间将这些结果写入文件系统中。
+
+**谱系（Lineage）：** 获取数据的谱系（lineage）或起源（provenance）信息一直是科学计算和数据库领域的研究主题。对于如解释结果的应用程序来说，该研究可以允许结果的解释被其他应用程序重新生产，并在工作流中出现bug或数据集丢失时重新计算数据。读者可以参考<sup>[5]</sup>和<sup>[9]</sup>来进一步了解这项工作。RDD提供的并行编程模型使用细粒度的谱系图的开销不是很高，因此可被用作故障恢复。
+
+基于谱系图的恢复机制与在MapReduce和Dryad中的计算（作业）恢复机制相似，其会通过任务的DAG追踪依赖。然而，在这些系统中，当作业结束后谱系信息就会被丢弃，需要借助副本式存储系统来在计算间共享数据。相反，RDD使用谱系关系来在计算间高效地持久化内存数据，不需要副本和磁盘I/O的开销。
+
+**关系型数据库：** RDD从概念上与数据库的视图很相似，持久化的RDD类似于具体化的（materialized）视图<sup>[28]</sup>。然而，就像DSM系统一样，数据库通常允许对所有记录进行细粒度的读写访问，为了容错需要记录操作和数据，且需要额外的开销来维护一致性。而RDD的粗粒度变换模型则不需要这些额外开销。
+
+## 9. 结论
+
+我们提出了弹性分布式数据集（resilient distributed datasets，RDD），它是一个高效、通用、带有容错的用于在集群应用程序间共享数据的抽象。RDD可以广泛地表达并行程序，其包括很多位迭代式计算而提出的专用编程模型，和在新的应用程序中目前无法表示的模型。不像需要数据副本来进行容错的现有的集群存储抽象，RDD提供了基于粗粒度变换的API，这使RDD可以使用谱系图来高效地恢复数据。我们在被叫做Spark的系统中实现了RDD，其在迭代式应用程序中的性能表现比Hadoop好20倍，且被用作交互式查询数百GB的数据。
+
+我们已经在[spark-project.org](spark-project.org)上开源了Spark，岂可作为可伸缩的数据分析和系统研究工具。
+
+## 致谢
+
+感谢Spark的最初的使用者，他们包括Tim Hunter, Lester Mackey, Dilip Joseph, and Jibin Zhan，感谢他们在自己真实的应用程序中试用我们的系统，并提供了很多建议，还在此过程中确定了一些研究挑战。同时感谢我们的领导者，Ed Nightingale和我们的额审稿人，感谢它们的反馈。本研究中部分工作由Berkeley AMP Lab sponsors Google, SAP, Amazon Web Services, Cloudera, Huawei, IBM, Intel, Microsoft, NEC, NetApp and VMWare, DARPA (contract #FA8650-11-C-7136), Google PhD Fellowship, the Natural Sciences and Engineering Research Council of Canada提供支持。
+
+## 参考文献
+
+<div class="reference">
+
+[1] Apache Hive. http://hadoop.apache.org/hive.
+
+[2] Scala. http://www.scala-lang.org.
+
+[3] G. Ananthanarayanan, A. Ghodsi, S. Shenker, and I. Stoica. Disk-locality in datacenter computing considered irrelevant. In HotOS ’11, 2011.
+
+[4] P. Bhatotia, A. Wieder, R. Rodrigues, U. A. Acar, and R. Pasquin. Incoop: MapReduce for incremental computations. In ACM SOCC ’11, 2011.
+
+[5] R. Bose and J. Frew. Lineage retrieval for scientific data processing: a survey. ACM Computing Surveys, 37:1–28, 2005.
+
+[6] S. Brin and L. Page. The anatomy of a large-scale hypertextual web search engine. In WWW, 1998.
+
+[7] Y. Bu, B. Howe, M. Balazinska, and M. D. Ernst. HaLoop: efficient iterative data processing on large clusters. Proc. VLDB Endow., 3:285–296, September 2010.
+
+[8] C. Chambers, A. Raniwala, F. Perry, S. Adams, R. R. Henry, R. Bradshaw, and N. Weizenbaum. FlumeJava: easy, efficient data-parallel pipelines. In PLDI ’10. ACM, 2010.
+
+[9] J. Cheney, L. Chiticariu, and W.-C. Tan. Provenance in databases: Why, how, and where. Foundations and Trends in Databases, 1(4):379–474, 2009.
+
+[10] J. Dean and S. Ghemawat. MapReduce: Simplified data processing on large clusters. In OSDI, 2004.
+
+[11] J. Ekanayake, H. Li, B. Zhang, T. Gunarathne, S.-H. Bae, J. Qiu, and G. Fox. Twister: a runtime for iterative mapreduce. In HPDC ’10, 2010.
+
+[12] P. K. Gunda, L. Ravindranath, C. A. Thekkath, Y. Yu, and L. Zhuang. Nectar: automatic management of data andcomputation in datacenters. In OSDI ’10, 2010.
+
+[13] Z. Guo, X. Wang, J. Tang, X. Liu, Z. Xu, M. Wu, M. F. Kaashoek, and Z. Zhang. R2: an application-level kernel for record and replay. OSDI’08, 2008.
+
+[14] T. Hastie, R. Tibshirani, and J. Friedman. The Elements of Statistical Learning: Data Mining, Inference, and Prediction. Springer Publishing Company, New York, NY, 2009.
+
+[15] B. He, M. Yang, Z. Guo, R. Chen, B. Su, W. Lin, and L. Zhou. Comet: batched stream processing for data intensive distributed computing. In SoCC ’10.
+
+[16] A. Heydon, R. Levin, and Y. Yu. Caching function calls using precise dependencies. In ACM SIGPLAN Notices, pages 311–320, 2000.
+
+[17] B. Hindman, A. Konwinski, M. Zaharia, A. Ghodsi, A. D. Joseph, R. H. Katz, S. Shenker, and I. Stoica. Mesos: A platform for fine-grained resource sharing in the data center. In NSDI ’11.
+
+[18] T. Hunter, T. Moldovan, M. Zaharia, S. Merzgui, J. Ma, M. J. Franklin, P. Abbeel, and A. M. Bayen. Scaling the Mobile Millennium system in the cloud. In SOCC ’11, 2011.
+
+[19] M. Isard, M. Budiu, Y. Yu, A. Birrell, and D. Fetterly. Dryad: distributed data-parallel programs from sequential buildingblocks. In EuroSys ’07, 2007.
+
+[20] S. Y. Ko, I. Hoque, B. Cho, and I. Gupta. On availability of intermediate data in cloud computations. In HotOS ’09, 2009.
+
+[21] D. Logothetis, C. Olston, B. Reed, K. C. Webb, and K. Yocum. Stateful bulk processing for incremental analytics. SoCC ’10.
+
+[22] G. Malewicz, M. H. Austern, A. J. Bik, J. C. Dehnert, I. Horn, N. Leiser, and G. Czajkowski. Pregel: a system for large-scale graph processing. In SIGMOD, 2010.
+
+[23] D. G. Murray, M. Schwarzkopf, C. Smowton, S. Smith, A. Madhavapeddy, and S. Hand. Ciel: a universal execution engine for distributed data-flow computing. In NSDI, 2011.
+
+[24] B. Nitzberg and V. Lo. Distributed shared memory: a survey of issues and algorithms. Computer, 24(8):52 –60, Aug 1991.
+
+[25] J. Ousterhout, P. Agrawal, D. Erickson, C. Kozyrakis, J. Leverich, D. Mazieres, S. Mitra, A. Narayanan, G. Parulkar, ` M. Rosenblum, S. M. Rumble, E. Stratmann, and R. Stutsman。 The case for RAMClouds: scalable high-performance storage entirely in DRAM. SIGOPS Op. Sys. Rev., 43:92–105, Jan 2010.
+
+[26] D. Peng and F. Dabek. Large-scale incremental processing using distributed transactions and notifications. In OSDI 2010.
+
+[27] R. Power and J. Li. Piccolo: Building fast, distributed programs with partitioned tables. In Proc. OSDI 2010, 2010.
+
+[28] R. Ramakrishnan and J. Gehrke. Database Management Systems. McGraw-Hill, Inc., 3 edition, 2003.
+
+[29] K. Thomas, C. Grier, J. Ma, V. Paxson, and D. Song. Design and evaluation of a real-time URL spam filtering service. In IEEE Symposium on Security and Privacy, 2011.
+
+[30] J. W. Young. A first order approximation to the optimum checkpoint interval. Commun. ACM, 17:530–531, Sept 1974.
+
+[31] Y. Yu, M. Isard, D. Fetterly, M. Budiu, U. Erlingsson, P. K. ´ Gunda, and J. Currey. DryadLINQ: A system for general-purpose distributed data-parallel computing using a high-level language. In OSDI ’08, 2008.
+
+[32] M. Zaharia, D. Borthakur, J. Sen Sarma, K. Elmeleegy, S. Shenker, and I. Stoica. Delay scheduling: A simple technique for achieving locality and fairness in cluster scheduling. In EuroSys ’10, 2010.
+
+[33] M. Zaharia, M. Chowdhury, T. Das, A. Dave, J. Ma, M. McCauley, M. Franklin, S. Shenker, and I. Stoica. Resilient distributed datasets: A fault-tolerant abstraction for in-memory cluster computing. Technical Report UCB/EECS-2011-82, EECS Department, UC Berkeley, 2011.
+
+</div>
