@@ -15,9 +15,6 @@ resources:
 
 *本篇文章是对论文[RDD-NSDI12-FINAL138](https://www.usenix.org/system/files/conference/nsdi12/nsdi12-final138.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
-
-<sup>[]</sup>
-
 <!--more-->
 
 ## 摘要
