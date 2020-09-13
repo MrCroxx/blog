@@ -1,7 +1,7 @@
 ---
 title: "《Web caching with consistent hashing》论文翻译"
 date: 2020-09-10T15:45:45+08:00
-lastmod: 2020-09-10T15:45:45+08:00
+lastmod: 2020-09-13T13:49:45+08:00
 draft: false
 keywords: []
 description: ""
