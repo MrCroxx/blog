@@ -1,5 +1,5 @@
 ---
-title: "《Ceph: A Scalable, High-Performance Distributed File System》论文翻译 [持续更新中]"
+title: "《Ceph: A Scalable, High-Performance Distributed File System》论文翻译"
 date: 2020-09-14T17:38:45+08:00
 lastmod: 2020-09-19T17:03:23+08:00
 draft: false
