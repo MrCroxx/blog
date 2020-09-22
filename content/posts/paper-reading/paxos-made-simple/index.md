@@ -1,7 +1,7 @@
 ---
-title: "《Paxos Made Simple》论文翻译 [持续更新中]"
+title: "《Paxos Made Simple》论文翻译"
 date: 2020-09-21T13:34:37+08:00
-lastmod: 2020-09-21T13:34:43+08:00
+lastmod: 2020-09-24T10:23:56+08:00
 draft: false
 keywords: []
 description: ""
