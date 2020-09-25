@@ -1,7 +1,7 @@
 ---
-title: "《Paxos Made Live - An Engineering Perspective》论文翻译 [持续更新中]"
+title: "《Paxos Made Live - An Engineering Perspective》论文翻译"
 date: 2020-09-24T11:42:43+08:00
-lastmod: 2020-09-24T11:42:43+08:00
+lastmod: 2020-09-27T17:18:01+08:00
 draft: false
 keywords: []
 description: ""
@@ -286,3 +286,84 @@ Chubby对数据库的需求非常简单：数据库需要存储键值对（键�
 
 其中有两次故障来自我们已经修复的bug。为了减少发生其它bug的可能性，我们会继续改进并运行之前描述的Chubby验证测试。
 
+我们的两个意外问题与新版本发布期间操作员的错误有关，其造成了数据丢失。在Google，系统的日常监控与管理由系统操作员完成。尽管他们做的很棒，但是由于他们通常不是构建系统的开发团队，因此不熟悉系统中复杂的细节。这可能会导致在不可预见的情况下偶尔发生的错误。现在，我们依赖小心地编写代码并使用良好测试过的脚本来自动化部署并减少操作员的参与。这样，我们最近能够在提供服务的同时无故障地在几百台机器上无故障地发行主要的Chubby版本。
+
+其中的一次故障由于内存损坏。因为我们的系统是日志结构的，且维护了数日的日志和快照，因此可以重放数据库直到故障发生的具体位置。我们验证了我们的日志是正确的，并得出内存损坏是由于不正常的软件或硬件问题的结论。我们添加了额外的校验和数据来在以后检测这种问题，并在检测到这种问题时使副本崩溃。
+
+## 8. 评估
+
+我们系统最初的目标是用我们自己的数据库替代3DB。因此，我们的系统必须有与3DB等同或更好的性能。我们测量了使用了我们的容错多副本数据库的完整的Chubby系统（客户端、服务器、及网络延迟）的性能。我们还将我们的系统与机遇3DB的系统进行了benchmark测试（见**表1**）。在我们的测试中，我们在相同的5个服务器（奔腾级的机器）上运行了两个Chubby的副本。Chubby的其中一份副本使用了我们的数据库，另一份副本使用了3DB。我们在工作站上运行Chubby客户端，以生成服务器的负载。在我们的测试中，我们测量了这个那个系统的吞吐量。每次调用包括Chubby客户端、网络、Chubby服务器、和我们的容错数据库。虽然这些测试会低估我们数据库的性能，但它提供了对基于Paxos系统的整个系统吞吐量的感知。
+
+尽管在实际情况下，Chubby的读请求占大多数，我们仍将测试编写为写密集型。因为读请求完全由master处理，其通常持有租约，不会执行Paxos算法。
+
+在我们的测试中，每个worker会在Chubby中反复地创建文件并等待Chubby返回。因此，每个操作都会对底层数据库进行一次写入调用。如果文件内容很小且只有一个worker，测试会测量系统延迟。日过文件内容很大，测试会测量以MB/s为单位测量系统吞吐量。通过使用多个并发的worker，我们还能测量系统在不同submissions/s下的吞吐量。
+
+所有使用超过1个worker的测试展示了将提交值分批的影响。通过将一些数据库事务中的更新打包应该可以对3DB有一些提速。最后两个吞吐量测试展示了创建快照的影响。该系统被配置为只要副本日志超过了100MB就创建快照。在这两个测试中，提供大概每100秒创建一个快照。在创建快照时，系统会为数据库创建另一个副本并将其落盘。这样，其性能会暂时下降。
+
+我们的系统没有性能上的优化，我们相信它有很大的提速空间。然而，既然其性能已经超过了3DB，进一步的优化目前不是优先考虑的。
+
+![表1 我们的系统与3DB的对比（数值越高越好）。](table-1.png "表1 我们的系统与3DB的对比（数值越高越好）。")
+
+## 9. 总结与未解决的问题
+
+我们描述了我们的基于Paxos共识算法的容错数据库的实现。尽管该领域有大量论文、算法可以追溯到15年前、我们的团队有相关经验（我们团队中有一个人过去设计过类似的系统，其他人过去构建过其他类型的复杂系统），构建该系统仍比我们最初预期的要困难得多。我们将其归咎于一下几点：
+
+- 现实系统的需求的与Paxos算法的描述之间有很大的隔阂。为了构建现实的系统，专家需要使用分散在各种文献中的许多思想，并作出一些较小的协议扩展。这些不断累积的扩展会非常多，最后系统会基于一个未被证明的协议。
+
+- 容错计算社区还没有开发能使实现它们的算法变得简单的工具。
+
+- 容错计算社区对测试没有给予足够的关注，这是构建容错系统中关键的部分。
+
+因此，核心算法工作仍是相对理论性的，且在更大的计算社区中可能无法使用。我们认为，为了使其能有更大的影响，该领域的研究人员应该专注于解决这些缺陷。
+
+相反，在编译器构造领域，尽管该领域的理论很复杂，但是它们能被广泛地接受。在解析的理论被充分理解后不久，就出现了像yacc<sup>[6]</sup>这样的工业级解析工具。且现在不光有像ANTLR<sup>[15]</sup>或CoCo/R<sup>[13]</sup>这样的前端工具，还有能够帮助优化、指令选择的树重写工具（tree-rewriting tool），和帮助生成二进制代码的汇编器，等等。因此，在软件工程的这个领域中，有一整套工具出现，这大大地简化了编译器的构造，或者至少减少了出错的可能性。编译器构造领域中，像解析这样的问题曾经处于研究的前言，现在已经被认为是“已经解决了”，并在许多学校的本科阶段中都有常规的教学。
+
+容错分布式计算社区似乎没有像编译器社区那样，开发出能够弥补理论和实践之间差距的工具和技术。我们的经验表明，这些差距并不是微不足道的，值得研究团体的关注。
+
+## 10. 致谢
+
+Google中的许多人为这个项目提供了帮助。实现了Chubby的Mike Burrows建议我们用基于Paxos的系统替换3DB。它和Sharon Perl审查了我们的设计并提供了非常棒的反馈。他们向我们介绍了处理磁盘损坏的机制并建议我们实现master租约。Michal Cierniak将最初的状态机编译器从Perl前移到了C++，并做了后续的修改（现在它也再Google的地方中被使用）。Vadim Furman帮助我们编写了Chubby验证测试。Salim Virji和他的团队负责将我们的系统在Google的数据中心上运行。
+
+Mike Burrows、Bill Coughran、Gregory Eitzman、Peter Mckenzie、Sharon Perl、Rob Pike、David Presotto、Sean Quinlan、和Salim Virji审查了本文的早期版本并提供了有价值的反馈。
+
+## 11. 参考文献
+
+<div class="reference">
+
+[1] Burrows, M. The Chubby lock service for loosely-coupled distributed systems. In Proceedings of the 7th USENIX Symposium on Operating Systems Design and Implementation, pp. 335-350
+
+[2] Chang, F., Dean, J., Ghemawat, S., Hsieh, W. C., Wallach, D. A., Burrows, M., Chandra, T., Fikes, A., and Gruber, R. E. Bigtable: A distributed storage system for structured data. In Proceedings of the 7th USENIX Symposium on Operating Systems Design and Implementation, pp. 205-218
+
+[3] Cristian, F. Reaching agreement on processor-group membership in synchronous distributed systems. Distributed Computing 4, 4 (1991), 175–188.
+
+[4] Ghemawat, S., Gobioff, H., and Leung, S.-T. The Google file system. In Proceedings of the 19th ACM Symposium on Operating Systems Principles (Dec. 2003), pp. 29–43.
+
+[5] Gray, C., Cheriton, D. Leases: An efficient fault-tolerant mechanism for distributed file cache consistency. In Proceedings of the 12th ACM Symposium on Operating Systems Principles (1989), pp. 202–210.
+
+[6] Johnson, S. C. Yacc: Yet another compiler-compiler.
+
+[7] Lamport, Shostak, and Pease. The byzantine generals problem. In Advances in Ultra-Dependable Distributed Systems, N. Suri, C. J. Walter, and M. M. Hugue (Eds.), IEEE Computer Society Press. 1995.
+
+[8] Lamport, L. The part-time parliament. ACM Transactions on Computer Systems 16, 2 (1998), 133–169.
+
+[9] Lamport, L. Paxos made simple. ACM SIGACT News 32, 4 (Dec. 2001), 18–25.
+
+[10] Lampson, B. W. How to build a highly available system using consensus. In 10th International Workshop on Distributed Algorithms (WDAG 96) (1996), Babaoglu and Marzullo, Eds., vol. 1151, Springer-Verlag, Berlin Germany, pp. 1–17.
+
+[11] Lee, E. K., and Thekkath, C. A. Petal: Distributed virtual disks. In Proceedings of the Seventh International Conference on Architectural Support for Programming Languages and Operating Systems (Cambridge, MA, 1996), pp. 84–92.
+
+[12] MacCormick, J., Murphy, N., Najork, M., Thekkath, C. A., and Zhou, L. Boxwood: Abstractions as the foundation for storage infrastructure. In Proceedings of the 6th Symposium on Operating Systems Design and Implementation (2004), pp. 105–120.
+
+[13] Moessenboeck, H. A generator for production quality compilers. In Proceedings of the 3rd International Workshop on Compiler Compilers - Lecture Notes in Computer Science 477 (Berlin, Heidelberg, New York, Tokyo, 1990), Springer-Verlag, pp. 42–55.
+
+[14] Oki, Brian M., and Liskov, Barbara H. Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed Systems. In Proceedings of the 7th annual ACM Symposium on Principles of Distributed Computing (1988), pp. 8–17.
+
+[15] Parr, T. J., and QUONG, R. W. Antlr: A predicated-ll(k) parser generator. Software–Practice and Experience 25, 7 (JULY 1995), 789–810.
+
+[16] Prisco, R. D., Lampson, B. W., and Lynch, N. A. Revisiting the paxos algorithm. In 11th International Workshop on Distributed Algorithms (WDAG 96) (1997), pp. 111–125.
+
+[17] Schneider, F. B. Implementing fault-tolerant services using the state machine approach: A tutorial. ACM Computing Surveys 22, 4 (1990), 299–319.
+
+[18] von Neumann, J. Probabilistic logics and synthesis of reliable organisms from unreliable components. Automata Studies (1956), 43–98.
+
+</div>
