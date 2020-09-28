@@ -122,7 +122,7 @@ Raft通过先选举一个高级leader然后给予该leader管理分布式日志�
 
 ![图4 服务器状态。follower仅响应来自其它服务器的请求。如果follower没有收到通信，那么它会变为candidate并开始一次选举。收到了来自整个集群中大多数节点投票的candidate会成为新的leader。leader通常会持续到其故障。](figure-4.png "图4 服务器状态。follower仅响应来自其它服务器的请求。如果follower没有收到通信，那么它会变为candidate并开始一次选举。收到了来自整个集群中大多数节点投票的candidate会成为新的leader。leader通常会持续到其故障。")
 
-Raft将时间划分为任意长度的term，如**图5**所示。term被编号为连续的整数。每个term从选举（election）开始，在选举中一个或多个candidate会试图成为leader，就像[章节5.2](#52-)中描述的那样。如果candidate赢得选举，那么它将在该term余下的时间了作为leader提供服务。在某些情况下，一次选举可能导致投票决裂，此时该term最终可能没有leader，那么很快会开始一个新的term（伴随一次新的选举）。Raft确保一个给定的term中最多只会有一个leader。
+Raft将时间划分为任意长度的term（任期），如**图5**所示。term被编号为连续的整数。每个term从选举（election）开始，在选举中一个或多个candidate会试图成为leader，就像[章节5.2](#52-)中描述的那样。如果candidate赢得选举，那么它将在该term余下的时间了作为leader提供服务。在某些情况下，一次选举可能导致投票决裂，此时该term最终可能没有leader，那么很快会开始一个新的term（伴随一次新的选举）。Raft确保一个给定的term中最多只会有一个leader。
 
 ![图5 时间被划分为term，每个term从选举开始。在一次成功选举后，单个leader会管理集群，直到该term结束。有些选举会失败，在这种情况下，term会不选择leader就结束。term之间的转换可以在不同服务器上的不同时间被观测到。](figure-5.png "图5 时间被划分为term，每个term从选举开始。在一次成功选举后，单个leader会管理集群，直到该term结束。有些选举会失败，在这种情况下，term会不选择leader就结束。term之间的转换可以在不同服务器上的不同时间被观测到。")
 
@@ -162,3 +162,10 @@ leader会决定什么时候能够安全地将日志条目应用到状态机，�
 
 - 如果不同日志的两个条目有相同的index和term，那么日志中之前的所有条目都是相同的。
 
+第一条性质基于“leader在给定term期间只会创建一条有给定index的日志条目，且日志条目在日志中的位置永远不会改变”的事实。第二条性质由AppendEntries提供的一个简单的一致性校验保证。当发送AppendEntries RPC时，leader会包含其日志中紧随新条目之前的index和term。如果follower在其日志中没有找到有相同index和term的条目，那么它会拒绝该新条目。一致性检验会以归纳的步骤执行：日志最初的空状态满足“日志匹配性质”，且每当日志被扩展时一致性检验会保证“日志匹配性质”。因此，每当AppendEntries成功返回，leader会得知follower的日志和它自己的日志直到新条目的位置都是相同的。
+
+在正常的操作中，leader的日志会和follower的日志保持一致，所以AppendEntries的一致性检验永远不会失败。然而，leader崩溃会使日志不一致（旧的leader可能没有完全复制它的日志中的所有条目）。这些不一致会随着一系列leader和follower的故障加剧。**图7**给出了follower可能与新leader不同的原因。follower可能丢失了leader有的一些条目，follower可能多出leader没有的一些条目，或者二者都有。日志中丢失或多出的条目可能垮了多个term。
+
+![图7 当最上面的leader开始当权时，a~f中的任意情况都可能在follower中发生。每个方框表示一个日志条目，方框中的条目是它的term。follower可能丢失条目（a~b），可能有额外的未被提交的条目（c~d），或者二者都有（e~f）。例如，在情况f中，该服务器是term 2的leader，其将一些条目添加到了它的日志中，然后它在将任意这些条目提交前崩溃了；该服务器快速地重启了并成了了term 3的leader，并又将更多条目添加到了它的日志中；在这些term 2和term 3的条目被提交前，该服务器再次崩溃，并在几个term期间保持离线状态。](figure-7.png "图7 当最上面的leader开始当权时，a~f中的任意情况都可能在follower中发生。每个方框表示一个日志条目，方框中的条目是它的term。follower可能丢失条目（a~b），可能有额外的未被提交的条目（c~d），或者二者都有（e~f）。例如，在情况f中，该服务器是term 2的leader，其将一些条目添加到了它的日志中，然后它在将任意这些条目提交前崩溃了；该服务器快速地重启了并成了了term 3的leader，并又将更多条目添加到了它的日志中；在这些term 2和term 3的条目被提交前，该服务器再次崩溃，并在几个term期间保持离线状态。")
+
+在Raft中，leader会通过强制follower复制其日志的方式处理不一致。这意味着follower日志中不一致的条目会被覆盖为leader日志中的条目。[章节5.4](#54-)
