@@ -1,7 +1,7 @@
 ---
-title: "《In Search of an Understandable Consensus Algorithm (Extended Version)》论文翻译 [持续更新中]"
+title: "《In Search of an Understandable Consensus Algorithm (Extended Version)》论文翻译"
 date: 2020-09-27T19:26:30+08:00
-lastmod: 2020-09-27T19:26:34+08:00
+lastmod: 2020-10-01T13:53:47+08:00
 draft: false
 keywords: []
 description: ""
@@ -44,7 +44,7 @@ Raft与现有的共识算法在很多方面都很相似（最明显的时候，O
 
 我们认为，无论为了教育目的还是作为实现的基础，Raft都比Paxos和其它共识算法更优秀；Raft的描述足够完整，能够满足使用系统的需求；Raft有很多开源实现并已经被一些公司使用；Raft的安全性性质已经被形式化定义并证明；Raft的效率与其它算法相似。
 
-本文的剩余部分介绍了多副本状态机问题（[第二章](#2-)），讨论了Paxos的优势与劣势（[第三章](#3-)），描述了我们为了可理解性使用的通用方法（[第四章](#4-)），给出了Raft共识算法（[第5~8章](#5-)），评估了Raft（[第九章](#9-)），并讨论了相关工作（[第十章](#10-)）。
+本文的剩余部分介绍了多副本状态机问题（[第二章](#2-多副本状态机)），讨论了Paxos的优势与劣势（[第三章](#3-paxos有什么问题)），描述了我们为了可理解性使用的通用方法（[第四章](#4-为可理解性做出的设计)），给出了Raft共识算法（[第5~8章](#5-raft共识算法)），评估了Raft（[第九章](#9-实现和评估)），并讨论了相关工作（[第十章](#10-相关工作)）。
 
 ## 2. 多副本状态机
 
@@ -98,7 +98,7 @@ Paxos的第二个问题是它没有为构建实用的实现提供良好的基础
 
 ## 5. Raft共识算法
 
-Raft是一种用来管理[第二章](#2-)中描述的形式的多副本日志的算法。**图2**以浓缩的形式总结了算法以供参考，**图3**列出可算法的关键性质；这些图中元素将在本章剩下的部分分条讨论。
+Raft是一种用来管理[第二章](#2-多副本状态机)中描述的形式的多副本日志的算法。**图2**以浓缩的形式总结了算法以供参考，**图3**列出可算法的关键性质；这些图中元素将在本章剩下的部分分条讨论。
 
 ![图2 对Raft共识算法的浓缩总结（不包括成员变更和日志压缩）。服务器的行为在左上角的的格子中被作为一系列独立且可重复的触发器规则描述。像“§5.2”这样的章节号表示某个特征将在哪一节中讨论。正式定义<sup>[31]</sup>将会更精确地描述算法。](figure-2.jpg "图2 对Raft共识算法的浓缩总结（不包括成员变更和日志压缩）。服务器的行为在左上角的的格子中被作为一系列独立且可重复的触发器规则描述。像“§5.2”这样的章节号表示某个特征将在哪一节中讨论。正式定义<sup>[31]</sup>将会更精确地描述算法。")
 
@@ -108,27 +108,27 @@ Raft通过先选举一个高级leader然后给予该leader管理分布式日志�
 
 考虑leader的方法，Raft将共识问题分解成三个相对独立的子问题，接下来的小节会对这些问题进行讨论：
 
-- **领导选举：** 当已有的leader故障时必须有新的leader被选举出来（[章节5.2](#52-)）。
+- **领导选举：** 当已有的leader故障时必须有新的leader被选举出来（[章节5.2](#52-领导选举)）。
 
-- **日志复制：** leader必须接收来自客户端的日志条目，并将它们复制到集群中，强制其它日志对它自己的日志达成一致（[章节5.3](#53-)）。
+- **日志复制：** leader必须接收来自客户端的日志条目，并将它们复制到集群中，强制其它日志对它自己的日志达成一致（[章节5.3](#53-日志复制)）。
 
-- **安全性：** Raft中关键的安全性是**图3**中的状态机安全性（State Machine Safety Property）：如果任意服务器将一个特定的日志条目应用到了其状态机中，那么不会有应用了有相同index（索引）的其他指令的日志条目的服务器。[章节5.4](#54-)描述了Raft如何确保这一性质；其解决方案包括对[章节5.2](#52-)中描述的选举机制的一个额外的约束。
+- **安全性：** Raft中关键的安全性是**图3**中的状态机安全性（State Machine Safety Property）：如果任意服务器将一个特定的日志条目应用到了其状态机中，那么不会有应用了有相同index（索引）的其他指令的日志条目的服务器。[章节5.4](#54-安全性)描述了Raft如何确保这一性质；其解决方案包括对[章节5.2](#52-领导选举)中描述的选举机制的一个额外的约束。
 
 在给出共识算法后，本章讨论了可用性问题和定时在本系统中的角色。
 
 ### 5.1 Raft基础
 
-一个Raft集群包括多个服务器；通常数量是5，这可以让系统能够容忍2个服务器故障。在给定时间内，每个服务器处于以下三个状态之一：leader、follower、或candidate。在正常的操作中，会有恰好一个leader，所有其它服务器都是follower。follower是被动的：它们不会自己提出请求，而仅响应来自leader和candidate的请求。leader处理所有的客户端请求（如果客户端联系了一个follower，该follower会将其重定向到leader）。第三个状态candidate，在[章节5.2](#52-)中描述的选举新leader时使用。**图4**展示了状态和状态间的转移；状态转移将在后文中讨论。
+一个Raft集群包括多个服务器；通常数量是5，这可以让系统能够容忍2个服务器故障。在给定时间内，每个服务器处于以下三个状态之一：leader、follower、或candidate。在正常的操作中，会有恰好一个leader，所有其它服务器都是follower。follower是被动的：它们不会自己提出请求，而仅响应来自leader和candidate的请求。leader处理所有的客户端请求（如果客户端联系了一个follower，该follower会将其重定向到leader）。第三个状态candidate，在[章节5.2](#52-领导选举)中描述的选举新leader时使用。**图4**展示了状态和状态间的转移；状态转移将在后文中讨论。
 
 ![图4 服务器状态。follower仅响应来自其它服务器的请求。如果follower没有收到通信，那么它会变为candidate并开始一次选举。收到了来自整个集群中大多数节点投票的candidate会成为新的leader。leader通常会持续到其故障。](figure-4.png "图4 服务器状态。follower仅响应来自其它服务器的请求。如果follower没有收到通信，那么它会变为candidate并开始一次选举。收到了来自整个集群中大多数节点投票的candidate会成为新的leader。leader通常会持续到其故障。")
 
-Raft将时间划分为任意长度的term（任期），如**图5**所示。term被编号为连续的整数。每个term从选举（election）开始，在选举中一个或多个candidate会试图成为leader，就像[章节5.2](#52-)中描述的那样。如果candidate赢得选举，那么它将在该term余下的时间了作为leader提供服务。在某些情况下，一次选举可能导致投票决裂，此时该term最终可能没有leader，那么很快会开始一个新的term（伴随一次新的选举）。Raft确保一个给定的term中最多只会有一个leader。
+Raft将时间划分为任意长度的term（任期），如**图5**所示。term被编号为连续的整数。每个term从选举（election）开始，在选举中一个或多个candidate会试图成为leader，就像[章节5.2](#52-领导选举)中描述的那样。如果candidate赢得选举，那么它将在该term余下的时间了作为leader提供服务。在某些情况下，一次选举可能导致投票决裂，此时该term最终可能没有leader，那么很快会开始一个新的term（伴随一次新的选举）。Raft确保一个给定的term中最多只会有一个leader。
 
 ![图5 时间被划分为term，每个term从选举开始。在一次成功选举后，单个leader会管理集群，直到该term结束。有些选举会失败，在这种情况下，term会不选择leader就结束。term之间的转换可以在不同服务器上的不同时间被观测到。](figure-5.png "图5 时间被划分为term，每个term从选举开始。在一次成功选举后，单个leader会管理集群，直到该term结束。有些选举会失败，在这种情况下，term会不选择leader就结束。term之间的转换可以在不同服务器上的不同时间被观测到。")
 
 不同的服务器可能在不同时间观测到term的装换，且在一些情况下，服务器可能没有观测到选举甚至没观测到整个term。term在Raft扮演逻辑时钟<sup>[14]</sup>的角色，且term能让服务器检测到过时的（obsolete）信息，如陈旧的（stale）leader。每个服务器会存储当前的term号，其随时间单调递增。当前的term号在任何服务器通信时都会被交换，日过服务器当前的term小于其它服务器的，那么它会更新其term号到到较大值。如果candidate或leader发现它的term过期了，它会立刻转到follower状态。如果服务器收到了有陈旧的term号的请求，它会拒绝该请求。
 
-Raft服务器使用远程过程调用（remote procedure call，RPC）通信，且基本的共识算法仅需要两种RPC。RequestVote RPC在选举时由candidate发起（[章节5.2](#52-)），而AppendEntries RPC被leader发起，用来复制日志条目和提供心跳（[章节5.3](#53-)）。[第七章](#7-)加入了第三个RPC，用来在服务器间传输快照。如果服务器没有及时收到响应，它们会重试RPC，且它们会并行地发起RPC以获得最佳性能。
+Raft服务器使用远程过程调用（remote procedure call，RPC）通信，且基本的共识算法仅需要两种RPC。RequestVote RPC在选举时由candidate发起（[章节5.2](#52-领导选举)），而AppendEntries RPC被leader发起，用来复制日志条目和提供心跳（[章节5.3](#53-日志复制)）。[第七章](#7-日志压缩)加入了第三个RPC，用来在服务器间传输快照。如果服务器没有及时收到响应，它们会重试RPC，且它们会并行地发起RPC以获得最佳性能。
 
 ### 5.2 领导选举
 
@@ -136,13 +136,13 @@ Raft使用心跳机制来触发领导选举。当服务器启动时，它们按�
 
 为了开始一次选举，follower会增大其当前的term，并转换到candidate状态。其随后为自己投票，并并行地给集群中每个其它的服务器发起RequestVote RPC。candidate会保持其状态，知道以下三件事情之一发生：（a）它赢得了选举；（b）另一个服务器成为了leader；（c）一段时就过后仍没有胜者。这些后果将在后文中分别讨论。
 
-如果candidate收到了整个集群中大多数相同term服务器的投票，那么它会赢得选举。在一个给定的term中，每个服务器会按先到先得（first-come-first-served）的方式给最多一个candidate投票（注意：[章节5.4](#54-)对投票增加了一个额外约束）。“大多数”规则确保了在特定的term中最多只有一个candidate能赢得选举（选举安全性如**图3**所示）。一旦candidate赢得选举，它会变成leader。随后它会向所有其他服务器发送心跳消息以建立起权威，并防止新选举发生。
+如果candidate收到了整个集群中大多数相同term服务器的投票，那么它会赢得选举。在一个给定的term中，每个服务器会按先到先得（first-come-first-served）的方式给最多一个candidate投票（注意：[章节5.4](#54-安全性)对投票增加了一个额外约束）。“大多数”规则确保了在特定的term中最多只有一个candidate能赢得选举（选举安全性如**图3**所示）。一旦candidate赢得选举，它会变成leader。随后它会向所有其他服务器发送心跳消息以建立起权威，并防止新选举发生。
 
 在等待投票时，candidate可能收到来自其它服务器声明自己是leader的AppendEntries RPC。如果leader的term（包括在其RPC中）至少与该candidate当前的term一样大，那么这个candidate会视其为合法的leader，并返回到follower状态。如果RPC中的term比该candidate当前的term小，那么该candidate会拒绝RPC并继续以candidate状态运行。
 
 第三种可能的结果是，candidate既没有赢得选举也没有输：如果许多follower在同时变成了candidate，投票可能决裂，这样可能没有candidate获取大多数的投票。当这种情况发生时，每个candidate都将会超时并通过增大其term和开始另一轮RequestVote RPC来开始新的一轮选举。然而，如果不采取额外措施，投票决裂可能会无限反复。
 
-Raft使用了随机额选举超时时间以确保投票决裂很少发生，且投票决裂可以被快速解决。为了在初次选举时防止投票决裂，选举超时时间会从一个固定的时间段（例如，150~300ms）中随机选取。这会在所有服务器上实现，这样大多数情况下只有单个服务器会超时，它会在任何其它服务器超时前赢得选举并发送心跳。同样的机制还在处理投票决裂时使用（译注：之前介绍的是**防止**投票决裂，接下来是**处理**投票决裂）。每个candidate在开始选举时重置其随机选举超时时间的计时器，且它会在下一次选举开始前等待该超时时间流逝，这减少了新的选举中再次发生投票决裂的可能性。[章节9.3](#93-)说明这种方法能快速地选出leader。
+Raft使用了随机额选举超时时间以确保投票决裂很少发生，且投票决裂可以被快速解决。为了在初次选举时防止投票决裂，选举超时时间会从一个固定的时间段（例如，150~300ms）中随机选取。这会在所有服务器上实现，这样大多数情况下只有单个服务器会超时，它会在任何其它服务器超时前赢得选举并发送心跳。同样的机制还在处理投票决裂时使用（译注：之前介绍的是**防止**投票决裂，接下来是**处理**投票决裂）。每个candidate在开始选举时重置其随机选举超时时间的计时器，且它会在下一次选举开始前等待该超时时间流逝，这减少了新的选举中再次发生投票决裂的可能性。[章节9.3](#93-性能)说明这种方法能快速地选出leader。
 
 选举是可理解性如何指导我们在备选设计中做出选择的一个实例。最初我们计划使用一个排名（ranking）系统：假设每个candidate有一个唯一的排名（rank），这个排名会在选取竞争中的candidate时使用。如果candidate发现了有更高排名的另一个candidate，它会返回follower状态，这样有更高排名的candidate能够更容易地赢得下一次选举。我们发现这种方法制造了有关可用性的隐晦的问题（如果排名较高的服务器故障，排名较低的服务器可能需要等待超时才能再次成为candidate，但是如果它再次成为candidate过早，它可能会重置领导选举的进度）。我们对该算法做了很多次调整，但是在每次调整后都会出现新的小问题。最终我们总结出，随机重试的方法更显而易见且易于理解。
 
@@ -154,7 +154,7 @@ Raft使用了随机额选举超时时间以确保投票决裂很少发生，且�
 
 日志被按照如**图6**的方式组织。每条日志都保存了一条状态机指令和leader收到该条目时的term号。日志条目中的term号被用作检测日志间的不一致性并确保**图3**中的一些性质。每个日志条目还有一个标识它在日志中的位置的整数index（索引）。
 
-leader会决定什么时候能够安全地将日志条目应用到状态机，这种条目被称为committed（已提交）的。Raft保证committed的条目时持久性的，且最终将会被所有可用的状态机执行。一旦撞见了日志条目的leader将其如知道了大多数服务器上，那么该条目会变成committed的（例如，**图6**中的条目7）。这还会提交在leader的日志中所有之前的条目。[章节5.4](#54-)讨论了在leader变更后应用这一规则的一些微妙的情况，其还展示了“提交是安全的”的定义。leader会跟踪它知道的被提交的最高的index，且它会在之后的AppendEntries RPC中包含这个index，这样其它server最终会发现它。一旦follower得知一个日志条目被提交，它会将该条目（按日志顺序）应用到它本地的状态机中。
+leader会决定什么时候能够安全地将日志条目应用到状态机，这种条目被称为committed（已提交）的。Raft保证committed的条目时持久性的，且最终将会被所有可用的状态机执行。一旦撞见了日志条目的leader将其如知道了大多数服务器上，那么该条目会变成committed的（例如，**图6**中的条目7）。这还会提交在leader的日志中所有之前的条目。[章节5.4](#54-安全性)讨论了在leader变更后应用这一规则的一些微妙的情况，其还展示了“提交是安全的”的定义。leader会跟踪它知道的被提交的最高的index，且它会在之后的AppendEntries RPC中包含这个index，这样其它server最终会发现它。一旦follower得知一个日志条目被提交，它会将该条目（按日志顺序）应用到它本地的状态机中。
 
 我们设计的Raft日志机制能维护不同服务器间高级别的连贯性。这不但简化了系统的行为，还使系统更可预测，这时确保安全性的重要部分。Raft维护的如下的性质共同构成了**图3**中的“日志匹配性质（Log Matching Property）”：
 
@@ -168,7 +168,7 @@ leader会决定什么时候能够安全地将日志条目应用到状态机，�
 
 ![图7 当最上面的leader开始当权时，a~f中的任意情况都可能在follower中发生。每个方框表示一个日志条目，方框中的条目是它的term。follower可能丢失条目（a~b），可能有额外的未被提交的条目（c~d），或者二者都有（e~f）。例如，在情况f中，该服务器是term 2的leader，其将一些条目添加到了它的日志中，然后它在将任意这些条目提交前崩溃了；该服务器快速地重启了并成了了term 3的leader，并又将更多条目添加到了它的日志中；在这些term 2和term 3的条目被提交前，该服务器再次崩溃，并在几个term期间保持离线状态。](figure-7.png "图7 当最上面的leader开始当权时，a~f中的任意情况都可能在follower中发生。每个方框表示一个日志条目，方框中的条目是它的term。follower可能丢失条目（a~b），可能有额外的未被提交的条目（c~d），或者二者都有（e~f）。例如，在情况f中，该服务器是term 2的leader，其将一些条目添加到了它的日志中，然后它在将任意这些条目提交前崩溃了；该服务器快速地重启了并成了了term 3的leader，并又将更多条目添加到了它的日志中；在这些term 2和term 3的条目被提交前，该服务器再次崩溃，并在几个term期间保持离线状态。")
 
-在Raft中，leader会通过强制follower复制其日志的方式处理不一致。这意味着follower日志中不一致的条目会被覆盖为leader日志中的条目。[章节5.4](#54-)将展示当结合一个额外的约束后，这会是安全的。
+在Raft中，leader会通过强制follower复制其日志的方式处理不一致。这意味着follower日志中不一致的条目会被覆盖为leader日志中的条目。[章节5.4](#54-安全性)将展示当结合一个额外的约束后，这会是安全的。
 
 为了使follower的日志和leader自己的日志一致，leader必须找到二者的日志中最新的一致的日志条目，删除follower日志中该点后的所有条目，并将leader日志中该点后的所有条目发送给follower。所有这些操作都在响应AppendEntries RPC的一致性检验时发生。leader会为每个follower维护一个nextIndex，它是leader将发送给该follower的下一条日志的index。当leader首次掌权时，它会将所有的nextIndex值初始化为其日志的最后一个条目的下一个index（在**图7**中该值为11）。如果follower的日志与leader的不一致，下一次AppendEntries RPC中的一致性检验会失败。当RPC被拒绝后，leader会减小该nextIndex并重试AppendEntries RPC。最终，nextIndex会达到leader和follower的日志匹配的点。这时，AppendEntries会成功，它会删除follower日志中任何冲突的条目，并将日志条目从leader的日志中追加到follower的日志中（如果有的话）。一旦AppendEntries成功，follower的日志就与leader的一致，并在该term的余下的时间里保持这样。
 
@@ -176,7 +176,7 @@ leader会决定什么时候能够安全地将日志条目应用到状态机，�
 
 通过这种机制，leader在掌权时不需要采取特殊的行为来恢复日志一致性。它只需要开始正常的操作，然后日志会在响应AppendEntries一致性检验故障时自动恢复。leader永远都不会覆写或删除它自己的日志条目（**图3**中的领导只增性质，Leader Append-Only Property）。
 
-这种日志复制机制体现了[第二章](#2-)描述的理想的共识性质：只要大多数服务器在线，Raft就可以接受、复制、并应用新日志条目；在正常情况下新日志条目只需要一轮RPC就可以被复制到集群中大多数节点上；单个缓慢的follower不会影响性能。
+这种日志复制机制体现了[第二章](#2-多副本状态机)描述的理想的共识性质：只要大多数服务器在线，Raft就可以接受、复制、并应用新日志条目；在正常情况下新日志条目只需要一轮RPC就可以被复制到集群中大多数节点上；单个缓慢的follower不会影响性能。
 
 ### 5.4 安全性
 
@@ -194,7 +194,7 @@ Raft通过比较日志最后一个条目的index和term来确定哪个日志更�
 
 #### 5.4.2 提交之前term的日志条目
 
-正如[章节5.3](#53-)中描述的那样，一条当前term的日志，一旦它被存储到大多数的服务器上，那么leader会得知这个条目被提交了。如果leader在提交一个条目时崩溃，最后的leader会试图完成这个条目的复制。然而，当之前term的条目被存储到大多数服务器上时，leader无法立刻断定它被提交了。**图8**阐述了一种情况，在该情况下，就的日志条目被存储到了大多数服务器中，但仍会被之后的leader覆盖。
+正如[章节5.3](#53-日志复制)中描述的那样，一条当前term的日志，一旦它被存储到大多数的服务器上，那么leader会得知这个条目被提交了。如果leader在提交一个条目时崩溃，最后的leader会试图完成这个条目的复制。然而，当之前term的条目被存储到大多数服务器上时，leader无法立刻断定它被提交了。**图8**阐述了一种情况，在该情况下，就的日志条目被存储到了大多数服务器中，但仍会被之后的leader覆盖。
 
 ![图8 展示为什么leader不能通过之前term的日志条目判断提交的时间序列。在（a）中，S1是leader，它部分复制了index为2的日志条目。在（b）中，S1崩溃，S5收到来自S3、S4和它自己的投票而被选举为term 3的leader，并接受了不同的日志条目作为index 2的条目。在（c）中，S5崩溃，S1重启且被选举为leader，并继续复制。此时，term 2的日志已经被复制到了大多数服务器上，但是没有被提交。如果此时S1像（d）中的情况一样发生崩溃，那么S5将会被选举为leader（S2、S3和S4会为其投票），且会用它自己的term 3的日志条目覆盖index 2中的条目。然而，如果S1在崩溃前复制了其当前term的条目到大多数服务器上，正如（e）中所示，那么这个条目会被提交（S5无法赢得选举）。此时，日志中所有之前的条目都同样被提交了。](figure-8.png "图8 展示为什么leader不能通过之前term的日志条目判断提交的时间序列。在（a）中，S1是leader，它部分复制了index为2的日志条目。在（b）中，S1崩溃，S5收到来自S3、S4和它自己的投票而被选举为term 3的leader，并接受了不同的日志条目作为index 2的条目。在（c）中，S5崩溃，S1重启且被选举为leader，并继续复制。此时，term 2的日志已经被复制到了大多数服务器上，但是没有被提交。如果此时S1像（d）中的情况一样发生崩溃，那么S5将会被选举为leader（S2、S3和S4会为其投票），且会用它自己的term 3的日志条目覆盖index 2中的条目。然而，如果S1在崩溃前复制了其当前term的条目到大多数服务器上，正如（e）中所示，那么这个条目会被提交（S5无法赢得选举）。此时，日志中所有之前的条目都同样被提交了。")
 
@@ -204,7 +204,7 @@ Raft通过比较日志最后一个条目的index和term来确定哪个日志更�
 
 #### 5.4.3 安全性参数
 
-有了完整的Raft算法，现在我们可以更精确地证明“领导完整性性质”成立（该证明基于安全性的证明，见[章节9.2](#92-)）。我们假设“领导完整性性质”不成立，那么我们会得出一个矛盾。假设term $T$的leader（$leader_T$）提交了一个该term的日志条目，但是该日志条目没被之后的某个term的leader保存。考虑该leader没有保存该条目的最小term $U$（$U>T$）。
+有了完整的Raft算法，现在我们可以更精确地证明“领导完整性性质”成立（该证明基于安全性的证明，见[章节9.2](#92-正确性)）。我们假设“领导完整性性质”不成立，那么我们会得出一个矛盾。假设term $T$的leader（$leader_T$）提交了一个该term的日志条目，但是该日志条目没被之后的某个term的leader保存。考虑该leader没有保存该条目的最小term $U$（$U>T$）。
 
 1. 被提交的条目在$leader_U$被选举时必须不在其日志中（leader从未删除或覆写日志条目）。
 
@@ -242,7 +242,7 @@ Raft通过比较日志最后一个条目的index和term来确定哪个日志更�
 
 $$ broadcastTime \ll electionTimeout \ll MTBF $$
 
-在这个不等式中，$broadcatTime$是服务器将RPC并行地发送给集群中的每个服务器并收到它们的响应的平均时间，$electionTimeout$是[章节5.2](#52-)中描述的选举超时，$MTBF$是单个服务器发生两次故障间的平均时间。$broadcastTime$应该比$electionTimeout$小一个数量级，这样leader可以可靠的发送心跳消息以阻止选举发生；因为$exectionTimeout$采用了随机方法，这一不等性也让投票决裂不太可能发生。$electionTimeout$应该比$MTBF$小几个数量级，这样系统能够取得稳定的进展。当leader崩溃时，系统将会在大概$electionTime$的时间内不可用，我们想让这一时间仅占总时间的很小的比例。
+在这个不等式中，$broadcatTime$是服务器将RPC并行地发送给集群中的每个服务器并收到它们的响应的平均时间，$electionTimeout$是[章节5.2](#52-领导选举)中描述的选举超时，$MTBF$是单个服务器发生两次故障间的平均时间。$broadcastTime$应该比$electionTimeout$小一个数量级，这样leader可以可靠的发送心跳消息以阻止选举发生；因为$exectionTimeout$采用了随机方法，这一不等性也让投票决裂不太可能发生。$electionTimeout$应该比$MTBF$小几个数量级，这样系统能够取得稳定的进展。当leader崩溃时，系统将会在大概$electionTime$的时间内不可用，我们想让这一时间仅占总时间的很小的比例。
 
 $broadcastTime$和$MTBF$是下层系统的属性，而$electionTimeout$是必须由我们选取的。Raft的RPC通常需要收件人将信息持久化到稳定存储中，所以$broadcastTime$可能在0.5ms到20ms不等，这取决于存储技术。因此，$electionTimeout$可能在10ms到500ms之间。通常服务器的MTBF为几个月或更长时间，这可以轻松满足定时要求。
 
@@ -288,9 +288,9 @@ Raft的日志会随着正常的操作增长，以合并更多的客户端请求�
 
 ![图12 服务器使用新的快照取代它日志中已提交的条目（index 1~5），快照只保存了当前状态（在本例中为变量$x$和$y$）。该快照包括的最后的index和term用来安置紧随其后的日志条目6。](figure-12.png "图12 服务器使用新的快照取代它日志中已提交的条目（index 1~5），快照只保存了当前状态（在本例中为变量$x$和$y$）。该快照包括的最后的index和term用来安置紧随其后的日志条目6")
 
-**图12**展示了Raft的快照的基本想法。每个服务器独立地创建快照，快照仅覆盖服务器日志中已提交的条目。大部分的工作由状态机将其当前状态写入到快照组成。Raft还在快照中包括了少量的元数据：*last included index*是快照替换的最后一个条目（状态机应用的最后一个条目）的index，*last included term*是这一条目的term。这些被保存的信息用来支持对紧随快照后面的第一个条目的AppendEntries的一致性检验，因为该条目需要前一条日志的index和term。为了启用集群成员变更（见[第六章](#6-)），快照还包括日志中直到last included index的最新的配置。一旦服务器完成了快照写入，它会删除直到last included index的所有日志条目和任何之前的快照。
+**图12**展示了Raft的快照的基本想法。每个服务器独立地创建快照，快照仅覆盖服务器日志中已提交的条目。大部分的工作由状态机将其当前状态写入到快照组成。Raft还在快照中包括了少量的元数据：*last included index*是快照替换的最后一个条目（状态机应用的最后一个条目）的index，*last included term*是这一条目的term。这些被保存的信息用来支持对紧随快照后面的第一个条目的AppendEntries的一致性检验，因为该条目需要前一条日志的index和term。为了启用集群成员变更（见[第六章](#6-集群成员变更)），快照还包括日志中直到last included index的最新的配置。一旦服务器完成了快照写入，它会删除直到last included index的所有日志条目和任何之前的快照。
 
-尽管正常情况下服务器独立地创建快照，leader偶尔必须将快照发送给落后的follower。这会在leader已经丢弃了它需要发送给follower的下一条日志条目是发生。幸运的是，这种情况不太可能在正常操作中出现：在正常情况下，跟上了leader的follower中已经有了这一条目。然而，异常缓慢的follower或新加入集群中的服务器（见[第六章](#6-)）中没有这一条目。对leader来说，让这样的follower追上新状态的方法就是通过网络向其发送快照。
+尽管正常情况下服务器独立地创建快照，leader偶尔必须将快照发送给落后的follower。这会在leader已经丢弃了它需要发送给follower的下一条日志条目是发生。幸运的是，这种情况不太可能在正常操作中出现：在正常情况下，跟上了leader的follower中已经有了这一条目。然而，异常缓慢的follower或新加入集群中的服务器（见[第六章](#6-集群成员变更)）中没有这一条目。对leader来说，让这样的follower追上新状态的方法就是通过网络向其发送快照。
 
 ![图13 InstallSnapshot RPC总结。快照被分割成块来传输，这可以通过给follower发送每个块时告知其存活，这样follower可以重设选举定时器。](figure-13.png "图13 InstallSnapshot RPC总结。快照被分割成块来传输，这可以通过给follower发送每个块时告知其存活，这样follower可以重设选举定时器。")
 
@@ -342,7 +342,7 @@ Raft的客户端会将所有的请求发送给leader。当客户端首次启动�
 
 ### 9.2 正确性
 
-我们已经为[第五章](#5-)描述的共识机制进行了形式化规范与证明。形式化的规范<sup>[31]</sup>使用了TLA+规范语言<sup>[17]</sup>能让**图2**中总结的信息完全准确。其有大概400行长，并可以作为证明。它对任何实现Raft的人来说也很有用。我们通过TLA证明系统<sup>[7]</sup>机械化地证明了“日志完整性性质”。然而，该证明依赖了还没被机械化检验的不变式（日历，我们还没有证明规范的类型安全性）。此外，我们为“状态机安全性性质”编写了完整（它仅依赖规范本身）且相对准确的非形式化的证明<sup>[31]</sup>（其大概有3500个词那么长）。
+我们已经为[第五章](#5-raft共识算法)描述的共识机制进行了形式化规范与证明。形式化的规范<sup>[31]</sup>使用了TLA+规范语言<sup>[17]</sup>能让**图2**中总结的信息完全准确。其有大概400行长，并可以作为证明。它对任何实现Raft的人来说也很有用。我们通过TLA证明系统<sup>[7]</sup>机械化地证明了“日志完整性性质”。然而，该证明依赖了还没被机械化检验的不变式（日历，我们还没有证明规范的类型安全性）。此外，我们为“状态机安全性性质”编写了完整（它仅依赖规范本身）且相对准确的非形式化的证明<sup>[31]</sup>（其大概有3500个词那么长）。
 
 ### 9.3 性能
 
@@ -378,4 +378,100 @@ Raft和Paxos最大的不同在于Raft的强领导权：Raft的领导选举是共
 
 Raft为达成共识所需的消息类型比其他我们知道的基于日志复制的算法更少。例如，我们数了VR和Zookeeper用作基本共识和成员变更的消息类型数（不包括日志复制和成员交互，因为它们几乎与算法相互独立）。VR和Zookeeper都定义了10中不同的消息类型，而Raft仅有4中消息类型（两种RPC请求和它们的响应）。Raft的消息比其它算法的更浓缩一点，但是总体上更简单。另外，在VR和Zookeeper的描述中，它们在leader变更时会传输整个日志，在实际情况下，将需要额外的消息类型来优化这些机制。
 
-Raft的强领导权方法简化了算法，
+Raft的强领导权方法简化了算法，但它也妨碍了一些性能优化。例如，Egalitarian Paxos（ePaxos）可以在一些条件下通过无leader的方法实现更好的性能<sup>[27]</sup>。EPaxos利用了状态机指令的可交换性。任何服务器，在有其它指令被提议并与它发生指令交换时，可以仅用一轮通信就能提交一个指令。然而，如果被并发提议的指令没有互相发生交换，EPaxos就需要额外一轮通信。因为任何服务器都可能提交指令，EPaxos在服务器间的负载均衡更好，且在广域网配置下能实现比Raft更低的延迟。然而，它比Paxos又增添了相当的复杂性。
+
+在其它工作中，有很多不同的用作集群成员变更的方法被提出或实现，包括Lamport最初的提议<sup>[15]</sup>、VR<sup>[22]</sup>、和SMART<sup>[24]</sup>。我们为Raft选择了联合共识的方法，因为它利用了其余的共识协议，因此只需要很少的额外机制来实现成员变更。Raft没有选择Lamport的$\alpha$方法，因为它假设共识的达成不需要leader。相比VR和SMART，Raft的重配置算法的优势是，成员变更时不需要限制对正常请求的处理；相反，VR在配置变更期间会停止所有正常的处理，SMART对未完成的请求数量有类$\alpha$的限制。Raft的方法还比VR或SMART加入了更少的额外机制。
+
+## 11. 结论
+
+算法通常是以正确、效率、和/或简洁为主要目标设计的。尽管这些都是很有价值的目标，但我们认为可理解性和这些目标一样重要。在开发者将算法转化为实用的实现之前，其它目标都无法实现，且实用的实现不可避免地会脱离或扩展算法发表的形式。除非开发者对算法有很深的理解并能建立有关该算法的直觉，否则他们很难在实现过程中保留算法期望的性质。
+
+本文中，我们解决了分布式共识的问题。该领域有一个被广泛接受但是难以理解的算法Paxos，它已经挑战了学生和开发者很多年。我们开发了一个新算法Raft，我们已经表明它比Paxos更好理解。我们还认为Raft为系统构建提供了更好的基础。把可理解性作为设计的主要目标改变我我们设计Raft的方法。在设计的过程中，我们发现我们反复地使用了一些技术，如分解问题和简化状态空间。这些技术不但提高了Raft的可理解性，还让我们能更好地理解它的正确性。
+
+## 12. 致谢
+
+The user study would not have been possible without the support of Ali Ghodsi, David Mazières, and the students of CS 294-91 at Berkeley and CS 240 at Stanford. Scott Klemmer helped us design the user study, and Nelson Ray advised us on statistical analysis. The Paxos slides for the user study borrowed heavily from a slide deck originally created by Lorenzo Alvisi. Special thanks go to David Mazières and Ezra Hoch for finding subtle bugs in Raft. Many people provided helpful feedback on the paper and user study materials, including Ed Bugnion, Michael Chan, Hugues Evrard, Daniel Giffin, Arjun Gopalan, Jon Howell, Vimalkumar Jeyakumar, Ankita Kejriwal, Aleksandar Kracun, Amit Levy, Joel Martin, Satoshi Matsushita, Oleg Pesok, David Ramos, Robbert van Renesse, Mendel Rosenblum, Nicolas Schiper, Deian Stefan, Andrew Stone, Ryan Stutsman, David Terei, Stephen Yang, Matei Zaharia, 24 anonymous conference reviewers (with duplicates), and especially our shepherd Eddie Kohler. Werner Vogels tweeted a link to an earlier draft, which gave Raft significant exposure. This work was supported by the Gigascale Systems Research Center and the Multiscale Systems Center, two of six research centers funded under the Focus Center Research Program, a Semiconductor Research Corporation program, by STARnet, a Semiconductor Research Corporation program sponsored by MARCO and DARPA, by the National Science Foundation under Grant No. 0963859, and by grants from Facebook, Google, Mellanox, NEC, NetApp, SAP, and Samsung. Diego Ongaro is supported by The Junglee Corporation Stanford Graduate Fellowship.
+
+## 参考文献
+
+<div class="reference">
+
+[1] BOLOSKY, W. J., BRADSHAW, D., HAAGENS, R. B., KUSTERS, N. P., AND LI, P. Paxos replicated state machines as the basis of a high-performance data store. In Proc. NSDI’11, USENIX Conference on Networked Systems Design and Implementation (2011), USENIX, pp. 141–154.
+
+[2] BURROWS, M. The Chubby lock service for looselycoupled distributed systems. In Proc. OSDI’06, Symposium on Operating Systems Design and Implementation (2006), USENIX, pp. 335–350.
+
+[3] CAMARGOS, L. J., SCHMIDT, R. M., AND PEDONE, F. Multicoordinated Paxos. In Proc. PODC’07, ACM Symposium on Principles of Distributed Computing (2007), ACM, pp. 316–317.
+
+[4] CHANDRA, T. D., GRIESEMER, R., AND REDSTONE, J. Paxos made live: an engineering perspective. In Proc. PODC’07, ACM Symposium on Principles of Distributed Computing (2007), ACM, pp. 398–407.
+
+[5] CHANG, F., DEAN, J., GHEMAWAT, S., HSIEH, W. C., WALLACH, D. A., BURROWS, M., CHANDRA, T., FIKES, A., AND GRUBER, R. E. Bigtable: a distributed storage system for structured data. In Proc. OSDI’06, USENIX Symposium on Operating Systems Design and Implementation (2006), USENIX, pp. 205–218.
+
+[6] CORBETT, J. C., DEAN, J., EPSTEIN, M., FIKES, A., FROST, C., FURMAN, J. J., GHEMAWAT, S., GUBAREV, A., HEISER, C., HOCHSCHILD, P., HSIEH, W., KANTHAK, S., KOGAN, E., LI, H., LLOYD, A., MELNIK, S., MWAURA, D., NAGLE, D., QUINLAN, S., RAO, R., ROLIG, L., SAITO, Y., SZYMANIAK, M., TAYLOR, C., WANG, R., AND WOODFORD, D. Spanner: Google’s globally-distributed database. In Proc. OSDI’12, USENIX Conference on Operating Systems Design and Implementation (2012), USENIX, pp. 251–264.
+
+[7] COUSINEAU, D., DOLIGEZ, D., LAMPORT, L., MERZ, S., RICKETTS, D., AND VANZETTO, H. TLA+ proofs. In Proc. FM’12, Symposium on Formal Methods (2012), D. Giannakopoulou and D. M´ery, Eds., vol. 7436 of Lecture Notes in Computer Science, Springer, pp. 147–154.
+
+[8] GHEMAWAT, S., GOBIOFF, H., AND LEUNG, S.-T. The Google file system. In Proc. SOSP’03, ACM Symposium on Operating Systems Principles (2003), ACM, pp. 29–43.
+
+[9] GRAY, C., AND CHERITON, D. Leases: An efficient faulttolerant mechanism for distributed file cache consistency. In Proceedings of the 12th ACM Ssymposium on Operating Systems Principles (1989), pp. 202–210.
+
+[10] HERLIHY, M. P., AND WING, J. M. Linearizability: a correctness condition for concurrent objects. ACM Transactions on Programming Languages and Systems 12 (July 1990), 463–492.
+
+[11] HUNT, P., KONAR, M., JUNQUEIRA, F. P., AND REED, B. ZooKeeper: wait-free coordination for internet-scale systems. In Proc ATC’10, USENIX Annual Technical Conference (2010), USENIX, pp. 145–158.
+
+[12] JUNQUEIRA, F. P., REED, B. C., AND SERAFINI, M. Zab: High-performance broadcast for primary-backup systems. In Proc. DSN’11, IEEE/IFIP Int’l Conf. on Dependable Systems & Networks (2011), IEEE Computer Society, pp. 245–256.
+
+[13] KIRSCH, J., AND AMIR, Y. Paxos for system builders. Tech. Rep. CNDS-2008-2, Johns Hopkins University, 2008.
+
+[14] LAMPORT, L. Time, clocks, and the ordering of events in a distributed system. Commununications of the ACM 21, 7 (July 1978), 558–565.
+
+[15] LAMPORT, L. The part-time parliament. ACM Transactions on Computer Systems 16, 2 (May 1998), 133–169.
+
+[16] LAMPORT, L. Paxos made simple. ACM SIGACT News 32, 4 (Dec. 2001), 18–25.
+
+[17] LAMPORT, L. Specifying Systems, The TLA+ Language and Tools for Hardware and Software Engineers. AddisonWesley, 2002.
+
+[18] LAMPORT, L. Generalized consensus and Paxos. Tech. Rep. MSR-TR-2005-33, Microsoft Research, 2005.
+
+[19] LAMPORT, L. Fast paxos. Distributed Computing 19, 2(2006), 79–103.
+
+[20] LAMPSON, B. W. How to build a highly available system using consensus. In Distributed Algorithms, O. Baboaglu and K. Marzullo, Eds. Springer-Verlag, 1996, pp. 1–17.
+
+[21] LAMPSON, B. W. The ABCD’s of Paxos. In Proc. PODC’01, ACM Symposium on Principles of Distributed Computing (2001), ACM, pp. 13–13.
+
+[22] LISKOV, B., AND COWLING, J. Viewstamped replication revisited. Tech. Rep. MIT-CSAIL-TR-2012-021, MIT, July 2012.
+
+[23] LogCabin source code. http://github.com/ logcabin/logcabin.
+
+[24] LORCH, J. R., ADYA, A., BOLOSKY, W. J., CHAIKEN, R., DOUCEUR, J. R., AND HOWELL, J. The SMART way to migrate replicated stateful services. In Proc. EuroSys’06, ACM SIGOPS/EuroSys European Conference on Computer Systems (2006), ACM, pp. 103–115.
+
+[25] MAO, Y., JUNQUEIRA, F. P., AND MARZULLO, K. Mencius: building efficient replicated state machines for WANs. In Proc. OSDI’08, USENIX Conference on Operating Systems Design and Implementation (2008), USENIX, pp. 369–384.
+
+[26] MAZIERES ` , D. Paxos made practical. http://www.scs.stanford.edu/˜dm/home/papers/paxos.pdf, Jan. 2007.
+
+[27] MORARU, I., ANDERSEN, D. G., AND KAMINSKY, M. There is more consensus in egalitarian parliaments. In Proc. SOSP’13, ACM Symposium on Operating System Principles (2013), ACM.
+
+[28] Raft user study. http://ramcloud.stanford.edu/˜ongaro/userstudy/.
+
+[29] OKI, B. M., AND LISKOV, B. H. Viewstamped replication: A new primary copy method to support highly-available distributed systems. In Proc. PODC’88, ACM Symposium on Principles of Distributed Computing(1988), ACM, pp. 8–17.
+
+[30] O’NEIL, P., CHENG, E., GAWLICK, D., AND ONEIL, E. The log-structured merge-tree (LSM-tree). Acta Informatica 33, 4 (1996), 351–385.
+
+[31] ONGARO, D. Consensus: Bridging Theory and Practice. PhD thesis, Stanford University, 2014 (work in progress). http://ramcloud.stanford.edu/˜ongaro/thesis.pdf.
+
+[32] ONGARO, D., AND OUSTERHOUT, J. In search of an understandable consensus algorithm. In Proc ATC’14, USENIX Annual Technical Conference (2014), USENIX.
+
+[33] OUSTERHOUT, J., AGRAWAL, P., ERICKSON, D., KOZYRAKIS, C., LEVERICH, J., MAZIERES ` , D., MITRA, S., NARAYANAN, A., ONGARO, D., PARULKAR, G., ROSENBLUM, M., RUMBLE, S. M., STRATMANN, E., AND STUTSMAN, R. The case for RAMCloud. Communications of the ACM 54 (July 2011), 121–130.
+
+[34] Raft consensus algorithm website. http://raftconsensus.github.io.
+
+[35] REED, B. Personal communications, May 17, 2013.
+
+[36] ROSENBLUM, M., AND OUSTERHOUT, J. K. The design and implementation of a log-structured file system. ACM Trans. Comput. Syst. 10 (February 1992), 26–52.
+
+[37] SCHNEIDER, F. B. Implementing fault-tolerant services using the state machine approach: a tutorial. ACM Computing Surveys 22, 4 (Dec. 1990), 299–319.
+
+[38] SHVACHKO, K., KUANG, H., RADIA, S., AND CHANSLER, R. The Hadoop distributed file system. In Proc. MSST’10, Symposium on Mass Storage Systems and Technologies (2010), IEEE Computer Society, pp. 1–10.
+
+[39] VAN RENESSE, R. Paxos made moderately complex. Tech. rep., Cornell University, 2012. 
+
+</div>
