@@ -15,8 +15,15 @@ resources:
 
 *本篇文章是对论文[weil-osdi06](https://www.usenix.org/legacy/events/osdi06/tech/full_papers/weil/weil_html/)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
-
 <!--more-->
+
+## 作者
+
+Sage A. Weil, Scott A. Brandt, Ethan L. Miller, Darrell D. E. Long, Carlos Maltzahn
+
+University of California, Santa Cruz
+
+{sage, scott, elm, darrell, carlosm}@cs.ucsc.edu
 
 ## 摘要
 

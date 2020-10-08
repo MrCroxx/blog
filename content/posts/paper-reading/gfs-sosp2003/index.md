@@ -18,6 +18,12 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Sanjay Ghemawat, Howard Gobioff, and Shun-Tak Leung
+
+Google
+
 ## 摘要
 
 GFS（Google File System）是由我们设计并实现的为大规模分布式数据密集型应用程序设计的可伸缩（scalable）的分布式文件系统。GFS为在廉价商用设备上运行提供了容错能力，并可以在有大量客户端的情况下提供较高的整体性能。

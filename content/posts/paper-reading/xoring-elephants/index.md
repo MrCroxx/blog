@@ -18,6 +18,22 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Sathiamoorthy University of Southern California msathiam@usc.edu
+
+Megasthenis Asteris University of Southern California asteris@usc.edu
+
+Dimitris Papailiopoulos University of Southern California papailio@usc.edu
+
+Alexandros G. Dimakis University of Southern California dimakis@usc.edu
+
+Ramkumar Vadali Facebook ramkumar.vadali@fb.com
+
+Scott Chen Facebook sc@fb.com
+
+Dhruba Borthakur Facebook dhruba@fb.com
+
 ## 摘要
 
 大型分布式存储系统通常使用副本来提供可靠性。最近，为了减少三副本系统带来的巨大开销，开始使用纠删码。在设计时，一般选择Reed-Solomon码（RS码）作为标准，其高昂的修复开销往往被认为是为了高效存储和高可用性而带来的不可避免的代价。

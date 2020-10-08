@@ -17,6 +17,14 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Matei Zaharia, Mosharaf Chowdhury, Tathagata Das, Ankur Dave, Justin Ma,
+
+Murphy McCauley, Michael J. Franklin, Scott Shenker, Ion Stoica
+
+University of California, Berkeley
+
 ## 摘要
 
 我们提出了一个能够使开发者在大型集群上执行内存式计算且带有容错的分布式内存的抽象——Resilient Distributed Datasets（RDD，弹性分布式数据集）。RDD的想法由在当前计算框架中处理效率不高的两类应用程序驱动：迭代算法和交互式数据挖掘工具。在这两种情况下，将数据保存在内存中能够将性能提高一个数量级。为了实现有效地容错，RDD提供了共享内存的一个受限的形式，其基于粗粒度的变换而不是细粒度的共享状态更新。然而，我们发现RDD足以表示很广泛的计算类型，包括最近像Pregel一样的专门针对迭代任务的程序模型，以及在新应用程序中这些模型表达不出的模型。我们在被称为Spark的系统中实现了RDD，并通过各种用户程序和benchmark来评估这个系统。

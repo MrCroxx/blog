@@ -1,7 +1,7 @@
 ---
-title: "《CRUSH: Controlled, Scalable, Decentralized Placement of Replicated Data》论文翻译[持续更新中]"
+title: "《CRUSH: Controlled, Scalable, Decentralized Placement of Replicated Data》论文翻译"
 date: 2020-10-01T16:28:29+08:00
-lastmod: 2020-10-01T16:28:33+08:00
+lastmod: 2020-10-08T14:16:28+08:00
 draft: false
 keywords: []
 description: ""
@@ -15,12 +15,21 @@ resources:
 
 *本篇文章是对论文[CRUSH: Controlled, Scalable, Decentralized Placement of Replicated Data](http://tom.nos-eastchina1.126.net/weil-crush-sc06.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
-
 <!--more-->
+
+## 作者
+
+Sage A. Weil Scott A. Brandt Ethan L. Miller Carlos Maltzahn
+
+Storage Systems Research Center
+
+University of California, Santa Cruz
+
+{sage, scott, elm, carlosm}@cs.ucsc.edu
 
 ## 摘要
 
-新兴的大型分布式存储系统面临着将PB级的数据分布到数十、数百、甚至数千个存储设备上的问题。这样的系统必须均匀地分布数据和负载，以高效地利用可用资源并最大化系统性能，同时帮助处理增长并管理硬件故障。我们开发了CRUSH，一个可伸缩的伪随机数据分布函数，其为分布式对象存储系统设计，能高效地将数据对象映射到存储设备上，且而不依赖中央目录。因为大型系统有着天然的（inherently）动态性（译注：在Ceph中我将其翻译为“xxx本质上具有动态性”，本文中均翻译为“xxx具有天然的动态性”，以便于表达），CRUSh是为在帮助处理存储的增加与移除的同时减小不必要的数据移动而设计的。该算法适用于很多种类的数据副本和可靠性机制，同时根据用户定义的策略分布数据，这些策略可以强制将不同的副本分散到不同的故障域（failure domain）中。
+新兴的大型分布式存储系统面临着将PB级的数据分布到数十、数百、甚至数千个存储设备上的问题。这样的系统必须均匀地分布数据和负载，以高效地利用可用资源并最大化系统性能，同时帮助处理增长并管理硬件故障。我们开发了CRUSH，一个可伸缩的伪随机数据分布函数，其为分布式对象存储系统设计，能高效地将数据对象映射到存储设备上，且而不依赖中央目录。因为大型系统有着固有的（inherently）动态性（译注：在Ceph中我将其翻译为“xxx本质上具有动态性”，本文中均翻译为“xxx具有固有的动态性”，以便于表达），CRUSh是为在帮助处理存储的增加与移除的同时减小不必要的数据移动而设计的。该算法适用于很多种类的数据副本和可靠性机制，同时根据用户定义的策略分布数据，这些策略可以强制将不同的副本分散到不同的故障域（failure domain）中。
 
 ## 1. 引言
 
@@ -46,7 +55,7 @@ CRUSH基于RUSH算法族[Honicky and Miller 2004]且与其最为相似。RUSH是
 
 CRUSH算法参考每个设备的权重值来将数据对象从概率上近似均匀地分布到存储设备上。该分布受分层的（hierarchical）*集群映射（cluster map）* 控制，其表示可用的存储资源，由这些资源组成的逻辑元素构成。例如，人们可能通过如下方式描述一个大型设施（installation）：设施由多行服务器的cabinet（机箱架）组成，cabinet中装满了disk of shelf（磁盘柜，译注：下文中省略为shelf），shelf中装满了storage device（存储设备，译注，下文中省略为device）。数据分布策略是根据*放置规则（placement rules）* 定义的，这些规则指定了有多少目标副本被从集群中选取且副本放置时有哪些限制。例如，用户可能指定三份副本需要被放置在不同cabinet上的物理机上，这样它们就不会共享同一个电路。
 
-给定一个整型输入值$x$，CRUSH会输出一个由$n$个不同的目标存储组成的有序列表$\overrightarrow{R}$。CRUSH使用了一个强大的多输入整型哈希函数，$x$是其输入之一，该函数可以使映射完全是确定性的，且可以仅通过集群映射、放置规则、和$x$计算。该分布是伪随机的，因为相似数据的输出结果或存储在任何device上的item（项）间没有明显的关联。CRUSH生成的副本分布是*非聚簇（declustered）* 的，因为一个item的副本所在的device与所有其它item的副本所在位置看上去也是独立的。
+给定一个整型输入值$x$，CRUSH会输出一个由$n$个不同的目标存储组成的有序列表$\overrightarrow{R}$。CRUSH使用了一个强大的多输入整型哈希函数，$x$是其输入之一，该函数可以使映射完全是确定性的，且可以仅通过集群映射、放置规则、和$x$计算。该分布是伪随机的，因为相似数据的输出结果或存储在任何device上的item（项）间没有明显的关联。CRUSH生成的副本分布是*分簇（declustered）* 的，因为一个item的副本所在的device与所有其它item的副本所在位置看上去也是独立的。
 
 ### 3.1 分层集群映射
 
@@ -64,7 +73,7 @@ CRUSH旨在将数据均匀地分布到加权的device上，以维护存储和dev
 
 ![算法1 CRUSH中对象$x$的放置](algorithm-1.png "算法1 CRUSH中对象$x$的放置")
 
-每条规则由一系列应用到层次结构中的简单操作组成，如**算法1**中的伪代码表示的那样。CRUSH函数的整型输入$x$通常是对象名或其它的标识符，如一组副本被放在同一个device上的对象的标识符。$take(a)$操作会在存储层次结构中选取一个item（通常是一个bucket），并将其分配给向量$\overrightarrow{i}$，作为后续操作的输入。$select(n,t)$操作遍历每个元素$i$（$i \in \overrightarrow{i}$），并在以该点为根的子树中选取$n$个类型为$t$的不同的item。device的类型已知且固定，且系统中的每个bucket都有一个类型字段，以用来区分不同类型的bucket（例如，用来表示“row”的bucket和用来表示“cabinet”的bucket）。对于每个$i$（$i \in \overrightarrow{i}$），$select(n,t)$调用会遍历item$r$（$ r \in 1,...,n $），并递归下降地处理中间的任何bucket，然后在每个bucket中通过函数$c(r,x)$（在[章节3.4](#34-)中为每类bucket定义的）伪随机地选取一个其中的item，直到它找到一个类型为请求的类型$t$的item。其产生的$n| \overrightarrow{i} |$个不同的item会被放回到输入$ \overrightarrow{i} $中，它们或作为后续$select(n,t)$的输入，或通过$emit$操作被移动到结果向量中。
+每条规则由一系列应用到层次结构中的简单操作组成，如**算法1**中的伪代码表示的那样。CRUSH函数的整型输入$x$通常是对象名或其它的标识符，如一组副本被放在同一个device上的对象的标识符。$take(a)$操作会在存储层次结构中选取一个item（通常是一个bucket），并将其分配给向量$\overrightarrow{i}$，作为后续操作的输入。$select(n,t)$操作遍历每个元素$i$（$i \in \overrightarrow{i}$），并在以该点为根的子树中选取$n$个类型为$t$的不同的item。device的类型已知且固定，且系统中的每个bucket都有一个类型字段，以用来区分不同类型的bucket（例如，用来表示“row”的bucket和用来表示“cabinet”的bucket）。对于每个$i$（$i \in \overrightarrow{i}$），$select(n,t)$调用会遍历item$r$（$ r \in 1,...,n $），并递归下降地处理中间的任何bucket，然后在每个bucket中通过函数$c(r,x)$（在[章节3.4](#34-bucket类型)中为每类bucket定义的）伪随机地选取一个其中的item，直到它找到一个类型为请求的类型$t$的item。其产生的$n| \overrightarrow{i} |$个不同的item会被放回到输入$ \overrightarrow{i} $中，它们或作为后续$select(n,t)$的输入，或通过$emit$操作被移动到结果向量中。
 
 ![表1 在同一列但不同的3个cabinet上分布3份副本的简单规则。](table-1.png "表1 在同一列但不同的3个cabinet上分布3份副本的简单规则。")
 
@@ -84,7 +93,7 @@ $select(n,t)$操作可能从它的起始点开始穿过多个存储层级以找�
 
 ### 3.3 映射变更和数据移动
 
-大型文件系统中数据分布的一个重要要素是对存储资源增加或移除的响应方式。CRUSH在所有时刻都会维护一个均匀的数据分布和负载，以避免负载不对称和相关可用资源利用不充分。当一个device故障时，CRUSH会标记该device，但仍将其留在层次结构中，这样它会被拒绝且它的内容会通过放置算法（见[章节3.2.1](#321-)）被均匀地重分布。这种集群映射的变化将会让总数据的最优（最小）比例（$ w_{failed} / W $，其中$W$是所有设备的总权重）被重新映射到新的存储目标上，因为仅故障设备上的数据会被移动。
+大型文件系统中数据分布的一个重要要素是对存储资源增加或移除的响应方式。CRUSH在所有时刻都会维护一个均匀的数据分布和负载，以避免负载不对称和相关可用资源利用不充分。当一个device故障时，CRUSH会标记该device，但仍将其留在层次结构中，这样它会被拒绝且它的内容会通过放置算法（见[章节3.2.1](#321-碰撞故障与过载)）被均匀地重分布。这种集群映射的变化将会让总数据的最优（最小）比例（$ w_{failed} / W $，其中$W$是所有设备的总权重）被重新映射到新的存储目标上，因为仅故障设备上的数据会被移动。
 
 当集群层次结构被改变时（例如增加或移除存储资源），情况会更加复杂。CRUSH的映射过程使用集群映射作为加权分层决策树，在这样的情况下可能造成比理论最优$ \frac{ \Delta w}{W} $更多的数据移动。在层次结构中的每一层中，当相对子树的权重变化改变了分布时，一些数据必须从权重减小的子树移动到权重增大的子树上。因为层次结构上的每个节点的伪随机放置决策在统计上是独立的，移动到子树的数据会在该点下均匀地重分布，但是不一定会被重新映射到导致权重变化的item下（译注：因此会造成更多的数据移动）。仅后面（更深）的层级的放置过程（经常是不同的）会移动数据以保持整体相对分布的正确性。**图3**中二分层级结构中说明了这种一般性的影响。
 
@@ -102,7 +111,7 @@ $select(n,t)$操作可能从它的起始点开始穿过多个存储层级以找�
 
 device很少被单独添加到大型系统中。相反，新的存储通常以多个设备组成的一整块部署，例如在服务器rack中添加一个shelf或者可能添加一整个cabinet。达到寿命的device也经常作为一个集合退役（单独的设备故障除外），我们很自然地会视它们为一个整体。CRUSH的uniform bucket被用来表示这种情况下的一个相同的device的集合。其关键的优势在于与它的性能：CRUSH可以在恒定的时间内将副本映射到bucket中。在不适合使用均衡限制的情况中，可以使用其它bucket类型。
 
-给定CRUSH的输入$x$和一个副本编号$r$，我们使用函数$c(r,x)=(hash(x)+rp) \mod m$从大小为$m$的uniform bucket中选择一个item，其中$p$是随机选择的（但是是确定的）大于$m$的质数。对于任意的$r \le m $，我们总是能使用一些简单的数论定理<sup>注2</sup>来选择一个不同的item。对于$r > m$，这一保障不再成立，这意味着两个不同的副本$r$和相同的输入$x$可能解析到同一个item。在实际环境中，这仅意味着碰撞的概率非零，且后续会通过放置算法回溯（见[章节3.2.1](#321-)）。
+给定CRUSH的输入$x$和一个副本编号$r$，我们使用函数$c(r,x)=(hash(x)+rp) \mod m$从大小为$m$的uniform bucket中选择一个item，其中$p$是随机选择的（但是是确定的）大于$m$的质数。对于任意的$r \le m $，我们总是能使用一些简单的数论定理<sup>注2</sup>来选择一个不同的item。对于$r > m$，这一保障不再成立，这意味着两个不同的副本$r$和相同的输入$x$可能解析到同一个item。在实际环境中，这仅意味着碰撞的概率非零，且后续会通过放置算法回溯（见[章节3.2.1](#321-碰撞故障与过载)）。
 
 如果uniform bucket的大小改变，会发生device间的完整的数据重调配，这很像传统的基于哈希的分部策略。
 
@@ -162,7 +171,7 @@ CRUSH的数据分布看上去应该是随机的（与对象标识符$x$或存储
 
 ![图5 CRUSH集群架构在4层架构的第2层中增加或移除device后的重组织效率与RUSH<sub>P</sub>和RUSH<sub>T</sub>的对比。1是最优的。](figure-5.png "图5 CRUSH集群架构在4层架构的第2层中增加或移除device后的重组织效率与RUSH<sub>P</sub>和RUSH<sub>T</sub>的对比。1是最优的。")
 
-**图5**以移动因子$ m_{actual} / m_{optimal} $的性质展示了相对的重组织效率，其中1表示最优的对象数，越大的值意味着需要越多的移动。X轴是增加或移除的OSD的双，Y轴是移动因子的对数。在所有的情况下，更大的权重变换（与整个系统相比）会导致更高效的重组织。RUSH<sub>P</sub>（单个大型list bucket）在极端情况下遥遥领先，即添加存储带来的移动最少（最优），而移除存储带来的移动最多（此时会有严重的性能下降，见[章节4.3](#43-)）。CRUSH中由list bucket（仅在只有存储添加的情况）或straw bucket组成的多层结构有次少的数据移动。使用tree bucket的CRUSH的效率稍微低一下，但是比朴素的RUSH<sub>T</sub>好了几乎25%（由每个tree bucket中的9个item带来的轻微的的不均衡导致）。而正如预期的那样（见[章节3.3](#33-)），在由list bucket构建的CRUSH结构中移除存储的效率很差。
+**图5**以移动因子$ m_{actual} / m_{optimal} $的性质展示了相对的重组织效率，其中1表示最优的对象数，越大的值意味着需要越多的移动。X轴是增加或移除的OSD的双，Y轴是移动因子的对数。在所有的情况下，更大的权重变换（与整个系统相比）会导致更高效的重组织。RUSH<sub>P</sub>（单个大型list bucket）在极端情况下遥遥领先，即添加存储带来的移动最少（最优），而移除存储带来的移动最多（此时会有严重的性能下降，见[章节4.3](#43-算法性能)）。CRUSH中由list bucket（仅在只有存储添加的情况）或straw bucket组成的多层结构有次少的数据移动。使用tree bucket的CRUSH的效率稍微低一下，但是比朴素的RUSH<sub>T</sub>好了几乎25%（由每个tree bucket中的9个item带来的轻微的的不均衡导致）。而正如预期的那样（见[章节3.3](#33-映射变更和数据移动)），在由list bucket构建的CRUSH结构中移除存储的效率很差。
 
 ![图6 在不同类型的bucket中添加或移除item后的重组织效率。1是最优的。尽管从list bucket的尾部移除item时会导致最坏的情况，straw bucket和list bucket通常仍是最佳选择。tree bucket的性能受bucket大小的对数限制。](figure-6.png "图6 在不同类型的bucket中添加或移除item后的重组织效率。1是最优的。尽管从list bucket的尾部移除item时会导致最坏的情况，straw bucket和list bucket通常仍是最佳选择。tree bucket的性能受bucket大小的对数限制。")
 
@@ -186,5 +195,76 @@ CRUSH保留了故障的device在存储结构中的位置，因为通常故障时
 
 ### 4.4 可靠性
 
-对于大型存储系统来说，数据安全性是很重要的，因为设备数量大导致硬件故障的发生是很正常的。像CRUSH这种非聚簇分布的随机分布策略备受关注，因为它们扩大了与任意给定device共享数据的对等节点的数量。（通常来说，）有两个相互竞争且影响相反的因素。第一，因为副本数据更少的位能分布在更大的对等节点集合上，因此故障后的恢复能够并行执行，这减少了恢复时间且将系统的脆弱点的范围缩小到了其它故障上。第二，更大的对等节点的组意味着因同时发生了第二个故障而导致流丢失共享数据的可能性更高。在使用2路镜像时，这两个因素相互抵消；而在超过两份副本的情况下，数据的安全性随着非聚簇程度提高 [Xin et al. 2004]。
+对于大型存储系统来说，数据安全性是很重要的，因为设备数量大导致硬件故障的发生是很正常的。像CRUSH这种分簇分布的随机分布策略备受关注，因为它们扩大了与任意给定device共享数据的对等节点的数量。（通常来说，）有两个相互竞争且影响相反的因素。第一，因为副本数据更少的位能分布在更大的对等节点集合上，因此故障后的恢复能够并行执行，这减少了恢复时间且将系统的脆弱点的范围缩小到了其它故障上。第二，更大的对等节点的组意味着因同时发生了第二个故障而导致流丢失共享数据的可能性更高。在使用2路镜像时，这两个因素相互抵消；而在超过两份副本的情况下，数据的安全性随着分簇程度提高 [Xin et al. 2004]。
 
+然而，多故障（multiple failure）情况的关键问题是：通常，故障可能不是独立的——在许多情况下，像电源故障或物理干扰这样的单个事件会影响到多个device，且采用分簇副本策略的更大型的对等节点组会增大数据丢失的可能性。CRUSH可将副本分散到用户定义的不同故障域中（在RUSH或已有的基于哈希的策略中都没有这一功能），这是专门为了防止并发的关联故障导致的数据丢失设计的。尽管这可以明显降低风险，但是缺少用来研究的特定的存储集群配置和相关的历史故障数据时，很难量化整个系统可靠性提高的程度。我们希望在以后进行这样的研究，但这超出了本文讨论的范围。
+
+## 5. 展望
+
+CRUSH正在作为Ceph的一部分进行开发，Ceph是一个数PB级的文件系统。目前的研究包括一个主要基于CRUSH的独有特性的智能、可靠的分布式对象存储。目前CRUSH使用的原始规则结构的复杂度刚好足以支持我们目前设想的数据分布策略。一些系统的特殊需求需要更强大的规则结构来满足。
+
+尽管对意外故障发生时的安全性考虑是驱动CRUSH设计的主要目标，但是在可以用马尔可夫或其它定量模型评估其对系统平均数据丢失时间（MTTDL）的精确的影响前，还需要研究实际系统中的故障，以确定故障的特征与频率。
+
+CRUSH的性能高度依赖于较为强大的多输入整型哈希函数。因为它同时影响着算法的正确性（分布的质量）与速度，因此，有必要对足以在CRUSH中使用的更快的哈希技术进行研究。
+
+## 6. 结论
+
+分布式存储系统对数据放置提出了一系列的独特的可扩展性的挑战。CRUSH通过将数据放置问题转化为伪随机映射函数解决了这些挑战，它消除了常见的元数据分配需求，转为通过基于用来描述可用存储的加权层次结构的方式分布数据。集群映射的层次接口能够反映出下层物理设备的组织情况和设施的基础架构情况，例如，在数据中心中，device被组成shelf、cabinet、和row，从而使自定义的放置规则可以定义各种策略以能够将对象的不同副本分布到不同的用户定义的故障域中（如不同的电力和网络基础设施中）。这样，CRUSH能够减轻通常在已有的采用分簇副本策略的伪随机系统中的关联设备故障问题带来的问题。CRUSH还通过选择性地将数据以最小计算代价地从装的太多的device迁出，解决了随机化的方法固有的设备中数据过量装载的风险。
+
+CRUSH以极为高效的方式完成了所有这些任务，在计算效率和所需的元数据方面都是如此。映射计算的运行时间为$O( \log n )$，在数千台device的情况下执行时仅需几十毫秒。CRUSH集高效、可靠、灵活与一身，使其成为大型分布式存储系统的理想选择。
+
+## 7. 致谢
+
+R. J. Honicky’s excellent work on RUSH inspired the development of CRUSH. Discussions with Richard Golding, Theodore Wong, and the students and faculty of the Storage Systems Research Center were most helpful in motivating and refining the algorithm. This work was supported in part by Lawrence Livermore National Laboratory, Los Alamos National Laboratory, and Sandia National Laboratory under contract B520714. Sage Weil was supported in part by a fellowship from Lawrence Livermore National Laboratory. We would also like to thank the industrial sponsors of the SSRC, including Hewlett Packard Laboratories, IBM, Intel, Microsoft Research, Network Appliance, Onstor, Rocksoft, Symantec, and Yahoo.
+
+## 8. 更多
+
+CRUSH的源码采用LGPL协议，可通过[https://users.soe.ucsc.edu/~sage/crush](https://users.soe.ucsc.edu/~sage/crush)访问。
+
+## 参考文献
+
+<div class="reference">
+
+- ANDERSON, E., HALL, J., HARTLINE, J., HOBBS, M., KARLIN, A. R., SAIA, J., SWAMINATHAN, R., AND WILKES, J. 2001. An experimental study of data migration algorithms. In Proceedings of the 5th International Workshop on Algorithm Engineering, SpringerVerlag, London, UK, 145–158.
+
+- ANDERSON, E., HOBBS, M., KEETON, K., SPENCE, S., UYSAL, M., AND VEITCH, A. 2002. Hippodrome: running circles around storage administration. In Proceedings of the 2002 Conference on File and Storage Technologies(FAST).
+
+- AZAGURY, A., DREIZIN, V., FACTOR, M., HENIS, E., NAOR, D., RINETZKY, N., RODEH, O., SATRAN, J., TAVORY, A., AND YERUSHALMI, L. 2003. Towards an object store. In Proceedings of the 20th IEEE / 11th NASA Goddard Conference on Mass Storage Systems and Technologies, 165–176.
+
+- BRAAM, P. J. 2004. The Lustre storage architecture. http://www.lustre.org/documentation.html, Cluster File Systems, Inc., Aug.
+
+- BRINKMANN, A., SALZWEDEL, K., AND SCHEIDELER, C. 2000. Efficient, distributed data placement strategies for storage area networks. In Proceedings of the 12th ACM Symposium on Parallel Algorithms and Architectures (SPAA), ACM Press, 119–128. Extended Abstract.
+
+- CHOY, D. M., FAGIN, R., AND STOCKMEYER, L. 1996. Efficiently extendible mappings for balanced data distribution. Algorithmica 16, 215–232.
+
+- GHEMAWAT, S., GOBIOFF, H., AND LEUNG, S.-T. 2003. The Google file system. In Proceedings of the 19th ACM Symposium on Operating Systems Principles (SOSP ’03), ACM.
+
+- GOBIOFF, H., GIBSON, G., AND TYGAR, D. 1997. Security for network attached storage devices. Tech. Rep. TR CMU-CS-97-185, Carniege Mellon, Oct.
+
+- GOEL, A., SHAHABI, C., YAO, D. S.-Y., AND ZIMMERMAN, R. 2002. SCADDAR: An efficient randomized technique to reorganize continuous media blocks. In Proceedings of the 18th International Conference on Data Engineering (ICDE ’02), 473–482.
+
+- GRANVILLE, A. 1993. On elementary proofs of the Prime Number Theorem for Arithmetic Progressions, without characters. In Proceedings of the 1993 Amalfi Conference on Analytic Number Theory, 157–194.
+
+- HONICKY, R. J., AND MILLER, E. L. 2004. Replication under scalable hashing: A family of algorithms for scalable decentralized data distribution. In Proceedings of the 18th International Parallel & Distributed Processing Symposium (IPDPS 2004), IEEE.
+
+- JENKINS, R. J., 1997. Hash functions for hash table lookup. http://burtleburtle.net/bob/hash/evahash.html.
+
+- KARGER, D., LEHMAN, E., LEIGHTON, T., LEVINE, M., LEWIN, D., AND PANIGRAHY, R. 1997. Consistent hashing and random trees: Distributed caching protocols for relieving hot spots on the World Wide Web. In ACM Symposium on Theory of Computing, 654–663.
+
+- LUMB, C. R., GANGER, G. R., AND GOLDING, R. 2004. D-SPTF: Decentralized request distribution in brick-based storage systems. In Proceedings of the 11th International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS), 37–47.
+
+- NAGLE, D., SERENYI, D., AND MATTHEWS, A. 2004. The Panasas ActiveScale storage cluster—delivering scalable high bandwidth storage. In Proceedings of the 2004 ACM/IEEE Conference on Supercomputing (SC ’04).
+
+- RODEH, O., AND TEPERMAN, A. 2003. zFS—a scalable distributed file system using object disks. In Proceedings of the 20th IEEE / 11th NASA Goddard Conference on Mass Storage Systems and Technologies, 207–218.
+
+- SAITO, Y., FRØLUND, S., VEITCH, A., MERCHANT, A., AND SPENCE, S. 2004. FAB: Building distributed enterprise disk arrays from commodity components. In Proceedings of the 11th International Conference on Architectural Support for Programming Languages and Operating Systems (ASPLOS), 48–58.
+
+- SANTOS, J. R., MUNTZ, R. R., AND RIBEIRO-NETO, B. 2000. Comparing random data allocation and data striping in multimedia servers. In Proceedings of the 2000 SIGMETRICS Conference on Measurement and Modeling of Computer Systems, ACM Press, Santa Clara, CA, 44–55.
+
+- SCHMUCK, F., AND HASKIN, R. 2002. GPFS: A shareddisk file system for large computing clusters. In Proceedings of the 2002 Conference on File and Storage Technologies (FAST), USENIX, 231–244.
+
+- TANG, H., GULBEDEN, A., ZHOU, J., STRATHEARN, W., YANG, T., AND CHU, L. 2004. A self-organizing storage cluster for parallel data-intensive applications. In Proceedings of the 2004 ACM/IEEE Conference on Supercomputing (SC ’04).
+
+- XIN, Q., MILLER, E. L., AND SCHWARZ, T. J. E. 2004. Evaluation of distributed recovery in large-scale storage systems. In Proceedings of the 13th IEEE International Symposium on High Performance Distributed Computing (HPDC), 172–181.
+
+</div>
