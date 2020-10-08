@@ -18,6 +18,12 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Diego Ongaro and John Ousterhout
+
+Stanford University
+
 ## 摘要
 
 Raft是一个用来管理多副本日志（replicated log）的共识算法。其作用与（multi-）Paxos相同、效率与Paxos想用，但结构与Paxos不同；这让Raft比Paxos更容易理解，且Raft为构建实用的系统提供了更扎实的基础。为了提高可理解性，Raft将共识的关键元素分离为：领导选举、日志复制、和安全性；且其增强了连贯性（coherency）<sup>译注1</sup>，以减少必须考虑的状态数。用户学习结果表明，对于学生来说，Raft比Paxos更容易学习。Raft还包括一个用于变更集群成员的新机制，其使用重叠的大多数来保证安全性。

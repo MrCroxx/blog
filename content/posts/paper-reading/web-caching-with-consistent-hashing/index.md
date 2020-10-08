@@ -17,7 +17,17 @@ resources:
 
 <!--more-->
 
-> 注1：这是一篇1999年的论文，其中的一些问题在当今条件下已经不是问题。但是还是可以通过本文了解当时的困境与解决方案。
+{{< admonition >}}
+这是一篇1999年的论文，其中的一些问题在当今条件下已经不是问题。但是还是可以通过本文了解当时的困境与解决方案。
+{{< /admonition >}}
+
+## 作者
+
+David Karger 1, Alex Sherman Ł,1, Andy Berkheimer, Bill Bogstad, Rizwan Dhanidina,
+
+Ken Iwamoto, Brian Kim, Luke Matkins, Yoav Yerushalmi
+
+MIT Laboratory for Computer Science, 545 Technology Square, Room 321, Cambridge, MA 02139, USA
 
 ## 摘要
 
