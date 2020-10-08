@@ -18,6 +18,12 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Tushar Chandra, Robert Griesemer, and Joshua Redstone
+
+Google Inc.
+
 ## 摘要
 
 我们描述了我们在使用Paxos共识算法构建一个容错的数据库的经历。尽管在该领域已经有文献，但是事实上构建这样一个数据库并非易事。我们描述了选取算法和遇到的工程问题，及我们对这些问题的解决方案。我们的度量表明我们构建了一个很有竞争力的系统。

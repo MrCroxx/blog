@@ -18,6 +18,14 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Jeffrey Dean and Sanjay Ghemawat
+
+jeff@google.com, sanjay@google.com
+
+Google, Inc
+
 ## 摘要
 
 MapReduce是一个用来处理和生成大型数据集的编程模型和相关实现。用户需要指定*map*函数和*reduce*函数。*map*函数处理键值对并生成一组由键值对组成的中间值，*reduce*函数将所有键相同的中间值合并。就像本文中展示的那样，现实世界中的很多任务都可以通过这个模型表示。

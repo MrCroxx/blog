@@ -18,6 +18,17 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Fay Chang, Jeffrey Dean, Sanjay Ghemawat, Wilson C. Hsieh, Deborah A. Wallach
+
+Mike Burrows, Tushar Chandra, Andrew Fikes, Robert E. Gruber
+
+{fay,jeff,sanjay,wilsonh,kerr,m3b,tushar,fikes,gruber}@google.com
+
+Google, Inc.
+
+
 ## 摘要
 
 Bigtable是一个为管理大规模可伸缩的结构化数据而设计的的分布式存储系统，它可以跨上千台商用服务器管理PB级的数据。Google中很多项目将数据存储在Bigtable中，包括web索引、Google Earth和Google Finance。这些应用程序对Bigtable提出了非常不同的需求，这些不同包括数据大小不同（从URL到web页面再到卫星图像）和延迟要求不同（从后端批处理任务到实时数据服务）。尽管需求是多变的，Bigtable还是成功地为Google的所有这些产品提供了灵活的、高性能的解决方案。在本文中，我们描述了Bigtable提供的允许客户端动态控制数据布局和格式的简单数据模型，以及Bigtable的设计与实现。

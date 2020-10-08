@@ -18,6 +18,10 @@ resources:
 
 <!--more-->
 
+## 作者
+
+Leslie Lamport
+
 ## 摘要
 
 Paxos算法，用直白的话描述的时候，真的很简单。
