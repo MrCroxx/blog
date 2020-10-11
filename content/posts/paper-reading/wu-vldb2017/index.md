@@ -1,7 +1,7 @@
 ---
-title: "《An Empirical Evaluation of In-Memory Multi-Version Concurrency Control》论文翻译[持续更新中]"
+title: "《An Empirical Evaluation of In-Memory Multi-Version Concurrency Control》论文翻译"
 date: 2020-10-08T16:02:56+08:00
-lastmod: 2020-10-08T16:02:56+08:00
+lastmod: 2020-10-12T14:36:33+08:00
 draft: false
 keywords: []
 description: ""
@@ -59,7 +59,7 @@ Andrew Pavlo Carnegie Mellon University pavlo@cs.cmu.edu
 
 ![表1 对商业和研究用MVCC DBMS中的设计决策的总结。每个系统的“Year”（Oracle除外）是它首次发布或宣布的时间。对于Oracle，“Year”是其首次包含了MVCC的年份。除了Oracle、MySQL和Postgres外，所有的系统都宣称它们的数据库的主要存储位置是内存。](table-1.png "表1 对商业和研究用MVCC DBMS中的设计决策的总结。每个系统的“Year”（Oracle除外）是它首次发布或宣布的时间。对于Oracle，“Year”是其首次包含了MVCC的年份。除了Oracle、MySQL和Postgres外，所有的系统都宣称它们的数据库的主要存储位置是内存。")
 
-在接下来的章节中，我们将讨论这些设计决策实现上的问题和性能权衡点。接着我们在[第7章](#7-)对它们进行了全面的评估。我们注意到，本文中仅考虑了串行事务执行。尽管日志和恢复是DBMS架构中很重要方面，但是我们的研究中并没有包括它们，因为它们与单版本系统中的没什么不同，且内存式DBMS日志已经在别处被研究过了<sup>[39, 49]</sup>。
+在接下来的章节中，我们将讨论这些设计决策实现上的问题和性能权衡点。接着我们在[第7章](#7-实验分析)对它们进行了全面的评估。我们注意到，本文中仅考虑了串行事务执行。尽管日志和恢复是DBMS架构中很重要方面，但是我们的研究中并没有包括它们，因为它们与单版本系统中的没什么不同，且内存式DBMS日志已经在别处被研究过了<sup>[39, 49]</sup>。
 
 ### 2.2 DBMS元数据
 
@@ -79,7 +79,7 @@ Andrew Pavlo Carnegie Mellon University pavlo@cs.cmu.edu
 
 ### 3.1 时间戳排序（Timestamp Ordering）——MVTO
 
-1979年的MVTO算法被认为是最初的并发控制协议<sup>[38, 39]</sup>。该方法的核心在于使用事务的标识符（$ T_{id} $）来预计算它们的串行顺序。除了[章节2.2](#22-)中描述的字段以外，其版本头中还包括最后一次读取了它的事务的标识符（`read-ts`）。当事务视图读取或更新一个被其它事务持有其写入锁的版本时，DBMS会打断该事务。
+1979年的MVTO算法被认为是最初的并发控制协议<sup>[38, 39]</sup>。该方法的核心在于使用事务的标识符（$ T_{id} $）来预计算它们的串行顺序。除了[章节2.2](#22-dbms元数据)中描述的字段以外，其版本头中还包括最后一次读取了它的事务的标识符（`read-ts`）。当事务视图读取或更新一个被其它事务持有其写入锁的版本时，DBMS会打断该事务。
 
 当事务$T$在逻辑元组$A$上调用了一个读操作时，DBMS会搜索一个能使该$ T_{id} $在其`begin-ts`和`end-ts`字段的范围间的物理版本。如**图2a**所示，如果版本$A_x$的写入锁没有被另一个活动的事务持有（即，`txn-id`的值为0或等于$ T_{id} $），那么$T$会被允许读取该版本，因为MVTO永远不会允许一个事务读取未提交的版本。一旦事务读取了$A_x$，如果$A_x$的`read-ts`字段的当前值小于$ T_{id} $，那么DBMS会将其置为$ T_{id} $。否则，该事务将读取一个较旧的版本，且不会更新该字段。
 
@@ -135,7 +135,7 @@ MVOCC协议将事务分为了3个阶段。当事务开始时，它处于*读阶�
 
 **从老到新（Oldest-to-Newest，O2N）：** 在这种顺序下，链头是元组现存的最老的版本（如**图3a**所示）。这一版本可能对任何活动的事务都不可见，但是DBMS还没有回收它。O2N的优势在于，在元组被修改时，DBMS不需要更新索引使其指向元组的新版本。但是DBMS在查询处理期间可能要遍历很长的版本链来找到最新版本。因为这一操作是pointer-chasing（译注：指遍历由指针链接在一起的数据结构，因为下一个元组总是不在缓存中，因此在遍历过程中会不断引起内存操作）的且这一操作会因读取了不需要的版本而污染CPU缓存，所以这一操作很慢。因此，通过O2N实现良好的性能高度依赖系统对旧版本剪枝的能力。
 
-**从新到老（Newest-to-Oldest，N2O）：** 这种顺序将元组最新的版本作为版本链的链头保存（如**图3b**所示）。因为大部分事务都访问元组的最新版本，所以DBMS不必遍历整个链。然而，其缺点是在于，每当元组被修改后链头都会变化。随后DBMS会更新该表的所有索引（索引的前项（primary）和后项（secondary）都要更新）以指向新版本。正如我们在[章节6.1](#61-)中讨论的那样，可以通过一个间接层来避免这一个问题，该层提供了一个将元组的最新版本映射到物理地址的位置。在这种配置下，索引指向元组的映射条目而不是它们的物理位置。这在有很多后项索引的表中表现良好，但是增加了额外的存储开销。
+**从新到老（Newest-to-Oldest，N2O）：** 这种顺序将元组最新的版本作为版本链的链头保存（如**图3b**所示）。因为大部分事务都访问元组的最新版本，所以DBMS不必遍历整个链。然而，其缺点是在于，每当元组被修改后链头都会变化。随后DBMS会更新该表的所有索引（索引的前项（primary）和后项（secondary）都要更新）以指向新版本。正如我们在[章节6.1](#61-逻辑指针)中讨论的那样，可以通过一个间接层来避免这一个问题，该层提供了一个将元组的最新版本映射到物理地址的位置。在这种配置下，索引指向元组的映射条目而不是它们的物理位置。这在有很多后项索引的表中表现良好，但是增加了额外的存储开销。
 
 仅追加存储的另一个问题是，如何处理非内联（non-inline）属性（例如BLOB）。考虑一个有两个属性的表（一个是整型，一个是BLOB）。在仅追加策略下，当一个事务更新该表的一个元组时，DBMS会创建该BLOB属性的一份拷贝（即使事务么有修改它），且随后新版本会指向这份拷贝。因为这创建了冗余的拷贝，所以这一操作很浪费。为了避免这一个问题，一种优化是让相同元组的多个物理版本指向同一个非内联数据。DBMS维护该数据的引用计数来确保其值仅在它们不再被任意版本引用时才会被删除。
 
@@ -181,7 +181,7 @@ MVCC中的GC有两种实现，它们的不同之处在于DBMS如何查找过期�
 
 ### 5.2 事务级垃圾回收
 
-在这种GC机制下，DBMS会以事务级的粒度回收存储空间。这是用于所有的版本存储策略。当事务生成的版本对任何活动中的事务都不可见时，DBMS会认为该事务过期。在一个epoch结束后，所有被属于该epoch的事务生成的版本可以被安全地移除。这一策略比元组级GC策略更简单，且能与本地事务存储优化（transcation-local storage optimization）配合的更好（[章节4.4](#44-)），因为DBMS会立刻回收事务的存储空间。然而，这一方法的缺点是，DNMS需要为每个epoch追踪事务的读/写集合，而不是仅使用epoch的成员计数器。
+在这种GC机制下，DBMS会以事务级的粒度回收存储空间。这是用于所有的版本存储策略。当事务生成的版本对任何活动中的事务都不可见时，DBMS会认为该事务过期。在一个epoch结束后，所有被属于该epoch的事务生成的版本可以被安全地移除。这一策略比元组级GC策略更简单，且能与本地事务存储优化（transcation-local storage optimization）配合的更好（[章节4.4](#44-探讨)），因为DBMS会立刻回收事务的存储空间。然而，这一方法的缺点是，DNMS需要为每个epoch追踪事务的读/写集合，而不是仅使用epoch的成员计数器。
 
 ![图4 垃圾回收——检查数据库中过期版本方式的总览元组级GC死奥妙表的版本链，而事务级GC使用事务的写集合。](figure-4.png "图4 垃圾回收——检查数据库中过期版本方式的总览元组级GC死奥妙表的版本链，而事务级GC使用事务的写集合。")
 
@@ -219,11 +219,11 @@ MVCC中的GC有两种实现，它们的不同之处在于DBMS如何查找过期�
 
 ## 7. 实验分析
 
-我们现在将给出对本文中我们讨论的事务管理设计决策的分析。我们付出了很多努力来在Peloton DBMS<sup>[5]</sup>中实现了每种设计的最先进的版本。Peloton将元组保存在基于行（row-oriented）的无序内存堆中。它使用了libcuckoo<sup>[19]</sup>哈希表作为它的内部数据结构，并使用Bw-Tree<sup>[32]</sup>作为数据库索引。我们还使用了无闩变成技术<sup>[15]</sup>来优化Peloton的性能。我们将所有的事务作为在SERIALIZABLE隔离级别下的存储过程执行。Peloton使用了基于epoch的内存管理（见[第五章](#5-)），我们将它的epoch配置为40ms<sup>[44]</sup>。
+我们现在将给出对本文中我们讨论的事务管理设计决策的分析。我们付出了很多努力来在Peloton DBMS<sup>[5]</sup>中实现了每种设计的最先进的版本。Peloton将元组保存在基于行（row-oriented）的无序内存堆中。它使用了libcuckoo<sup>[19]</sup>哈希表作为它的内部数据结构，并使用Bw-Tree<sup>[32]</sup>作为数据库索引。我们还使用了无闩变成技术<sup>[15]</sup>来优化Peloton的性能。我们将所有的事务作为在SERIALIZABLE隔离级别下的存储过程执行。Peloton使用了基于epoch的内存管理（见[第五章](#5-垃圾回收)），我们将它的epoch配置为40ms<sup>[44]</sup>。
 
 我们将Peloton部署在了4插槽的Intel Xeon E7-4820服务器上，它有128GB的DRAM，运行64位Ubuntu 14.04操作系统。每个插槽上有10个1.9GHz的核心和25MB的L3缓存。
 
-我们首先比较了并发控制协议。然后选择了总体上最佳的协议，用它来评估版本存储、垃圾回收、和索引管理策略。对于每个实验，我们执行了60秒的负载让DBMS热身，然后再执行120秒的负载来测量吞吐量。我们为每个实验执行5次，并汇报平均执行时间。我们在[第八章](#8-)中总结了我们的发现。
+我们首先比较了并发控制协议。然后选择了总体上最佳的协议，用它来评估版本存储、垃圾回收、和索引管理策略。对于每个实验，我们执行了60秒的负载让DBMS热身，然后再执行120秒的负载来测量吞吐量。我们为每个实验执行5次，并汇报平均执行时间。我们在[第八章](#8-探讨)中总结了我们的发现。
 
 ### 7.1 Benchmarks
 
@@ -235,7 +235,7 @@ MVCC中的GC有两种实现，它们的不同之处在于DBMS如何查找过期�
 
 ### 7.2 并发控制协议
 
-首先我们比较使用了[第三章](#3-)中的并发控制协议的DBMS的性能。对于串行验证者策略，我们在快照隔离上实现了SSN（SI+SSN）<sup>[45]</sup>。我们让DBMS固定使用（1）N2O顺序的仅追加存储（2）事务级GC（3）逻辑映射索引指针。
+首先我们比较使用了[第三章](#3-并发控制协议)中的并发控制协议的DBMS的性能。对于串行验证者策略，我们在快照隔离上实现了SSN（SI+SSN）<sup>[45]</sup>。我们让DBMS固定使用（1）N2O顺序的仅追加存储（2）事务级GC（3）逻辑映射索引指针。
 
 首先，我们的实验使用YCSB负载来评估协议。我们首先调研了阻碍这些协议扩展的瓶颈。然后通过不同的负载争用比较了它们的性能。之后，我们展示了每种协议在处理既包括读写事务又包括只读事务的异构负载时的表现如何。最后，我们使用了TPC-C benchmark来每种协议在真实负载下的表现。
 
@@ -279,15 +279,15 @@ DBMS使用了20个线程来执行读写事务，我们使用不同的线程数�
 
 **图11**表明，为没被修改的非内联属性维护引用计数器总是会有更好的性能。在读取敏感型负载下，当有这些计数器的非内联属性的个数增加到50个的时候，DBMS的吞吐量比常规的“完整元组拷贝（full-tuple-copy）”策略高出了多达40%。这是因为DBMS避免了更新操作中的冗余数据拷贝。这一差异在更新敏感型负载下更为突出，其性能差异超过了100%，如**图11b**所示。
 
-**版本链顺序（Version Chain Ordering）：** 第二个实验测量了在[章节4.1](#41-)描述的N2O和O2N的版本链顺序的性能。我们使用了事务级的后台清理GC，并在YCSB混合负载下比较了不同的顺序。我们将事务的长度设为10。我们固定了DBMS的线程数为40，并使用了不同的负载争用等级。
+**版本链顺序（Version Chain Ordering）：** 第二个实验测量了在[章节4.1](#41-仅追加存储append-only-storage)描述的N2O和O2N的版本链顺序的性能。我们使用了事务级的后台清理GC，并在YCSB混合负载下比较了不同的顺序。我们将事务的长度设为10。我们固定了DBMS的线程数为40，并使用了不同的负载争用等级。
 
 ![图12 版本链顺序——对仅追加存储策略下不同版本链顺序的评估，其使用了YCSB负载，使用了40个DBMS线程，并使用不同的争用等级。](figure-12.png "图12 版本链顺序——对仅追加存储策略下不同版本链顺序的评估，其使用了YCSB负载，使用了40个DBMS线程，并使用不同的争用等级。")
 
 如**图12**所示，在两种负载下，N2O顺序的性能总是比O2N的好。尽管DBMS会为每个新版本更新索引的指针，但是这与O2N遍历更长的链的开销相比相形见绌。版本链长度的增加意味着事务需要执行更长时间，从而增大了一个事务与另一个事务冲突的可能性。这种现象在最高的争用级别下（$ \theta = 0.9 $）更为明显，其中N2O顺序的性能达到了2.4~3.4倍。
 
-**事务足迹（Transaction Footprint）：** 在下一项存储策略的对比中，我们在元组中使用了不同的属性数。我们在40个线程上使用了低争用的（$ \theta = 0.2 $）的YCSB负载，其中每个事务执行10个操作。每个读取或更新操作仅访问或修改元组中的一个属性。我们使用了N2O顺序的仅追加存储。对于所有的版本存储策略，我们都分别分配了单独的内存空间，以减少内存分配的开销。
+**事务占用（Transaction Footprint）：** 在下一项存储策略的对比中，我们在元组中使用了不同的属性数。我们在40个线程上使用了低争用的（$ \theta = 0.2 $）的YCSB负载，其中每个事务执行10个操作。每个读取或更新操作仅访问或修改元组中的一个属性。我们使用了N2O顺序的仅追加存储。对于所有的版本存储策略，我们都分别分配了单独的内存空间，以减少内存分配的开销。
 
-![图13 事务足迹——对在YCSB负载下（$ \theta = 0.2 $）的不同版本存储策略的评估，其使用了40个DBMS线程，每个事务中更新操作的比例不同。](figure-13.png "图13 事务足迹——对在YCSB负载下（$ \theta = 0.2 $）的不同版本存储策略的评估，其使用了40个DBMS线程，每个事务中更新操作的比例不同。")
+![图13 事务占用——对在YCSB负载下（$ \theta = 0.2 $）的不同版本存储策略的评估，其使用了40个DBMS线程，每个事务中更新操作的比例不同。](figure-13.png "图13 事务占用——对在YCSB负载下（$ \theta = 0.2 $）的不同版本存储策略的评估，其使用了40个DBMS线程，每个事务中更新操作的比例不同。")
 
 如**图13a**所示，在表有10个属性时，仅追加策略和增量策略的性能相似。同样，仅追加策略和时间旅行策略的吞吐量几乎相同。**图13b**的结果表明，当表有100个属性时，查分策略的性能达到了仅追加策略和时间旅行策略的2倍，因为它使用的内存更少。
 
@@ -315,7 +315,7 @@ DBMS使用了20个线程来执行读写事务，我们使用不同的线程数�
 
 ### 7.4 垃圾回收
 
-现在我们将对[第五章](#5-)中介绍的GC机制进行评估。在这些实验中，我们使用了MVTO并发控制协议。首先我们比较了元组级的后台清理和协同清理。然后我们将元组级的方法与事务级的方法进行了对比。
+现在我们将对[第五章](#5-垃圾回收)中介绍的GC机制进行评估。在这些实验中，我们使用了MVTO并发控制协议。首先我们比较了元组级的后台清理和协同清理。然后我们将元组级的方法与事务级的方法进行了对比。
 
 **元组级比较（Tuple-level Comparison）：** 我们使用了低争用因子和高争用因子的更新敏感型负载（每个事务10个操作）。DBMS使用了O2N顺序的仅追加存储，因为COOP仅适用于这一顺序。在我们的配置中，DBMS使用40个线程处理事务，使用1个线程做GC。我们给出了DBMS的吞吐量随时间的变化和系统中新分配的内存总量。为了更好地理解GC的影响，我们还在禁用GC的情况下执行了负载。
 
@@ -323,7 +323,7 @@ DBMS使用了20个线程来执行读写事务，我们使用不同的线程数�
 
 ![图19 元组级对比（内存）——在YCSB负载下DBMS为每个事务分配的内存总量（越低越好）随时间变化，其使用了40个线程与元组级GC机制。](figure-19.png "图19 元组级对比（内存）——在YCSB负载下DBMS为每个事务分配的内存总量（越低越好）随时间变化，其使用了40个线程与元组级GC机制。")
 
-**图18**中的结果显示，在读取敏感负载下，COOP的吞吐量比VAC高出了45%。在**图19**中，我们可以看到，COOP中每个事务的内存足迹比VAC少30%~60%。与VAC相比，COOP的性能更加稳定，因为它可以将GC的开销分摊到多个线程上，且内存回收更快。在两种负载下，我们都能看到，当GC被禁用时，性能会随着时间下降，因为DBMS需要遍历更长的版本链以检索版本。另外，因为系统永远不会回收内存，它需要为每个新版本分配新内存。
+**图18**中的结果显示，在读取敏感负载下，COOP的吞吐量比VAC高出了45%。在**图19**中，我们可以看到，COOP中每个事务的内存占用比VAC少30%~60%。与VAC相比，COOP的性能更加稳定，因为它可以将GC的开销分摊到多个线程上，且内存回收更快。在两种负载下，我们都能看到，当GC被禁用时，性能会随着时间下降，因为DBMS需要遍历更长的版本链以检索版本。另外，因为系统永远不会回收内存，它需要为每个新版本分配新内存。
 
 **元组级vs事务级（Tuple-level vs. Transaction-level）：** 下面，我们评估在执行两种YCSB负载（高争用因子）的混合时，使用元组级和事务级机制的DBMS的性能。在我们的配置下，DBNS使用N2O顺序的仅追加存储。我们将工作线程数设置为40，并使用1个线程来做后台清理（VAC）。我们还在使用40个线程但没有任何GC的配置下执行了相同的负载。
 
@@ -335,7 +335,7 @@ DBMS使用了20个线程来执行读写事务，我们使用不同的线程数�
 
 ### 7.5 索引管理
 
-最后，我们比较了[第六章](#6-)中描述的索引指针策略。影响使用这些策略的DBMS的性能的主要方面是辅助所以。每当创建新版本时，DBMS就要更新指针。因此，我们在更新敏感型YCSB负载下，评估了这些策略随着数据库中辅助索引数增加时的性能表现。在所有试验的配置下，DBMS都使用了MVTO并发控制协议、N2O顺序的仅追加存储、和事务级COOP GC。我们使用仅追加存储的原因在于它是唯一支持物理索引指针的策略。对于逻辑指针，我们将每个索引键映射到了版本链链头。
+最后，我们比较了[第六章](#6-索引管理)中描述的索引指针策略。影响使用这些策略的DBMS的性能的主要方面是辅助所以。每当创建新版本时，DBMS就要更新指针。因此，我们在更新敏感型YCSB负载下，评估了这些策略随着数据库中辅助索引数增加时的性能表现。在所有试验的配置下，DBMS都使用了MVTO并发控制协议、N2O顺序的仅追加存储、和事务级COOP GC。我们使用仅追加存储的原因在于它是唯一支持物理索引指针的策略。对于逻辑指针，我们将每个索引键映射到了版本链链头。
 
 ![图22 索引管理——在不同辅助索引数下事务达到的吞吐量。](figure-22.png "图22 索引管理——在不同辅助索引数下事务达到的吞吐量。")
 
@@ -347,11 +347,11 @@ DBMS使用了20个线程来执行读写事务，我们使用不同的线程数�
 
 我们在对MVCC DBMS中的这些事务管理设计策略的分析与实验中得出了4个发现。最重要的是，版本存储策略是多核环境下内存式MVCC DBMS伸缩性最重要的组件之一。这违背了传统的数据库研究中的常识，传统的数据库研究通常侧重于并发控制协议的优化<sup>[48]</sup>。我们观察到，仅追加策略和时间旅行策略的性能受下层内存分配策略的效率影响；主动为每个核划分内存空间可以解决这一问题。无论使用怎样的内存分配策略，增量存储策略都能保持相对较高的性能，特别是当只修改表中保存的属性的子集的时候。但是该策略表扫描性能很低，且可能不适合读取量很大的分析负载。
 
-我们还发现，使用适合负载的并发控制协议能够提高性能，特别是在高争用的负载下。[章节7.2](#72-)的结果表明，协议的优化可能对这些负载下的性能有负面影响。总之，我们发现MVTO在各种负载下的表现都很好。我们在**表1**中列出的系统都没有使用这一协议。
+我们还发现，使用适合负载的并发控制协议能够提高性能，特别是在高争用的负载下。[章节7.2](#72-并发控制协议)的结果表明，协议的优化可能对这些负载下的性能有负面影响。总之，我们发现MVTO在各种负载下的表现都很好。我们在**表1**中列出的系统都没有使用这一协议。
 
-我们还观察到MVCC DBMS的性能与GC的实现密切相关。特别是，我们发现事务级GC能提供最好的性能和最少的内存足迹。这是因为它回收过期元组版本的同步开销比其它方法小。我们注意到，GC过程可能导致系统的吞吐量和内存足迹波动。
+我们还观察到MVCC DBMS的性能与GC的实现密切相关。特别是，我们发现事务级GC能提供最好的性能和最少的内存占用。这是因为它回收过期元组版本的同步开销比其它方法小。我们注意到，GC过程可能导致系统的吞吐量和内存占用波动。
 
-最后，我们发现，对于构建了许多辅助索引的数据库来说，索引管理策略也会影响DBMS的性能。[章节7.5](#75-)的结果显示，逻辑指针策略总能达到更高的吞吐量，特别是当处理更新敏感型负载时。这证实了工业界中对这一问题的报告<sup>[25]</sup>。
+最后，我们发现，对于构建了许多辅助索引的数据库来说，索引管理策略也会影响DBMS的性能。[章节7.5](#75-索引管理)的结果显示，逻辑指针策略总能达到更高的吞吐量，特别是当处理更新敏感型负载时。这证实了工业界中对这一问题的报告<sup>[25]</sup>。
 
 为了验证这些发现，我摩恩在Peloton中做了最后一个实验，我们配置Peloton使用**表1**中列出的MVCC配置。我们执行了TPC-C负载，并使用一个线程反复执行StockScan查询。我们测量了DBMS的吞吐量和StockScan查询的平均延迟。虽然在真实地DBMS中有我们没比较的其它因素（例如，数据结果、存储架构、查询编译等），但这仍是对它们的能力的很好的近似。
 
@@ -369,4 +369,118 @@ DBMS使用了20个线程来执行读写事务，我们使用不同的线程数�
 
 **并发控制协议：** 已有的一些工作提出了优化内存式事务处理的新技术<sup>[46, 47]</sup>。Larson等人<sup>[27]</sup>在Microsoft Hekaton DBMS的早期版本中比较了悲观协议（MV2PL）和乐观协议（MVOCC）<sup>[16]</sup>。Lomet等人<sup>[31]</sup>提出了一种使用时间戳范围解决事务间冲突的策略，Faleiro等人<sup>[18]</sup>等人分离了DBMS事务处理中的MVCC并发控制协议和版本管理。考虑到确保MVCC串行性的挑战，许多DBMS转而支持被称为快照隔离<sup>[8]</sup>的更弱的隔离级别，它不会排除写入倾斜异常（write-skew anomaly）。串行快照隔离（serializable snapshot isolation，SSI）通过消除快照隔离中可能发生的异常确保了串行性<sup>[12, 20]</sup>。Kim等人<sup>[24]</sup>使用SSN来在异构负载上扩展MVCC。我们在本文中的研究比它的范围更广。
 
-**版本存储：** 
+**版本存储：** MVCC DBMS中的另一个重要的设计选择是版本存储策略。Herman等人<sup>[23]</sup>提出了一种不同的用于事务管理的结构，以在不妥协读取性能的同时实现高写入吞吐量。Neumann等人<sup>[36]</sup>通过本地事务存储优化减少了同步开销，提高了MVCC DBMS的性能。这些策略与传统的仅追加版本存储策略不同，传统的策略在内存为主的DBMS中有更高的内存分配开销。Arulraj等人<sup>[7]</sup>研究了在运行异构负载时，物理设计对混合DBMS性能的影响。
+
+**垃圾回收：** 大多数DBMS都适用于元组级别的后台清理垃圾回收策略。Lee等人<sup>[29]</sup>评估了现代DBMS中使用的一系列不同的垃圾回收策略。他们提出了一种新的混合策略，减少了SAP HANA中的内存占用。Silo的基于epoch的内存管理方法让DBMS能够扩展到更多线程数量上<sup>[44]</sup>。这种方法仅在一个epoch（和之前的epoch）不再包含活动的事务后回收版本。
+
+**索引管理：** 最新，有一些新的索引数据结构被提出，以支持可伸缩的内存为主的DBMS。Lomet等人<sup>[32]</sup>等人引入了一种无闩保序索引，称为Bw-Tree，目前在Microsoft的一些产品中使用。Leis等人<sup>[30]</sup>和Mao等人<sup>[34]</sup>分别提出了ART和Masstree，它们是基于Tries的可伸缩索引结构。本工作没有研究不同索引结构的性能，而是着眼于不同的辅助索引管理策略如何影响MVCC DBMS的性能。
+
+## 10. 总结
+
+我们发表了对内存式MVCC的事务管理设计决策的评估。我们描述了每种设计决策的最先进的实现，并展示了已有的系统是如何使用它们的。然后我们在Peloton DBMS中实现了它们，并使用OLTP负载来突出显示它们的权衡点。我们还展示了阻碍DBMS支持更多CPU核心数和更复杂的负载的问题。
+
+致谢： This work was supported (in part) by the National Science Foundation (CCF-1438955) and the Samsung Fellowship Program. We also thank Tianzheng Wang for his feedback.
+
+## 参考文献
+
+<div class="reference">
+
+[1] MemSQL. http://www.memsql.com.
+
+[2] MySQL. http://www.mysql.com.
+
+[3] NuoDB. http://www.nuodb.com.
+
+[4] Oracle Timeline. http://oracle.com.edgesuite.net/timeline/oracle/.
+
+[5] Peloton. http://pelotondb.org.
+
+[6] PostgreSQL. http://www.postgresql.org.
+
+[7] J. Arulraj and et al. Bridging the Archipelago between Row-Stores and Column-Stores for Hybrid Workloads. SIGMOD, 2016.
+
+[8] H. Berenson and et al. A Critique of ANSI SQL Isolation Levels. SIGMOD’95.
+
+[9] P. A. Bernstein and N. Goodman. Concurrency Control in Distributed Database Systems. CSUR, 13(2), 1981.
+
+[10] P. A. Bernstein, C. W. Reid, and S. Das. Hyder-A Transactional Record Manager for Shared Flash. In CIDR, 2011.
+
+[11] P. A. Bernstein and et al. Concurrency Control and Recovery in Database Systems. 1987.
+
+[12] M. J. Cahill, U. Röhm, and A. D. Fekete. Serializable Isolation for Snapshot Databases. SIGMOD, 2008.
+
+[13] M. J. Carey and W. A. Muhanna. The Performance of Multiversion Concurrency Control Algorithms. TOCS, 4(4), 1986.
+
+[14] B. F. Cooper, A. Silberstein, E. Tam, R. Ramakrishnan, and R. Sears. Benchmarking cloud serving systems with YCSB. In SoCC, 2010.
+
+[15] T. David, R. Guerraoui, and V. Trigonakis. Everything You Always Wanted To Know About Synchronization But Were Afraid To Ask. In SOSP, 2013.
+
+[16] C. Diaconu and et al. Hekaton: SQL Server’s Memory-Optimized OLTP Engine. SIGMOD, 2013.
+
+[17] K. P. Eswaran and et al. The Notions of Consistency and Predicate Locks in a Database System. Communications of the ACM, 19(11), 1976.
+
+[18] J. M. Faleiro and D. J. Abadi. Rethinking Serializable Multiversion Concurrency Control. VLDB, 2014.
+
+[19] B. Fan, D. G. Andersen, and M. Kaminsky. MemC3: Compact and Concurrent MemCache with Dumber Caching and Smarter Hashing. In NSDI, 2013.
+
+[20] A. Fekete, D. Liarokapis, E. O’Neil, P. O’Neil, and D. Shasha. Making Snapshot Isolation Serializable. TODS, 30(2), 2005.
+
+[21] M. Grund, J. Krüger, H. Plattner, A. Zeier, P. Cudre-Mauroux, and S. Madden. HYRISE: A Main Memory Hybrid Storage Engine. VLDB, 2010.
+
+[22] A. Harrison. InterBase’s Beginnings. http://www.firebirdsql.org/en/annharrison-s-reminiscences-on-interbase-s-beginnings/.
+
+[23] S. Héman, M. Zukowski, N. J. Nes, L. Sidirourgos, and P. Boncz. Positional Update Handling in Column Stores. SIGMOD, 2010.
+
+[24] K. Kim, T. Wang, J. Ryan, and I. Pandis. ERMIA: Fast Memory-Optimized Database System for Heterogeneous Workloads. SIGMOD, 2016.
+
+[25] E. Klitzke. Why uber engineering switched from postgres to mysql. https://eng.uber.com/mysql-migration/, July 2016.
+
+[26] H.-T. Kung and J. T. Robinson. On Optimistic Methods for Concurrency Control. TODS, 6(2), 1981.
+
+[27] P.-Å. Larson and et al. High-Performance Concurrency Control Mechanisms for Main-Memory Databases. VLDB, 2011.
+
+[28] J. Lee, M. Muehle, N. May, F. Faerber, V. Sikka, H. Plattner, J. Krueger, and M. Grund. High-Performance Transaction Processing in SAP HANA. IEEE Data Eng. Bull., 36(2), 2013.
+
+[29] J. Lee and et al. Hybrid Garbage Collection for Multi-Version Concurrency Control in SAP HANA. SIGMOD, 2016.
+
+[30] V. Leis, A. Kemper, and T. Neumann. The Adaptive Radix Tree: ARTful Indexing for Main-Memory Databases. ICDE, 2013.
+
+[31] D. Lomet, A. Fekete, R. Wang, and P. Ward. Multi-Version Concurrency via Timestamp Range Conflict Management. ICDE, 2012.
+
+[32] D. B. Lomet, S. Sengupta, and J. J. Levandoski. The Bw-Tree: A B-tree for New Hardware Platforms. ICDE, 2013.
+
+[33] N. Malviya, A. Weisberg, S. Madden, and M. Stonebraker. Rethinking Main memory OLTP Recovery. ICDE, 2014.
+
+[34] Y. Mao, E. Kohler, and R. T. Morris. Cache Craftiness for Fast Multicore Key-Value Storage. In EuroSys, 2012.
+
+[35] C. Mohan. ARIES/KVL: A Key-Value Locking Method for Concurrency Control of Multiaction Transactions Operating on B-Tree Indexes. VLDB’90.
+
+[36] T. Neumann, T. Mühlbauer, and A. Kemper. Fast Serializable Multi-Version Concurrency Control for Main-Memory Database Systems. SIGMOD, 2015.
+
+[37] A. Pavlo and M. Aslett. What’s Really New with NewSQL? SIGMOD Rec., 45(2):45–55, June 2016.
+
+[38] D. P. Reed. Naming and Synchronization in a Decentralized Computer System. Ph.D. dissertation, 1978.
+
+[39] D. P. Reed. Implementing Atomic Actions on Decentralized Data. TOCS, 1983.
+
+[40] V. Sikka and et al. Efficient Transaction Processing in SAP HANA Database: The End of a Column Store Myth. SIGMOD, 2012.
+
+[41] M. Stonebraker and L. A. Rowe. The Design of POSTGRES. SIGMOD, 1986.
+
+[42] M. Stonebraker and et al. The End of an Architectural Era: (It’s Time for a Complete Rewrite). VLDB, 2007.
+
+[43] The Transaction Processing Council. TPC-C Benchmark (Revision 5.9.0). http://www.tpc.org/tpcc/spec/tpcc_current.pdf, June 2007.
+
+[44] S. Tu, W. Zheng, E. Kohler, B. Liskov, and S. Madden. Speedy Transactions in Multicore In-Memory Databases. In SOSP, 2013.
+
+[45] T. Wang, R. Johnson, A. Fekete, and I. Pandis. Efficiently Making (Almost) Any Concurrency Control Mechanism Serializable. arXiv:1605.04292, 2016.
+
+[46] Y. Wu, C.-Y. Chan, and K.-L. Tan. Transaction Healing: Scaling Optimistic Concurrency Control on Multicores. In SIGMOD, 2016.
+
+[47] X. Yu, A. Pavlo, D. Sanchez, and S. Devadas. Tictoc: Time Traveling Optimistic Concurrency Control. In SIGMOD, 2016.
+
+[48] X. Yu and et al. Staring Into the Abyss: An Evaluation of Concurrency Control with One Thousand Cores. VLDB, 2014.
+
+[49] W. Zheng, S. Tu, E. Kohler, and B. Liskov. Fast Databases with Fast Durability and Recovery Through Multicore Parallelism. In OSDI, 2014.
+
+</div>
