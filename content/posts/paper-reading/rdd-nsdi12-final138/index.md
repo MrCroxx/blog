@@ -237,7 +237,7 @@ for (i <- 1 to ITERATIONS) {
 
 #### 3.2.2 PageRank
 
-在PageRank<sup>[6]</sup>中有更复杂的数据共享模式。PageRank算法对每个文档，迭代地累加其他链接到它的文档的贡献值，来更新该文档的rank值。在每一轮迭代中，每个文档向与它相邻的文档发送$\frac{r}{n}$的贡献值，其中$r$是它的rank，$n$是与它相邻的文档数。接下来，更新其rank值到$ \alpha / N + ( 1 - \alpha ) \sum c_i$，其中$ \sum c_i $是其收到的贡献值的和，$N$是其收到来自其他文档贡献值的文档数。我们可以在Spark中按如下方式编写PageRank：
+在PageRank<sup>[6]</sup>中有更复杂的数据共享模式。PageRank算法对每个文档，迭代地累加其他链接到它的文档的贡献值，来更新该文档的rank值。在每一轮迭代中，每个文档向与它相邻的文档发送$\frac{r}{n}$的贡献值，其中$r$是它的rank，$n$是与它相邻的文档数。接下来，更新其rank值到$ \alpha / N + ( 1 - \alpha ) \sum c_i$，其中$ \sum c_i $是其收到的贡献值的和，$N$是文档的总数。我们可以在Spark中按如下方式编写PageRank：
 
 ```scala
 
