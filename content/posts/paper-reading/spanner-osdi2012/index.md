@@ -46,7 +46,7 @@ Spanner的主要目标是管理跨数中心的副本数据，但是我们还花�
 
 ## 2. 实现
 
-本章描述了Spanner的结构和Spanner底层实现的原理。然后，我们描述了*directory*抽象，其被用作管理副本和局部性（locality），它还是数据移动的单位。最后，我们描述了我们的数据模型、为什么Spanner看上去像关系型数据库而不是键值存储、怎样能让应用程序控制数据的局部性。
+本章描述了Spanner的结构和Spanner底层实现的原理。然后，我们描述了*目录*（directory）抽象，其被用作管理副本和局部性（locality），它还是数据移动的单位。最后，我们描述了我们的数据模型、为什么Spanner看上去像关系型数据库而不是键值存储、怎样能让应用程序控制数据的局部性。
 
 一份Spanner的部署被称为一个*universe*。因为Spanner在全球范围管理数据，所以只有少数的几个运行中的universe。我们目前运行了一个测试/练习场universe、一个开发/生产universe、和一个仅生产的universe。
 
@@ -76,8 +76,19 @@ Paxos状态机被用来实现一致性的多副本映射的集合。每个副本
 
 ### 2.2 目录和放置
 
-在键值映射集合的上层，Spanner的实现支持一种被称为*directory*的桶（bucket）抽象，它是一系列共享相同的前缀（prefix）的连续的键的集合。（术语*directory*的选择处于历史上的偶然，更好的术语可能是*bucket*。）我们将在[章节2.3](#23-)中解释前缀的来源。对directory的支持让应用程序能够通过谨慎地选取键来控制它们的数据的局部性。
+在键值映射集合的上层，Spanner的实现支持一种被称为*目录*（directory）的桶（bucket）抽象，它是一系列共享相同的前缀（prefix）的连续的键的集合。（术语*目录*的选择处于历史上的偶然，更好的术语可能是*桶*。）我们将在[章节2.3](#23-)中解释前缀的来源。对目录的支持让应用程序能够通过谨慎地选取键来控制它们的数据的局部性。
 
-directory是数据放置（placement）的单位。在同一个directory的所有数据都有相同的副本配置。当数据在Paxos group间移动时，它是以directory为单位移动，如**图3**所示。Spanner可能会为分流Paxos group的负载移动directory、可能为了把经常被一起访问的directory放在同一个group中而移动目录、或为了使directory靠近其访问者而移动directory。directory可以在client操作正在运行时移动。50MB的directory的移动期望在几秒内完成。
+目录是数据放置（placement）的单位。在同一个目录的所有数据都有相同的副本配置。当数据在Paxos group间移动时，它是以目录为单位移动，如**图3**所示。Spanner可能会为分流Paxos group的负载移动目录、可能为了把经常被一起访问的目录放在同一个group中而移动目录、或为了使目录靠近其访问者而移动目录。目录可以在client操作正在运行时移动。50MB的目录的移动期望在几秒内完成。
 
-![图3 directory是Paxos group间数据移动的单位。](figure-3.png "图3 directory是Paxos group间数据移动的单位。")
+![图3 目录是Paxos group间数据移动的单位。](figure-3.png "图3 目录是Paxos group间数据移动的单位。")
+
+一个Paxos group可能包含多个目录，这意味着Spanner的tablet与Bigtable的tablet不同：Spanner的tablet并非必须是行空间上按字典序连续的分区。Spanner的tablet是一个装有多个行空间的分区的容器。因为这样做可以一起定位多个经常被一起访问的目录，所以我们做了这样的决策。
+
+*movedir*是用来在Paxos group间移动目录的后台任务<sup>[14]</sup>。movedir也被用作为Paxos group添加或移除副本<sup>[25]</sup>，因为Spanner目前不支持Paxos内的配置变更。movedir没被实现为单个事务，这样可以避免阻塞大量数据移动时进行的读写。相反，moveidr会在开始移动数据时注册该事件，并在后台移动数据。当它已经移动完所有数据时，它会启动一个事务来原子性地移动剩余的少量数据，并更新两个Paxos group的元数据。
+
+目录也是能由应用程序指定的副本地理属性（geographic-replication property，或者简称”放置“，*placement*）的最小单位。我们的放置专用语言（placement-specification language）分离了管理副本配置的职责。管理员能控制两个维度：副本的数量和类型、那些副本的地理上的放置。管理员会在这两个维度上创建一个由命名选项组成的菜单（例如，北美，5路副本与1个witness）。应用程序通过通过给每个数据库和（或）每个独立的目录打上一个由这些选项组合而成的标签来控制数据副本策略。例如，应用程序可能将每个终端用户的数据保存在各自的目录中，这让用户A的数据能在欧洲有3个副本，并让用户B的数据能在北美有5个副本。
+
+为了解释的简介，我们对其做了简化。事实上，如果目录增长得过大，Spanner会将其分片成多个*段*（fragment）。段可能由不同的Paxos group提供服务（因此也由不同的服务器提供）。事实上，movedir在group之间移动的是段，而不是整个目录。
+
+### 2.3 数据模型
+
