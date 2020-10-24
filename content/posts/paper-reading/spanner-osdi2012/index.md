@@ -46,11 +46,11 @@ Spanner的主要目标是管理跨数中心的副本数据，但是我们还花�
 
 ## 2. 实现
 
-本章描述了Spanner的结构和Spanner底层实现的原理。然后，我们描述了*directory*抽象，其被用作管理副本和局部性（locality），它还是数据移动的单元。最后，我们描述了我们的数据模型、为什么Spanner看上去像关系型数据库而不是键值存储、怎样能让应用程序控制数据的局部性。
+本章描述了Spanner的结构和Spanner底层实现的原理。然后，我们描述了*directory*抽象，其被用作管理副本和局部性（locality），它还是数据移动的单位。最后，我们描述了我们的数据模型、为什么Spanner看上去像关系型数据库而不是键值存储、怎样能让应用程序控制数据的局部性。
 
 一份Spanner的部署被称为一个*universe*。因为Spanner在全球范围管理数据，所以只有少数的几个运行中的universe。我们目前运行了一个测试/练习场universe、一个开发/生产universe、和一个仅生产的universe。
 
-Spanner被组织为*zone*的集合，每个zone都大致类似于一份Bigtable服务器集群<sup>[9]</sup>的部署。zone是管理部署的单位。zone的集合还是数据能够跨位置分布的位置集合。当有新的数据中心加入服务或旧的数据中心被关闭时，zone可以加入运行中的系统或从运行中的系统移除。zone也是物理隔离的单元：在一个数据中心中可能有一个或多个zone，例如，如果不同的应用程序的数据必须跨同数据中心的不同的服务器的集合分区时会出现这种情况。
+Spanner被组织为*zone*的集合，每个zone都大致类似于一份Bigtable服务器集群<sup>[9]</sup>的部署。zone是管理部署的单位。zone的集合还是数据能够跨位置分布的位置集合。当有新的数据中心加入服务或旧的数据中心被关闭时，zone可以加入运行中的系统或从运行中的系统移除。zone也是物理隔离的单位：在一个数据中心中可能有一个或多个zone，例如，如果不同的应用程序的数据必须跨同数据中心的不同的服务器的集合分区时会出现这种情况。
 
 ![图1 spanner服务器组织结构。](figure-1.png "图1 spanner服务器组织结构。")
 
@@ -68,3 +68,16 @@ $$ (key:string, timestamp:int64) \rightarrow string $$
 
 为了支持副本，每个spanserver在每个tablet上实现了一个Paxos状态机。（早期的Spanner原型支持为每个tablet实现多个Paxos状态机，这让副本配置更加灵活。但是其复杂性让我们放弃了它。）每个状态机在它相关的tablet中保存其元数据和日志。我们的Paxos实现通过基于事件的leader租约来支持长期领导者，租约的默认长度为10秒。目前Spanner的实现记录每次Paxos写入两次：一次在tablet的日志中，一次在Paxos的日志中。这种选择是权宜之策，我们最终很可能会改进这一点。我们的Paxos实现是流水线化的，以在有WAN延迟的情况下提高Spanner的吞吐量；但是Paxos会按顺序应用写入（[第四章](#4-)会依赖这一点）。
 
+Paxos状态机被用来实现一致性的多副本映射的集合。每个副本的键值映射状态被保存在其对应的tablet中。写操作必须在leader处启动Paxos协议；读操作直接从任意足够新的副本处访问其底层tablet的状态。副本的集合是一个Paxos *group*。
+
+在每个spanserver的每个leader副本中，都实现了一个*lock table*来实现并发控制。lock table包括2阶段锁（two-phase lock）状态：它将键的范围映射到锁状态。（值得注意的是，长期Paxos leader对高效管理lock table来说十分重要。）在Bigtable和Spanner中，lock table都是为长期事务设计的（例如报告生成，其可能需要几分钟的时间），其在存在冲突的乐观并发控制协议下表现不佳。需要获取同步的操作（如事务性读取）会在lock table中请求锁；其它的操作会绕过lock table。
+
+在每个spanserver的每个leader副本中，还实现了一个*transaction manager*来提供分布式事务支持。transaction manager被用来实现*participant leader*；group中的其它副本称为*participant slave*。如果事务仅有一个Paxos group参与（大多数事务都是这种情况），它可以绕过transaction manager，因为lock table和Paxos共同提供了事务性。如果事务有超过一个Paxos group参与，那些group的leader会协调执行两阶段提交（two-phase commit）。参与的group之一会被选为*coordinator*：该group的participant leader会作为*coordinator leader*，该group的salve会作为*coordinator slave*。每个transaction manager的状态会被保存在底层Paxos group中（因此它也是多副本的）。
+
+### 2.2 目录和放置
+
+在键值映射集合的上层，Spanner的实现支持一种被称为*directory*的桶（bucket）抽象，它是一系列共享相同的前缀（prefix）的连续的键的集合。（术语*directory*的选择处于历史上的偶然，更好的术语可能是*bucket*。）我们将在[章节2.3](#23-)中解释前缀的来源。对directory的支持让应用程序能够通过谨慎地选取键来控制它们的数据的局部性。
+
+directory是数据放置（placement）的单位。在同一个directory的所有数据都有相同的副本配置。当数据在Paxos group间移动时，它是以directory为单位移动，如**图3**所示。Spanner可能会为分流Paxos group的负载移动directory、可能为了把经常被一起访问的directory放在同一个group中而移动目录、或为了使directory靠近其访问者而移动directory。directory可以在client操作正在运行时移动。50MB的directory的移动期望在几秒内完成。
+
+![图3 directory是Paxos group间数据移动的单位。](figure-3.png "图3 directory是Paxos group间数据移动的单位。")
