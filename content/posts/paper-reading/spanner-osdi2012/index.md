@@ -84,7 +84,7 @@ Paxos状态机被用来实现一致性的多副本映射的集合。每个副本
 
 一个Paxos group可能包含多个目录，这意味着Spanner的tablet与Bigtable的tablet不同：Spanner的tablet并非必须是行空间上按字典序连续的分区。Spanner的tablet是一个装有多个行空间的分区的容器。因为这样做可以一起定位多个经常被一起访问的目录，所以我们做了这样的决策。
 
-*movedir*是用来在Paxos group间移动目录的后台任务<sup>[14]</sup>。movedir也被用作为Paxos group添加或移除副本<sup>[25]</sup>，因为Spanner目前不支持Paxos内的配置变更。movedir没被实现为单个事务，这样可以避免阻塞大量数据移动时进行的读写。相反，moveidr会在开始移动数据时注册该事件，并在后台移动数据。当它已经移动完所有数据时，它会启动一个事务来原子性地移动剩余的少量数据，并更新两个Paxos group的元数据。
+*movedir*是用来在Paxos group间移动目录的后台任务<sup>[14]</sup>。movedir也被用作为Paxos group添加或移除副本<sup>[25]</sup>，因为Spanner目前不支持Paxos内的配置修改。movedir没被实现为单个事务，这样可以避免阻塞大量数据移动时进行的读写。相反，moveidr会在开始移动数据时注册该事件，并在后台移动数据。当它已经移动完所有数据时，它会启动一个事务来原子性地移动剩余的少量数据，并更新两个Paxos group的元数据。
 
 目录也是能由应用程序指定的副本地理属性（geographic-replication property，或者简称”放置“，*placement*）的最小单位。我们的放置专用语言（placement-specification language）分离了管理副本配置的职责。管理员能控制两个维度：副本的数量和类型、那些副本的地理上的放置。管理员会在这两个维度上创建一个由命名选项组成的菜单（例如，北美，5路副本与1个witness）。应用程序通过通过给每个数据库和（或）每个独立的目录打上一个由这些选项组合而成的标签来控制数据副本策略。例如，应用程序可能将每个终端用户的数据保存在各自的目录中，这让用户A的数据能在欧洲有3个副本，并让用户B的数据能在北美有5个副本。
 
@@ -176,7 +176,7 @@ $$ s_1 < s_2 \tag{transitivity} $$
 
 ### 4.2 细节分析
 
-本节解释了读写事务和只读事务中之前省略的一些使用的细节，以及用来实现原子性模型变更的特殊事务类型的实现。然后还描述了对之前描述的基本方案的一些改进
+本节解释了读写事务和只读事务中之前省略的一些使用的细节，以及用来实现原子性模型修改的特殊事务类型的实现。然后还描述了对之前描述的基本方案的一些改进
 
 #### 4.2.1 读写事务
 
@@ -188,3 +188,16 @@ $$ s_1 < s_2 \tag{transitivity} $$
 
 coordinator leader同样会获取写入锁，但是跳过准备阶段。它在收到其它所有的participant leader的消息后为整个事务选取一个时间戳。该提交时间戳$s$必须大于或等于所有的准备时间戳（以满足[章节4.1.3](#413-)中讨论的约束）、大于coordinator收到其提交消息的时间$TT.now().latest$、并大于任何该leader已经分配给之前事务的时间戳（同样为了保证单调性）。然后，coordinator leader会通过Paxos将提交记录写入日志（或者，如果在等待其它participant是超时，那么会打断它）。
 
+在允许任何coordinator副本应用该提交记录之前，coordinator leader会等到$TT.after(s)$，以遵循[章节4.1.2](#412-)中描述的提交等待规则。因为coordinator leader基于$TT.now().latest$选取$s$，且等待该时间戳成为过去时，所以期望等待时间至少为$2*\bar{\epsilon}$。这一等待时间通常会与Paxos通信重叠。在提交等待后，coordinator会将提交时间戳发送给客户端和所有其它的participant leader。每个participant leader会将事务的结果通过该Paxos记录。所有的participant会在相同的时间戳处应用事务，然后释放锁。
+
+#### 4.2.2 只读事务
+
+分配时间戳在所有参与读取的的Paxos group间的协商阶段（negotiation phase）。这样，对每个只读事务，Spanner都需要一个作用域（scope）表达式 ，该表达式总结了将将要被整个事务读取的键。Spanner自动地为单个查询推导作用于。
+
+如果作用域的值通过单个Paxos group提供服务，那么客户端会向该group的leader提出只读事务。（当前的Spanner只会在Paxos leader为一个只读事务选取一个时间戳。）该leader分配$s_{read}$并执行读取操作。对于单站点（single-site），Spanner通常能提供比$TT.now().latest$更好的支持。定义$LastTS()$为一个Paxos group最后一次已提交的写入的时间戳。如果该没有准备好的事务，则分配$s_{read}=LastTS()$就能满足外部一致性：事务将会看到最后一次写入的结果，并因此在写入之后。
+
+如果作用于的值由多个Paxos group提供服务，那么有很多种选择。最复杂的选择是与所有的group的leader做一轮通信来基于$LastTS()$协商$s_{read}$。目前，Spanner实现了一个更简单额选择。客户端避免了一轮雪上，仅让它的读操作在$s_{read}=TT.now().latest$是执行（可能需要等到safe time增加）。事务中的所有读取能被发送到足够新的副本。
+
+#### 4.2.3 模型修改事务
+
+TrueTime让Spanner能够支持原子模型修改。
