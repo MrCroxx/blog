@@ -153,3 +153,30 @@ Spanner还保证了如下的的外部一致性定性：如果事务$T_2$的开�
 **开始（Start）：** 写入事务$T_i$的coordinator leader在$e_i^{server}$会为其计算并分配值不小于$TT.now().latest$的时间戳$s_i$。注意，participant leader于此无关；[章节4.2.1](#421-)描述了participant如何参与下一条规则的实现。
 
 **提交等待（Commit Wait）：** coordinator leader确保了客户端在$TT.after(s_i)$为true之前无法看到任何由$T_i$提交的数据。提交等待确保了$s_i$比$T_i$的提交的绝对时间小，或者说$s_i < t_{abs}(e_i^{commit})$。该提交等待的实现在[章节4.2.1](#421-)中描述。证明：
+
+$$ s_1 < t_{abs}(e_1^{commit}) \tag{commit wait} $$
+$$ t_{abs}(e_1^{commit}) < t_{abs}(e_2^{start}) \tag{assumption} $$
+$$ t_{abs}(e_2^{start}) \le t_{abs}(e_2^{server}) \tag{causality} $$
+$$ t_{abs}(e_2^{server}) \le s_2 \tag{start} $$
+$$ s_1 < s_2 \tag{transitivity} $$
+
+#### 4.1.3 在某时间戳处提供读取服务
+
+[章节4.1.2](#412-)中描述的单调性定性让Spanner能够正确地确定副本的状态对一个读取操作来说是否足够新。每个副本会追踪一个被称为*safe time（安全时间）*的值$t_{safe}$，它是最新的副本中的最大时间戳。如果读操作的时间戳为$t$，那么当$t \le t_{safe}$时，副本可以满足该读操作。
+
+定义$t_{safe} = \min(t_{safe}^{Paxos},t_{safe}^{TM})$，其中每个Paxos状态机有safe time $t_{safe}^{Paxos}$，每个transaction manager有safe time $t_{safe}^{TM}$。$t_{safe}^{Paxos}$简单一些：它是被应用的最高的Paxos write的时间戳。因为时间戳单调增加，且写入操作按顺序应用，对于Paxos来说，写入操作不会发生在$t_{safe}^{Paxos}$或更低的时间。
+
+如果没有准备好的（还没提交的）事务（即处于两阶段提交的两个阶段中间的事务），那么$t_{safe}^{TM}$为$\infty$。（对于participant slave，$t_{safe}^{TM}$实际上表示副本的leader的transaction manager，slave可以通过Paxos write中传递的元数据来推断其状态。）如果有任何的这样的事务存在，那么受这些事务影响的状态是不确定的：particaipant副本还不知道这样的事务是否将会提交。如我们在[章节4.2.1](#421-)中讨论的那样，提交协议确保了每个participant知道准备好了的事务的时间戳的下界。对group $g$来说，每个事务$T_i$的participant leader会给其准备记录（prepare record）分配一个准备时间戳（prepare timestamp）$s_{i,g}^{prepare}$。coordinator leader确保了在整个participant group $g$中，事务的提交时间戳$s_i \ge s_{i,g}^{prepare} $。因此，对于group $g$中的每个副本，对$g$中的所有事务$T_i$，$t_{safe}^{TM} = \min_i(s_{i,g^{prepare}})-1$。
+
+#### 4.1.4 为只读事务分配时间戳
+
+只读事务以两阶段执行：分配时间戳$s_{read}$<sup>[8]</sup>，然后在$s_{read}$处以快照读取的方式执行事务的读取。快照读取能够在任何足够新的副本上执行。
+
+在事务开始后的任意时间分配的$s_{read}=TT.now()$，可以通过像[章节4.1.2](#412-)中针对写入操作提供的参数的方式来保证外部一致性。然而，对这样的时间戳来说，如果$t_{safe}$还没有足够大的时候，在$s_{read}$是对块的读取操作可能需要被阻塞。（另外，在选取$s_{read}$的值的时候，可能还需要增大$s_{max}$的值来保证不相交性。）为了减少阻塞的可能性，Spanner应该分配能保证外部一致性的最老的时间戳。[章节4.2.2](#422-)解释了如何选取这样的时间戳。
+
+### 4.2 细节分析
+
+本节解释了读写事务和只读事务中之前省略的一些使用的细节，以及用来实现原子性模型变更的特殊事务类型的实现。然后还描述了对之前描述的基本方案的一些改进
+
+#### 4.2.1 读写事务
+
