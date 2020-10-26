@@ -180,3 +180,11 @@ $$ s_1 < s_2 \tag{transitivity} $$
 
 #### 4.2.1 读写事务
 
+像Bigtable，事务中的写入操作在提交前会在客户端缓冲。这样，事务中的读取操作无法看到事务的写入操作的效果。这种设计在Spanner中很好，因为读操作会返回任何读取的数据的时间戳，而未提交的写入操作还没有被分配时间戳。
+
+读写事务中的读操作使用了伤停等待（wound-wait）<sup>[33]</sup>来避免死锁。客户端将读取提交给响应的group中的leader副本，请求读取锁并读取最新的数据。当事务保持打开（open）时，它会发送保活消息（keepalive message）以避免participant leader将其事务超时。当客户端完成了所有的读取并缓冲了所有的写入后，它会开始两阶段提交。客户端选取一个coordinator group并向每个participant的leader发送带有该coordinator的标识和和所有缓冲的写入的提交消息。让客户端驱动两阶段提交能够避免跨广域链路发送两次数据。
+
+非coordinator participant的leader先获取写入锁。然后它会选取一个必须大于任意它已经分配给之前的事务的准备时间戳（以保证单调性），并通过Paxos将准备记录写入日志。然后每个participant会通知coordinator其准备时间戳。
+
+coordinator leader同样会获取写入锁，但是跳过准备阶段。它在收到其它所有的participant leader的消息后为整个事务选取一个时间戳。该提交时间戳$s$必须大于或等于所有的准备时间戳（以满足[章节4.1.3](#413-)中讨论的约束）、大于coordinator收到其提交消息的时间$TT.now().latest$、并大于任何该leader已经分配给之前事务的时间戳（同样为了保证单调性）。然后，coordinator leader会通过Paxos将提交记录写入日志（或者，如果在等待其它participant是超时，那么会打断它）。
+
