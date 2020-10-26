@@ -106,7 +106,7 @@ Spanner的数据模型不是纯关系型的，其行必须有名字。更精确�
 
 ![表1 TrueTime API。参数t是TTstamp的类型。](table-1.png "表1 TrueTime API。参数t是TTstamp的类型。")
 
-本章描述了TrueTime API并概述其实现。我们将大部分的细节放在了另一篇论文中，本文的目标是证明这一API的能力。**表1**列出了API的方法。TrueTime显式地将时间表示为`TTinterval`，其为一个有时间不确定性界限的间隔时间（不像标准的时间接口，标准时间接口不会给客户端不确定性的概念）。`TTinterval`的接入点（endpoint）是`TTstamp`类型。`TT.now()`方法返回一个`TTinterval`，该时间间隔保证了包含`TT.now()`被调用的绝对时间。该时间类似于带有闰秒（leap-second）的UNIX时间。（译注：此处原文为“The time epoch is analogous to UNIX time with leap-second smearing.”）定义瞬时错误的界限为$\epsilon$，其为间隔宽度的一半，定义平均错误界限为$\bar{\epsilon}$。`TT.after()`和`TT.before()`是对`TT.now()`的方便的封装。
+本章描述了TrueTime API并概述其实现。我们将大部分的细节放在了另一篇论文中，本文的目标是证明这一API的能力。**表1**列出了API的方法。TrueTime显式地将时间表示为$TTinterval$，其为一个有时间不确定性界限的间隔时间（不像标准的时间接口，标准时间接口不会给客户端不确定性的概念）。$TTinterval$的接入点（endpoint）是$TTstamp$类型。$TT.now()$方法返回一个$TTinterval$，该时间间隔保证了包含$TT.now()$被调用的绝对时间。该时间类似于带有闰秒（leap-second）的UNIX时间。（译注：此处原文为“The time epoch is analogous to UNIX time with leap-second smearing.”）定义瞬时错误的界限为$\epsilon$，其为间隔宽度的一半，定义平均错误界限为$\bar{\epsilon}$。$TT.after()$和$TT.before()$是对$TT.now()$的方便的封装。
 
 函数$t_{abs}(e)$表示事件$e$的绝对时间。用更加正式的术语来说，TrueTime能够保证，对于一次调用$tt = TT.now()$来说，$tt.earliest \le t_{abs}(e_{now}) \le tt.latest$，其中$e_{now}$表示调用事件。
 
@@ -148,3 +148,8 @@ Spanner的实现允许Paxos leader通过让slave释放其lease vote来退位（a
 
 Spanner依赖如下的单调定性：在每个Paxos group内，Spanner以单调增加的顺序为Paxos write分配时间戳，即使跨leader也是如此。单个leader副本可以单调递增地分配时间戳。通过使用不相交定性，可以在跨leader的情况下保证该定性：leader必须仅在它的leader租约的期限内分配时间戳。注意，每当时间戳$s$被分配时，$s_{max}$会增加到$s$，以保持不相交性。
 
+Spanner还保证了如下的的外部一致性定性：如果事务$T_2$的开始在事务$T_1$提交之后，那么$T_2$的提交时间戳一定比$T_1$的提交时间戳大。定义事务$T_i$的开始事件与提交事件分别为$e_i^{start}$和$e_i^{commit}$、事务$T_i$的提交时间戳为$s_i$。该定性可以使用$t_{abs}(e_1^{commit}) < t_{abs}(e_2^{start}) \implies s_1 < s_2$表示。这一用来执行事务与分配时间戳的协议遵循两条规则，二者共同保证了定性，如下所示。定义写入事务$T_i$的提交请求到达coordinator leader的事件为$e_i^{server}$。
+
+**开始（Start）：** 写入事务$T_i$的coordinator leader在$e_i^{server}$会为其计算并分配值不小于$TT.now().latest$的时间戳$s_i$。注意，participant leader于此无关；[章节4.2.1](#421-)描述了participant如何参与下一条规则的实现。
+
+**提交等待（Commit Wait）：** coordinator leader确保了客户端在$TT.after(s_i)$为true之前无法看到任何由$T_i$提交的数据。提交等待确保了$s_i$比$T_i$的提交的绝对时间小，或者说$s_i < t_{abs}(e_i^{commit})$。该提交等待的实现在[章节4.2.1](#421-)中描述。证明：
