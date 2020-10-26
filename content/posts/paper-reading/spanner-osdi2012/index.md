@@ -66,13 +66,13 @@ $$ (key:string, timestamp:int64) \rightarrow string $$
 
 不像Bigtable，Spannner为数据分配时间戳，这是一种让Spanner更像多版本数据库而不是键值存储的重要的方式。tablet的状态被保存在一系列类B树的文件和一个预写日志（write-ahead log，WAL）中，它们都在一个被称为Colossus的分布式文件系统中（Google File System<sup>[15]</sup>的继任者）。
 
-为了支持副本，每个spanserver在每个tablet上实现了一个Paxos状态机。（早期的Spanner原型支持为每个tablet实现多个Paxos状态机，这让副本配置更加灵活。但是其复杂性让我们放弃了它。）每个状态机在它相关的tablet中保存其元数据和日志。我们的Paxos实现通过基于事件的leader租约来支持长期领导者，租约的默认长度为10秒。目前Spanner的实现记录每次Paxos写入两次：一次在tablet的日志中，一次在Paxos的日志中。这种选择是权宜之策，我们最终很可能会改进这一点。我们的Paxos实现是流水线化的，以在有WAN延迟的情况下提高Spanner的吞吐量；但是Paxos会按顺序应用写入（[第四章](#4-)会依赖这一点）。
+为了支持副本，每个spanserver在每个tablet上实现了一个Paxos状态机。（早期的Spanner原型支持为每个tablet实现多个Paxos状态机，这让副本配置更加灵活。但是其复杂性让我们放弃了它。）每个状态机在它相关的tablet中保存其元数据和日志。我们的Paxos实现通过基于事件的leader租约（lease）来支持长期领导者，租约的默认长度为10秒。目前Spanner的实现记录每次Paxos写入两次：一次在tablet的日志中，一次在Paxos的日志中。这种选择是权宜之策，我们最终很可能会改进这一点。我们的Paxos实现是流水线化的，以在有WAN延迟的情况下提高Spanner的吞吐量；但是Paxos会按顺序应用写入（[第四章](#4-)会依赖这一点）。
 
 Paxos状态机被用来实现一致性的多副本映射的集合。每个副本的键值映射状态被保存在其对应的tablet中。写操作必须在leader处启动Paxos协议；读操作直接从任意足够新的副本处访问其底层tablet的状态。副本的集合是一个Paxos *group*。
 
 在每个spanserver的每个leader副本中，都实现了一个*lock table*来实现并发控制。lock table包括2阶段锁（two-phase lock）状态：它将键的范围映射到锁状态。（值得注意的是，长期Paxos leader对高效管理lock table来说十分重要。）在Bigtable和Spanner中，lock table都是为长期事务设计的（例如报告生成，其可能需要几分钟的时间），其在存在冲突的乐观并发控制协议下表现不佳。需要获取同步的操作（如事务性读取）会在lock table中请求锁；其它的操作会绕过lock table。
 
-在每个spanserver的每个leader副本中，还实现了一个*transaction manager*来提供分布式事务支持。transaction manager被用来实现*participant leader*；group中的其它副本称为*participant slave*。如果事务仅有一个Paxos group参与（大多数事务都是这种情况），它可以绕过transaction manager，因为lock table和Paxos共同提供了事务性。如果事务有超过一个Paxos group参与，那些group的leader会协调执行两阶段提交（two-phase commit）。参与的group之一会被选为*coordinator*：该group的participant leader会作为*coordinator leader*，该group的salve会作为*coordinator slave*。每个transaction manager的状态会被保存在底层Paxos group中（因此它也是多副本的）。
+在每个spanserver的每个leader副本中，还实现了一个*transaction manager*来提供分布式事务支持。transaction manager被用来实现*participant leader*；group中的其它副本称为*participant slave*。如果事务仅有一个Paxos group参与（大多数事务都是这种情况），它可以绕过transaction manager，因为lock table和Paxos共同提供了事务性。如果事务有超过一个Paxos group参与，那些group的leader会协调执行两阶段提交（two-phase commit，2PC）。参与的group之一会被选为*coordinator*：该group的participant leader会作为*coordinator leader*，该group的salve会作为*coordinator slave*。每个transaction manager的状态会被保存在底层Paxos group中（因此它也是多副本的）。
 
 ### 2.2 目录和放置
 
@@ -122,3 +122,20 @@ TrueTime通过每个数据中心的*time server*机器集合和每个机器的*t
 
 本章描述了如何使用TrueTime确保并发控制相关的正确性属性与如何使用那些属性来实现如外部一致事务、无锁只读事务、和过去数据的非阻塞读取等特性。这些特性能实现例如确保整个数据库在时间戳$t$时刻的读取能够准确的看到截止$t$时刻的每个提交的事务的影响等功能。
 
+此外，将Paxos可见的写入（我们称之为*Paxos write*，除非上下文明确提到）与Spanner客户端写入区分开非常重要。例如，两阶段提交会在准备阶段（prepare phase）生成一个Paxos write，而没有相关的Spanner客户端写入。
+
+### 4.1 时间戳管理
+
+![表2 Spanner中的读写类型与对比。](table-2.png "表2 Spanner中的读写类型与对比。")
+
+**表2**列出了Spanner支持的操作类型。Spanner的实现支持读写事务（read-write transaction）、只读事务（read-only transaction））（即预先声明的快照隔离事务，(predeclared snapshot-isolation transactions）、和快照读取（snapshot read）。单独我的写入作为读写事务实现；单独的非快照读作为只读事务实现。二者都在内部重试。（客户端不需要自己编写重试循环。）
+
+只读事务是一种有快照隔离<sup>[6]</sup>的优势的事务。只读事务必须预先声明其没有任何写入；这并非只是没有任何写入操作的读写事务。只读事务中的读取会以系统选取的时间戳无锁执行，这样可以让到来写入不会被阻塞。只读事务中的读取操作可以在任何足够新的副本上执行（见[章节4.1.3](#413-)）。
+
+快照读取是无锁执行的对过去数据的读取操作。客户端可能为每个快照读取制定一个时间戳，也可能提供一个所需的时间戳的过期上限并让Spanner选取一个时间戳。在任一种情况下，快照读取都可以在任何足够新的副本上执行。
+
+对于只读事务和快照读取来说，一旦时间戳被选取后，不可避免地需要提交，除非该时间戳的数据已经被垃圾回收掉了。因此，客户端可以避免在重试循环中缓冲结果。当一个服务器故障时，客户端可以在内部对另一台服务器重复该时间戳和当前读取的位置继续执行查询。
+
+#### 4.1.1 Paxos leader租约
+
+Spanner的Paxos实现使用了定时的租约来长期保持领导权（默认为10秒）。潜在的leader回发送请求以获得定时的*lease vote（租约投票）*，当leader收到异性数量的lease vote后，leader会知道其持有了租约。
