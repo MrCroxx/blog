@@ -138,8 +138,13 @@ TrueTime通过每个数据中心的*time server*机器集合和每个机器的*t
 
 #### 4.1.1 Paxos leader租约
 
-Spanner的Paxos实现使用了定时的租约来长期保持领导权（默认为10秒）。潜在的leader回发送请求以获得定时的*lease vote（租约投票）*，当leader收到异性数量的lease vote后，leader会知道其持有了租约。副本会在成功的写入操作中隐式地延长其lease vote，且leader会在lease vote快要过期时请求延长lease vote。定义leader的*lease interval（租约区间）*的起始时间为leader发现了它收到了一定数量的lease vote的时间，结束时间为它不再有一定数量的lease vote的时间（因为一些lease vote过期了）。Spanner依赖如下的不相交的不变性：对于每个Paxos group，每个Paxos的leader的lease interval与所有其它的leader的lease interval不相交。附录A描述了该不变式是如何成立的。
+Spanner的Paxos实现使用了定时的租约来长期保持领导权（默认为10秒）。潜在的leader回发送请求以获得定时的*lease vote（租约投票）*，当leader收到异性数量的lease vote后，leader会知道其持有了租约。副本会在成功的写入操作中隐式地延长其lease vote，且leader会在lease vote快要过期时请求延长lease vote。定义leader的*lease interval（租约区间）*的起始时间为leader发现了它收到了一定数量的lease vote的时间，结束时间为它不再有一定数量的lease vote的时间（因为一些lease vote过期了）。Spanner依赖如下的不相交的定性（invariant）：对于每个Paxos group，每个Paxos的leader的lease interval与所有其它的leader的lease interval不相交。附录A描述了该定性是如何成立的。
 
-Spanner的实现允许Paxos leader通过让slave释放其lease vote来退位（abdicate）。为了保持不相交性不变，Spanner对可以退位的时间进行了约束。定义$s_{max}$为leader使用的最大的时间戳。后面的章节会说明何时可以提高$s_{max}$的值。在退位前，leader必须等到$TT.after(s_{max})$为true。
+Spanner的实现允许Paxos leader通过让slave释放其lease vote来退位（abdicate）。为了保持不相交性不变，Spanner对可以退位的时间进行了约束。定义$s_{max}$为leader使用的最大的时间戳。后面的章节会说明何时可以增加$s_{max}$的值。在退位前，leader必须等到$TT.after(s_{max})$为true。
 
-#### 4.1.2 
+#### 4.1.2 为读写事务分配时间戳
+
+事务的读写使用两阶段锁。因此，可以在已经获取了所有锁之后与任何锁被释放之前的任意时间里为其分配时间戳。对一个给定的事务，Spanner为其分配的时间戳是Paxos为Paxos write分配的表示事务提交的时间戳。
+
+Spanner依赖如下的单调定性：在每个Paxos group内，Spanner以单调增加的顺序为Paxos write分配时间戳，即使跨leader也是如此。单个leader副本可以单调递增地分配时间戳。通过使用不相交定性，可以在跨leader的情况下保证该定性：leader必须仅在它的leader租约的期限内分配时间戳。注意，每当时间戳$s$被分配时，$s_{max}$会增加到$s$，以保持不相交性。
+
