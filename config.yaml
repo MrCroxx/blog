@@ -1,4 +1,4 @@
-baseURL: https://blog.mrcroxx.com/
+# baseURL: ${BaseURL}
 defaultContentLanguage: zh-cn
 languageCode: zh-CN
 hasCJKLanguage: true
