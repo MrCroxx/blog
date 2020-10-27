@@ -1,7 +1,7 @@
 ---
-title: "《Spanner: Google’s Globally-Distributed Database》论文翻译[持续更新中]"
+title: "《Spanner: Google’s Globally-Distributed Database》论文翻译"
 date: 2020-10-23T13:00:19+08:00
-lastmod: 2020-10-23T13:00:22+08:00
+lastmod: 2020-10-28T20:53:29+08:00
 draft: false
 keywords: []
 description: ""
@@ -42,7 +42,7 @@ Spanner的主要目标是管理跨数中心的副本数据，但是我们还花�
 
 实现这些属性的关键是一个新的TrueTime API及其实现。该API直接暴露了时钟不确定度，且对Spanner的时间戳的保证基于该API的实现提供的界限内。如果不确定度较大，Spanner会减速以等待该不确定度。Google的集群管理软件提供了TureTime API的一种实现。该实现通过使用多种现代参考时钟（GPS和原子时钟）来让不确定度保持较小（通常小于10ms）。
 
-[第二章](#2-)描述了Spanner实现的结构、它的特定集合、和融入到了设计中的工程决策。[第三章](#3-)描述了我们的新TureTime API并概述了其实现。[第四章](#4-)描述了Spanner如何使用TrueTime来实现具有外部一致性的分布式事务、无锁只读事务、和原子性模型更新。[第五章](#5-)提供了Spanner性能和TrueTime表现的一些benchmark，并讨论了F1的经验。[第六、七、八章](#6-)，描述了相关工作和展望，并总结了我们的结论。
+[第二章](#2-实现)描述了Spanner实现的结构、它的特定集合、和融入到了设计中的工程决策。[第三章](#3-truetime)描述了我们的新TureTime API并概述了其实现。[第四章](#4-并发控制)描述了Spanner如何使用TrueTime来实现具有外部一致性的分布式事务、无锁只读事务、和原子性模型更新。[第五章](#5-评估)提供了Spanner性能和TrueTime表现的一些benchmark，并讨论了F1的经验。[第六、七、八章](#6-相关工作)，描述了相关工作和展望，并总结了我们的结论。
 
 ## 2. 实现
 
@@ -66,7 +66,7 @@ $$ (key:string, timestamp:int64) \rightarrow string $$
 
 不像Bigtable，Spannner为数据分配时间戳，这是Spanner更像多版本数据库而不是键值存储的重要原因之一。tablet的状态被保存在一系列类B树的文件和一个预写日志（write-ahead log，WAL）中，它们都在一个被称为Colossus的分布式文件系统中（Google File System<sup>[15]</sup>的继任者）。
 
-为了支持副本，每个spanserver在每个tablet上实现了一个Paxos状态机。（早期的Spanner原型支持为每个tablet实现多个Paxos状态机，这让副本配置更加灵活。但是其复杂性让我们放弃了它。）每个状态机在它相关的tablet中保存其元数据和日志。我们的Paxos实现通过基于定时的leader租约（lease）来支持长期领导者，租约的默认长度为10秒。目前，在Spanner的实现中，每次Paxos write会被记录两次：一次在tablet的日志中，一次在Paxos的日志中。这种选择是权宜之策，我们最终很可能会改进这一点。我们的Paxos实现是流水线化的，以在有WAN延迟的情况下提高Spanner的吞吐量；但是Paxos会按顺序应用写入（[第四章](#4-)会依赖这一点）。
+为了支持副本，每个spanserver在每个tablet上实现了一个Paxos状态机。（早期的Spanner原型支持为每个tablet实现多个Paxos状态机，这让副本配置更加灵活。但是其复杂性让我们放弃了它。）每个状态机在它相关的tablet中保存其元数据和日志。我们的Paxos实现通过基于定时的leader租约（lease）来支持长期领导者，租约的默认长度为10秒。目前，在Spanner的实现中，每次Paxos write会被记录两次：一次在tablet的日志中，一次在Paxos的日志中。这种选择是权宜之策，我们最终很可能会改进这一点。我们的Paxos实现是流水线化的，以在有WAN延迟的情况下提高Spanner的吞吐量；但是Paxos会按顺序应用写入（[第四章](#4-并发控制)会依赖这一点）。
 
 在实现一致性的多副本映射的集合时，使用了Paxos状态机。每个副本的键值映射状态被保存在其对应的tablet中。写操作必须在leader处启动Paxos协议；读操作直接从任意足够新的副本处访问其底层tablet的状态。副本的集合是一个Paxos *group*。
 
@@ -76,7 +76,7 @@ $$ (key:string, timestamp:int64) \rightarrow string $$
 
 ### 2.2 directory与放置
 
-在键值映射集合的上层，Spanner的实现支持一种被称为*directory（目录）*的*bucket（桶）*抽象，它是一系列共享相同的前缀（prefix）的连续的键的集合。（术语*directory*的选择处于历史上的偶然，更好的术语可能是*bucket*。）我们将在[章节2.3](#23-)中解释前缀的来源。对directory的支持让应用程序能够通过谨慎地选取键以控制它们的数据的局部性。
+在键值映射集合的上层，Spanner的实现支持一种被称为*directory（目录）*的*bucket（桶）*抽象，它是一系列共享相同的前缀（prefix）的连续的键的集合。（术语*directory*的选择处于历史上的偶然，更好的术语可能是*bucket*。）我们将在[章节2.3](#23-数据模型)中解释前缀的来源。对directory的支持让应用程序能够通过谨慎地选取键以控制它们的数据的局部性。
 
 directory是数据放置（placement）的单位。在同一个directory的所有数据都有相同的副本配置。当数据在Paxos group间移动时，它是以directory为单位移动，如**图3**所示。Spanner可能会为分流Paxos group的负载而移动directory、可能为了把经常被一起访问的directory放在同一个group中而移动directory、或为了使directory靠近其访问者而移动directory。directory可以在客户端操作正在运行时移动。50MB的directory的移动期望在几秒内完成。
 
@@ -130,7 +130,7 @@ TrueTime通过每个数据中心的*time server*机器集合和每个机器的*t
 
 **表2**列出了Spanner支持的操作类型。Spanner的实现支持读写事务（read-write transaction）、只读事务（read-only transaction）（即预先声明了的快照隔离事务，(predeclared snapshot-isolation transactions））、和快照读取（snapshot read）。单独的写入作为读写事务实现；单独的非快照读作为只读事务实现。二者都在内部重试。（客户端不需要自己编写重试循环。）
 
-只读事务是一种有快照隔离<sup>[6]</sup>的优势的事务。只读事务必须预先声明其没有任何写入，它并不只是没有任何写入操作的读写事务。只读事务中的读取会以系统选取的时间戳无锁执行，这样可以让到来写入不会被阻塞。只读事务中的读取操作可以在任何足够新的副本上执行（见[章节4.1.3](#413-)）。
+只读事务是一种有快照隔离<sup>[6]</sup>的优势的事务。只读事务必须预先声明其没有任何写入，它并不只是没有任何写入操作的读写事务。只读事务中的读取会以系统选取的时间戳无锁执行，这样可以让到来写入不会被阻塞。只读事务中的读取操作可以在任何足够新的副本上执行（见[章节4.1.3](#413-在某时间戳处提供读取服务)）。
 
 快照读取是无锁执行的对过去数据的读取操作。客户端可能为每个快照读取制定一个时间戳，也可能提供一个所需的时间戳的过期上限并让Spanner选取一个时间戳。在任一种情况下，快照读取都可以在任何足够新的副本上执行。
 
@@ -152,7 +152,7 @@ Spanner还保证了如下的的外部一致性定理：如果事务$T_2$在事�
 
 **开始（Start）：** 写入事务$T_i$的coordinator leader在$e_i^{server}$会为其计算并分配值不小于$TT.now().latest$的时间戳$s_i$。注意，participant leader于此无关；[章节4.2.1](#421-)描述了participant如何参与下一条规则的实现。
 
-**提交等待（Commit Wait）：** coordinator leader确保了客户端在$TT.after(s_i)$为true之前无法看到任何由$T_i$提交的数据。提交等待确保了$s_i$比$T_i$的提交的绝对时间小，或者说$s_i < t_{abs}(e_i^{commit})$。该提交等待的实现在[章节4.2.1](#421-)中描述。证明：
+**提交等待（Commit Wait）：** coordinator leader确保了客户端在$TT.after(s_i)$为true之前无法看到任何由$T_i$提交的数据。提交等待确保了$s_i$比$T_i$的提交的绝对时间小，或者说$s_i < t_{abs}(e_i^{commit})$。该提交等待的实现在[章节4.2.1](#421-读写事务)中描述。证明：
 
 $$ s_1 < t_{abs}(e_1^{commit}) \tag{commit wait} $$
 $$ t_{abs}(e_1^{commit}) < t_{abs}(e_2^{start}) \tag{assumption} $$
@@ -162,17 +162,17 @@ $$ s_1 < s_2 \tag{transitivity} $$
 
 #### 4.1.3 在某时间戳处提供读取服务
 
-[章节4.1.2](#412-)中描述的单调性定理让Spanner能够正确地确定副本的状态对一个读取操作来说是否足够新。每个副本会追踪一个被称为*safe time（安全时间）* 的值$t_{safe}$，它是最新的副本中的最大时间戳。如果读操作的时间戳为$t$，那么当$t \le t_{safe}$时，副本可以满足该读操作。
+[章节4.1.2](#412-为读写事务分配时间戳)中描述的单调性定理让Spanner能够正确地确定副本的状态对一个读取操作来说是否足够新。每个副本会追踪一个被称为*safe time（安全时间）* 的值$t_{safe}$，它是最新的副本中的最大时间戳。如果读操作的时间戳为$t$，那么当$t \le t_{safe}$时，副本可以满足该读操作。
 
 定义$t_{safe} = \min(t_{safe}^{Paxos},t_{safe}^{TM})$，其中每个Paxos状态机有safe time $t_{safe}^{Paxos}$，每个transaction manager有safe time $t_{safe}^{TM}$。$t_{safe}^{Paxos}$简单一些：它是被应用的序号最高的Paxos write的时间戳。因为时间戳单调增加，且写入操作按顺序应用，对于Paxos来说，写入操作不会发生在$t_{safe}^{Paxos}$或更低的时间。
 
-如果没有就绪（prepared）的（还没提交的）事务（即处于两阶段提交的两个阶段中间的事务），那么$t_{safe}^{TM}$为$\infty$。（对于participant slave，$t_{safe}^{TM}$实际上表示副本的leader的transaction manager的safe time，slave可以通过Paxos write中传递的元数据来推断其状态。）如果有任何的这样的事务存在，那么受这些事务影响的状态是不确定的：particaipant副本还不知道这样的事务是否将会提交。如我们在[章节4.2.1](#421-)中讨论的那样，提交协议确保了每个participant知道就绪事务的时间戳的下界。对group $g$来说，每个事务$T_i$的participant leader会给其就绪记录（prepare record）分配一个就绪时间戳（prepare timestamp）$s_{i,g}^{prepare}$。coordinator leader确保了在整个participant group $g$中，事务的提交时间戳$s_i \ge s_{i,g}^{prepare} $。因此，对于group $g$中的每个副本，对$g$中的所有事务$T_i$，$t_{safe}^{TM} = \min_i(s_{i,g^{prepare}})-1$。
+如果没有就绪（prepared）的（还没提交的）事务（即处于两阶段提交的两个阶段中间的事务），那么$t_{safe}^{TM}$为$\infty$。（对于participant slave，$t_{safe}^{TM}$实际上表示副本的leader的transaction manager的safe time，slave可以通过Paxos write中传递的元数据来推断其状态。）如果有任何的这样的事务存在，那么受这些事务影响的状态是不确定的：particaipant副本还不知道这样的事务是否将会提交。如我们在[章节4.2.1](#421-读写事务)中讨论的那样，提交协议确保了每个participant知道就绪事务的时间戳的下界。对group $g$来说，每个事务$T_i$的participant leader会给其就绪记录（prepare record）分配一个就绪时间戳（prepare timestamp）$s_{i,g}^{prepare}$。coordinator leader确保了在整个participant group $g$中，事务的提交时间戳$s_i \ge s_{i,g}^{prepare} $。因此，对于group $g$中的每个副本，对$g$中的所有事务$T_i$，$t_{safe}^{TM} = \min_i(s_{i,g^{prepare}})-1$。
 
 #### 4.1.4 为只读事务分配时间戳
 
 只读事务以两阶段执行：分配时间戳$s_{read}$<sup>[8]</sup>，然后在$s_{read}$处以快照读取的方式执行事务的读取。快照读取能够在任何足够新的副本上执行。
 
-$s_{read}=TT.now()$在事务开始后的任意时间分配，它可以通过像[章节4.1.2](#412-)中针对写入操作提供的参数的方式来保证外部一致性。然而，对这样的时间戳来说，如果$t_{safe}$还没有足够大，在$s_{read}$时对块的读取操作可能需要被阻塞。（另外，在选取$s_{read}$的值的时候，可能还需要增大$s_{max}$的值来保证不相交性。）为了减少阻塞的可能性，Spanner应该分配能保证外部一致性的最老的时间戳。[章节4.2.2](#422-)解释了如何选取这样的时间戳。
+$s_{read}=TT.now()$在事务开始后的任意时间分配，它可以通过像[章节4.1.2](#412-为读写事务分配时间戳)中针对写入操作提供的参数的方式来保证外部一致性。然而，对这样的时间戳来说，如果$t_{safe}$还没有足够大，在$s_{read}$时对块的读取操作可能需要被阻塞。（另外，在选取$s_{read}$的值的时候，可能还需要增大$s_{max}$的值来保证不相交性。）为了减少阻塞的可能性，Spanner应该分配能保证外部一致性的最老的时间戳。[章节4.2.2](#422-只读事务)解释了如何选取这样的时间戳。
 
 ### 4.2 细节分析
 
@@ -186,9 +186,9 @@ $s_{read}=TT.now()$在事务开始后的任意时间分配，它可以通过像[
 
 非coordinator participant的leader会先获取写入锁。然后它会选取一个必须大于任意它已经分配给之前的事务的就绪时间戳（以保证单调性），并通过Paxos将就绪记录写入日志。然后每个participant会通知coordinator其就绪时间戳。
 
-coordinator leader同样会获取写入锁，但是跳过就绪阶段。它在收到其它所有的participant leader的消息后为整个事务选取一个时间戳。该提交时间戳$s$必须大于或等于所有的就绪时间戳（以满足[章节4.1.3](#413-)中讨论的约束）、大于coordinator收到其提交消息的时间$TT.now().latest$、并大于任何该leader已经分配给之前事务的时间戳（同样为了保证单调性）。然后，coordinator leader会通过Paxos将提交记录写入日志（或者，如果在等待其它participant是超时，那么会打断它）。
+coordinator leader同样会获取写入锁，但是跳过就绪阶段。它在收到其它所有的participant leader的消息后为整个事务选取一个时间戳。该提交时间戳$s$必须大于或等于所有的就绪时间戳（以满足[章节4.1.3](#413-在某时间戳处提供读取服务)中讨论的约束）、大于coordinator收到其提交消息的时间$TT.now().latest$、并大于任何该leader已经分配给之前事务的时间戳（同样为了保证单调性）。然后，coordinator leader会通过Paxos将提交记录写入日志（或者，如果在等待其它participant是超时，那么会打断它）。
 
-在允许任何coordinator副本应用该提交记录之前，coordinator leader会等到$TT.after(s)$，以遵循[章节4.1.2](#412-)中描述的提交等待规则。因为coordinator leader基于$TT.now().latest$选取$s$，且等待该时间戳变成过去时，所以期望等待时间至少为$2*\bar{\epsilon}$。这一等待时间通常会与Paxos通信重叠。在提交等待后，coordinator会将提交时间戳发送给客户端和所有其它的participant leader。每个participant leader会将事务的结果通过该Paxos记录。所有的participant会在相同的时间戳处应用事务，然后释放锁。
+在允许任何coordinator副本应用该提交记录之前，coordinator leader会等到$TT.after(s)$，以遵循[章节4.1.2](#412-为读写事务分配时间戳)中描述的提交等待规则。因为coordinator leader基于$TT.now().latest$选取$s$，且等待该时间戳变成过去时，所以期望等待时间至少为$2*\bar{\epsilon}$。这一等待时间通常会与Paxos通信重叠。在提交等待后，coordinator会将提交时间戳发送给客户端和所有其它的participant leader。每个participant leader会将事务的结果通过该Paxos记录。所有的participant会在相同的时间戳处应用事务，然后释放锁。
 
 #### 4.2.2 只读事务
 
@@ -212,7 +212,7 @@ Spanner的模型修改事务是更加通用的非阻塞标准事务的变体。�
 
 之前定义的$t_{safe}^{Paxos}$的弱点是，如果没有Paxos write，它将无法增大。也就是说，如果一个Paxos group的最后一次写入操作发生在$t$之前，那么该group中发生在时间$t$的快照读取无法执行。Spanner通过利用leader租约时间范围不相交定理解决了这一问题。每个Paxos leader会通过维持一个比将来会发生的写入的时间戳更大的阈值来增大$t_{safe}^{Paxos}$：Paxos leader维护了一个从Paxos序号$n$到可分配给Paxos序号为$n+1$的最小时间戳的映射$MinNextTS(n)$。当副本应用到$n$时，它可以将$t_{safe}^{Paxos}$增大到$MinNextTS(n)$。
 
-单个leader实现其$MinNextTS()$约定很容易。因为$MinNextTS()$约定的时间戳在一个leader租约内，不相交定理能保证在leader间的$MinNextTS()$约定。如果leader希望将$MinNextTS()$增大到超过其leader租约之外，那么它必须先扩展其leader租约。注意，$s_{max}$总是要增大到$MinNextTS()$中最大的值，以保证不相交定理。
+单个leader实现其$MinNextTS()$约定很容易。因为$MinNextTS()$约定的时间戳在一个leader租约内，不相交定理能保证在leader间的$MinNextTS()$约定。如果leader希望将$MinNextTS()$增大到超过其leader租约之外，那么它必须先延长其leader租约。注意，$s_{max}$总是要增大到$MinNextTS()$中最大的值，以保证不相交定理。
 
 leader默认每8秒增大一次$MinNextTS()$的值。因此，如果没有就绪事务，空闲的Paxos group中的健康的slave在最坏情况下会为读操作提供超过8秒后的时间戳。leader也会依照来自slave的需求增大$MinNextTS()$的值。
 
@@ -251,4 +251,165 @@ leader默认每8秒增大一次$MinNextTS()$的值。因此，如果没有就绪
 
 ![图6 TrueTime的ε值的分布，在timeslave daemon查询time master后立即采样。图中分别绘制了第90%、99%、99.9%个数据的情况。](figure-6.png "图6 TrueTime的ε值的分布，在timeslave daemon查询time master后立即采样。图中分别绘制了第90%、99%、99.9%个数据的情况。")
 
-**图6**给出了在距离高达2200km的数据中心间的几千台spanserver机器上获取的TrueTime数据。图中绘出了第90%、99%和99.9%个的$\epsilon$，其在timeslave daemon查询time master后立即采样。采样中去掉了$\epsilon$因本地时钟的不确定度而产生的锯齿波，因此
+**图6**给出了在距离高达2200km的数据中心间的几千台spanserver机器上获取的TrueTime数据。图中绘出了第90%、99%和99.9%个的$\epsilon$，其在timeslave daemon查询time master后立即采样。采样中去掉了$\epsilon$因本地时钟的不确定度而产生的锯齿波，因此其测量的是time master的不确定度（通常为0）加上到time master的通信延迟的值。
+
+数据表明，通常来说，决定了$\epsilon$的这两个因素通常不是问题。然而，其中存在明显的尾延迟（tail-latency）问题，这会导致$\epsilon$的值更高。尾延迟在3月30日减少了，这时由于网络得到了改进，其减少了瞬时的网络链路拥堵。$\epsilon$在4月13日变大了约一个小时，这是由于一个数据中心例行维护中关闭了master两次。我们将继续调查并消除TrueTime峰值的原因。
+
+### 5.4 F1
+
+Spanner于2011年初开始在生产负载下进行实验评估，其作为F1（Google重写的广告系统后端系统）的一部分<sup>[35]</sup>。起初，该后端基于MySQL数据库，并手动将其按多种方式分片。其未压缩的数据集有数十TB，虽然这与许多NoSQL的实例相比很小，但是已经足够大以至于需要MySQL中的难用的分片机制。MySQL的分片策略会将每个消费者与所有相关数据分配到一个固定的分片中。这种布局让每个消费者可以使用索引与复杂的查询，但是这需要有对程序的业务逻辑的分片有所了解。随着消费者的数量与其数据量的增长，重新分片的开销对数据库来说十分昂贵。最后一次重分片花费了两年多的时间，涉及到数十个团队的协作与测试以降低其风险。这样的操作太过复杂而不能定期执行：因此，该团队不得不将一些数据存储在额外的Bigtable中以限制MySQL数据库的增长，这对影响了事务表现和跨所有数据的查询能力。
+
+F1团队选择使用Spanner的原因有很多。第一，Spanner消除了手动重分片的需求。第二，Spanner提供了副本同步和自动化故障转移。在MySQL的master-slave的副本策略下，实现故障转移很困难，且有数据丢失的风险与停机时间。第三，F1需要强事务语义，这使得其无法使用其它的NoSQL系统。应用程序的语义需要跨任意数据上的事务和一致性读取。F1团队还需要在他们的数据上使用辅助索引（secondary index）（因为Spanner尚未为辅助索引提供自动支持），而他们可以使用Spanner的事务来实现他们自己的一致全局索引。
+
+目前，所有应用程序的写入操作默认通过F1发送给Spanner，以取代基于MySQL的程序栈。F1在美国的西海岸有2份副本，在东海岸有3份副本。副本站点的选择基于潜在的重大自然灾害造成停电的可能性与它们的前端站点位置。有趣的是，Spanner的自动故障转移对它们来说几乎是不可见的。尽管最近几个月发生了计划外的集群故障，但是F1团队需要做的最大的工作是更新他们的数据库模型，以让Spanner知道在哪里优先放置Paxos leader，从而使其接近其前端移动后的位置。
+
+Spanner的时间戳语义让F1可以高效地维护从数据库状态计算出的内存数据结构。F1维护了所有修改的逻辑历史纪录，其作为每个事务的一部分写入了Spanner本身。F1会获取某一时间戳上完整的数据快照以初始化它的数据结构，然后读取增量的修改并更新数据结构。
+
+![表5 F1中directory-fragment的数量分布。](table-5.png "表5 F1中directory与fragment的数量分布。")
+
+**表5**阐述了F1中每个directory中的fragment的数量的分布。每个directory通常对应于一个F1上的应用程序栈的消费者。绝大多数的directory（即对绝大多数消费者来说）仅包含一个fragment，这意味着对那些消费者数据的读写操作能保证仅发生在单个服务器上。包含100多个fragment的directory都是包含F1辅助索引的表：对于这种不止有几个fragment的表的写入是极为少见的。F1团队仅在他们以事务的方式处理未优化的批数据负载时见到过这种行为。
+
+![表6 在24小时内测量的F1感知到的操作延迟。](table-6.png "表6 在24小时内测量的F1感知到的操作延迟。")
+
+**表6**给出了从F1服务器测出的Spanner操作延迟。在东海岸的数据中心在选取Paxos leader方面有更高的优先级。表中的数据是从这些数据中心内的F1服务器测量的。写入延迟的标准差更大，这是由因锁冲突而导致的一个长尾操作导致的。读取延迟的标准差甚至更大，其部分原因是，Paxos leader分布在两个数据中心中，其中只有一个数据中心有装有SSD的机器。此外，我们还对两个数据中心中的系统的每个读取操作进行了测量：字节读取量的均值与标准差分别约为1.6KB和119KB。
+
+## 6. 相关工作
+
+Megastore<sup>[5]</sup>和DynamoDB<sup>[3]</sup>中提供了跨数据中新的一直副本服务。DynamoDB给出了键值接口，且副本仅在一个区域内。Spanner像Megastore一样提供了半结构化的数据模型和一个与其相似的模型语言。Megastore没有达到很高的性能。因为Megastore位于Bigtable之上，这增加了高昂的通信开销。Megastore还不支持长期leader：可能有多个副本启动写入操作。在Paxos协议中，来自不同副本的所有写入必将发生冲突，即使它们在逻辑上并不冲突，这会导致单个Paxos group上的每秒钟写入吞吐量下降。Spanner提供了更高的性能、通用的事务、和外部一致性。
+
+Pavol等人<sup>[31]</sup>对比了数据库和MapReduce<sup>[12]</sup>的性能。他们指出，在分布式键值存储上探索数据库功能一些其它工作<sup>[1, 4, 7, 41]</sup>是这两个领域正在融合的证据。我们同意这一结论，但是我们证明了在多层上进行集成也有它特有的优势：例如，在多副本上集成并发控制减少了Spanner中提交等待的开销。
+
+在多副本存储上的分层事务的概念至少可以追溯到Gifford的论文<sup>[16]</sup>。Scatter<sup>[17]</sup>是一个最近出现的基于DHT的键值存储，它在一致性副本上实现了分层事务。Spanner着眼于提供比Scatter更高层的接口。Gray和Lamport<sup>[18]</sup>描述了一直基于Paxos的非阻塞提交协议。与两阶段提交相比，他们的协议产生了更多的消息开销，这将增加分布更广的group的提交开销的总量。Walter<sup>[36]</sup>提供了一种快照隔离的变体，其适用于数据中心内，而不适用于跨数据中心的场景。相反，我们的只读事务提供了更自然的语义，因为我们的所有操作都支持外部一致性。
+
+最近有大量关于减少或消除锁开销的工作。Calvin<sup>[40]</sup>去掉了并发控制：它预先分配时间戳并按时间戳的顺序执行事务。HStore<sup>[39]</sup>和Granola<sup>[11]</sup>都支持它们自己的事务类型，其中一些事务可以避免锁。这些系统都没有提供外部一致性。Spanner通过提供快照隔离的方式解决了争用问题。
+
+VoltDB<sup>[42]</sup>是一个内存式分片数据库，其支持广域下的master-slave的多副本策略以支持容灾恢复，但是不支持更通用的副本配置。它是NewSQL的一个例子，支持可伸缩的SQL<sup>[38]</sup>是其亮点。大量的商业数据库（如MarkLogic<sup>[26]</sup>和Oracle的Total Recall<sup>[30]</sup>）都实现了对过去数据的读取。Lomet和Li<sup>[24]</sup>描述了一种用于这种时态数据库的实现策略。
+
+对于可信参考时钟方面，Farsite得出了时钟不确定度的界限（比TrueTime的界限宽松很多）<sup>[13]</sup>：Farsite中的服务器租约与Spanner维护Paxos租约的方式相同。在之前的工作中<sup>[2, 23]</sup>，松散的时钟同步已经被用于并发控制。我们已经给出了使用TrueTime作为Paxos状态机间全局时间的原因之一。
+
+## 7. 后续工作
+
+在去年的大部分时间里，我们都在与F1团队合作，将Google的广告后端从MySQL迁移到Spanner。我们正在积极地提供监控与支持工具，并对其性能调优。另外，我们一直在改进我们的备份/还原系统的功能与性能。目前，我们正在实现Spanner的模型预言、辅助索引的自动化维护、和基于负载的自动化分片。对于更长期来说，我们计划去调研一些功能。乐观地并行读取可能是一个很有价值的策略，但是初步试验表示想要正确地实现它并非易事。此外，我们计划最终支持对Paxos配置的直接修改<sup>[22, 34]</sup>。
+
+因为我们期望许多用应程序会将数据副本分布到彼此较近的数据中心中，TrueTime $\epsilon$可能会明显影响西能。我们认为，将$\epsilon$降低到1ms以内没有不可逾越的障碍。可以减小time master的查询间隔时间，并使用相对便宜的石英钟。可以通过改进网络技术的方式减小time master的查询延迟，或者，甚至可以通过其它分布式时钟技术来避免这一问题。
+
+最后，还有很多明显需要改进的地方。尽管Spanner能扩展到大量节点上，节点内的本地数据结构在在执行复杂的SQL查询时性能相对较低，因为它们是为简单的键值访问设计的。数据库领域的文献中的算法与数据结构可以大幅改进单节点的性能。其次，能够自动化地在数据中心间移动数据以响应客户端中负载的变化长期以来一直是我们的目标之一，但是为了实现这一目标，我们还需要能够自动化、协作地在数据中心间移动客户端程序进程的能力。移动进程会让数据中心间的资源获取与分配的管理更加困难。
+
+## 8. 结论
+
+总而言之，Spanner结合并扩展了两个研究领域的观点：在更接近的数据库领域，需要易用的半结构化接口、事务、和基于SQL的查询语言；在系统领域，需要可伸缩、自动分片、容错、一致性副本、外部一致性、和广域分布。自从Spanner诞生以来，我们花了5年多的时间迭代设计与实现。这漫长的迭代部分原因是，人们很久才意识到Spanner应该做的不仅仅是解决全球化多副本命名空间的问题，还应该着眼于Bigtable锁缺少的数据库特性。
+
+我们的设计中的一方面十分重要：Spanner的特性的关键是TrueTime。我们证明了，通过消除时间API中的始终不确定度，=能够构建时间语义更强的分布式系统。此外，因为底层系统对时钟不确定度做了更严格的限制，所以实现更强的语义的开销减少了。在这一领域中，在设计分布式算法时，我们应该不再依赖宽松的时钟同步和较弱的时间API。
+
+## 致谢
+
+Many people have helped to improve this paper: our shepherd Jon Howell, who went above and beyond his responsibilities; the anonymous referees; and many Googlers: Atul Adya, Fay Chang, Frank Dabek, Sean Dorward, Bob Gruber, David Held, Nick Kline, Alex Thomson, and Joel Wein. Our management has been very supportive of both our work and of publishing this paper: Aristotle Balogh, Bill Coughran, Urs Holzle, Doron Meyer, Cos Nicolaou, Kathy Polizzi, Sridhar Ramaswany, and Shivakumar Venkataraman.
+
+We have built upon the work of the Bigtable and Megastore teams. The F1 team, and Jeff Shute in particular, worked closely with us in developing our data model and helped immensely in tracking down performance and correctness bugs. The Platforms team, and Luiz Barroso and Bob Felderman in particular, helped to make TrueTime happen. Finally, a lot of Googlers used to be on our team: Ken Ashcraft, Paul Cychosz, Krzysztof Ostrowski, Amir Voskoboynik, Matthew Weaver, Theo Vassilakis, and Eric Veach; or have joined our team recently: Nathan Bales, Adam Beberg, Vadim Borisov, Ken Chen, Brian Cooper, Cian Cullinan, Robert-Jan Huijsman, Milind Joshi, Andrey Khorlin, Dawid Kuroczko, Laramie Leavitt, Eric Li, Mike Mammarella, Sunil Mushran, Simon Nielsen, Ovidiu Platon, Ananth Shrinivas, Vadim Suvorov, and Marcel van der Holst.
+
+## 参考文献
+
+<div class="reference">
+
+[1] Azza Abouzeid et al. “HadoopDB: an architectural hybrid of MapReduce and DBMS technologies for analytical workloads”. Proc. of VLDB. 2009, pp. 922–933.
+
+[2] A. Adya et al. “Efficient optimistic concurrency control using loosely synchronized clocks”. Proc. of SIGMOD. 1995, pp. 23–34.
+
+[3] Amazon. Amazon DynamoDB. 2012.
+
+[4] Michael Armbrust et al. “PIQL: Success-Tolerant Query Processing in the Cloud”. Proc. of VLDB. 2011, pp. 181–192.
+
+[5] Jason Baker et al. “Megastore: Providing Scalable, Highly Available Storage for Interactive Services”. Proc. of CIDR. 2011, pp. 223–234.
+
+[6] Hal Berenson et al. “A critique of ANSI SQL isolation levels”. Proc. of SIGMOD. 1995, pp. 1–10.
+
+[7] Matthias Brantner et al. “Building a database on S3”. Proc. of SIGMOD. 2008, pp. 251–264.
+
+[8] A. Chan and R. Gray. “Implementing Distributed Read-Only Transactions”. IEEE TOSE SE-11.2 (Feb. 1985), pp. 205–212.
+
+[9] Fay Chang et al. “Bigtable: A Distributed Storage System for Structured Data”. ACM TOCS 26.2 (June 2008), 4:1–4:26.
+
+[10] Brian F. Cooper et al. “PNUTS: Yahoo!’s hosted data serving platform”. Proc. of VLDB. 2008, pp. 1277–1288.
+
+[11] James Cowling and Barbara Liskov. “Granola: Low-Overhead Distributed Transaction Coordination”. Proc. of USENIX ATC. 2012, pp. 223–236.
+
+[12] Jeffrey Dean and Sanjay Ghemawat. “MapReduce: a flexible data processing tool”. CACM 53.1 (Jan. 2010), pp. 72–77.
+
+[13] John Douceur and Jon Howell. Scalable Byzantine-FaultQuantifying Clock Synchronization. Tech. rep. MSR-TR-2003- 67. MS Research, 2003.
+
+[14] John R. Douceur and Jon Howell. “Distributed directory service in the Farsite file system”. Proc. of OSDI. 2006, pp. 321–334.
+
+[15] Sanjay Ghemawat, Howard Gobioff, and Shun-Tak Leung. “The Google file system”. Proc. of SOSP. Dec. 2003, pp. 29–43.
+
+[16] David K. Gifford. Information Storage in a Decentralized Computer System. Tech. rep. CSL-81-8. PhD dissertation. Xerox PARC, July 1982.
+
+[17] Lisa Glendenning et al. “Scalable consistency in Scatter”. Proc. of SOSP. 2011.
+
+[18] Jim Gray and Leslie Lamport. “Consensus on transaction commit”. ACM TODS 31.1 (Mar. 2006), pp. 133–160.
+
+[19] Pat Helland. “Life beyond Distributed Transactions: an Apostate’s Opinion”. Proc. of CIDR. 2007, pp. 132–141.
+
+[20] Maurice P. Herlihy and Jeannette M. Wing. “Linearizability: a correctness condition for concurrent objects”. ACM TOPLAS 12.3 (July 1990), pp. 463–492.
+
+[21] Leslie Lamport. “The part-time parliament”. ACM TOCS 16.2 (May 1998), pp. 133–169.
+
+[22] Leslie Lamport, Dahlia Malkhi, and Lidong Zhou. “Reconfiguring a state machine”. SIGACT News 41.1 (Mar. 2010), pp. 63–73.
+
+[23] Barbara Liskov. “Practical uses of synchronized clocks in distributed systems”. Distrib. Comput. 6.4 (July 1993), pp. 211–219.
+
+[24] David B. Lomet and Feifei Li. “Improving Transaction-Time DBMS Performance and Functionality”. Proc. of ICDE (2009), pp. 581–591.
+
+[25] Jacob R. Lorch et al. “The SMART way to migrate replicated stateful services”. Proc. of EuroSys. 2006, pp. 103–115.
+
+[26] MarkLogic. MarkLogic 5 Product Documentation. 2012.
+
+[27] Keith Marzullo and Susan Owicki. “Maintaining the time in a distributed system”. Proc. of PODC. 1983, pp. 295–305.
+
+[28] Sergey Melnik et al. “Dremel: Interactive Analysis of WebScale Datasets”. Proc. of VLDB. 2010, pp. 330–339.
+
+[29] D.L. Mills. Time synchronization in DCNET hosts. Internet Project Report IEN–173. COMSAT Laboratories, Feb. 1981.
+
+[30] Oracle. Oracle Total Recall. 2012.
+
+[31] Andrew Pavlo et al. “A comparison of approaches to large-scale data analysis”. Proc. of SIGMOD. 2009, pp. 165–178.
+
+[32] Daniel Peng and Frank Dabek. “Large-scale incremental processing using distributed transactions and notifications”. Proc. of OSDI. 2010, pp. 1–15.
+
+[33] Daniel J. Rosenkrantz, Richard E. Stearns, and Philip M. Lewis II. “System level concurrency control for distributed database systems”. ACM TODS 3.2 (June 1978), pp. 178–198.
+
+[34] Alexander Shraer et al. “Dynamic Reconfiguration of Primary/Backup Clusters”. Proc. of USENIX ATC. 2012, pp. 425–438.
+
+[35] Jeff Shute et al. “F1 — The Fault-Tolerant Distributed RDBMS Supporting Google’s Ad Business”. Proc. of SIGMOD. May 2012, pp. 777–778.
+
+[36] Yair Sovran et al. “Transactional storage for geo-replicated systems”. Proc. of SOSP. 2011, pp. 385–400.
+
+[37] Michael Stonebraker. Why Enterprises Are Uninterested in NoSQL. 2010.
+
+[38] Michael Stonebraker. Six SQL Urban Myths. 2010.
+
+[39] Michael Stonebraker et al. “The end of an architectural era: (it’s time for a complete rewrite)”. Proc. of VLDB. 2007, pp. 1150–1160.
+
+[40] Alexander Thomson et al. “Calvin: Fast Distributed Transactions for Partitioned Database Systems”. Proc. of SIGMOD. 2012, pp. 1–12.
+
+[41] Ashish Thusoo et al. “Hive — A Petabyte Scale Data Warehouse Using Hadoop”. Proc. of ICDE. 2010, pp. 996–1005.
+
+[42] VoltDB. VoltDB Resources. 2012.
+
+</div>
+
+## 附录A Paxos leader租约管理
+
+确保Paxos leader租约时间范围不相交的最简单的方法是，无论何时延长租约，都让leader提交一次同步的Paxos write。之后的leader会读取该时间范围并等到该范围过去。
+
+使用TrueTime可以在不需要额外日志写入的情况下确保不相交性。潜在的第$i$个leader在有$r$个副本的情况下，会在lease vote的开始时设置下界$v_{i,r}^{leader}=TT.now().earliest$，其是在$e_{i,r}^{send}$（leader发出租约请求的时间）之前计算的。每个副本$r$在当前租约的$e_{i,r}^{grant}$时授权新租约，其发生在$e_{i,r}^{receive}$（副本收到租约请求的时间）之后；租约在$t_{i,r}^{end}=TT.now().latest_10$时结束，其是在$e_{i,r}^{receive}$之后计算的。副本$r$遵循**一次投票（single-vote）**规则：在$TT.after(t_{i,r}^{end})$为true之前，它不会再次授权lease vote。为了在不同的$r$之间保证这一规则，在授权租约之前，Spanner会在给出授权的副本中记录lease vote；这次日志写入可通过已有的Paxos协议日志写入一并完成。
+
+当第$i$个leader收到一定数量的lease vote时（$e_i^{quorum}$事件），它会计算它的租约时间范围$lease_i=[TT.now().latest, \min_r(v_{i,r}^{leader})+10]$。当$TT.before(\min_r(v_{i,r}^{leader})+10)$为false，那么该leader会认为该租约过期。为了证明不相交性，我们使用了如下事实：第$i$个和第$(i+1)$个leader必须在它们的“大多数（quorum）”有一个副本的共用的。我们称该副本为$r_0$。证明：
+
+$$ lease_i.end=\min_r(v_{i,r}^{leader}) \tag{by definition} $$
+$$ min_r(v_{i,r}^{leader})+10 \le \min_r(v_{i,r}^{leader})+10 \tag{min} $$
+$$ v_{i,r_0}^{leader}+10 \le t_{abs}(e_{i,r_0}^{send})+10 \tag{by definition} $$
+$$ t_{abs}(e_{i,r_0}^{send})+10 \le t_{abs}(e_{i,r_0}^{receive})+10 \tag{causality} $$
+$$ t_{abs}(e_{i,r_0}^{receive})+10 \le t_{i,r_0}^{end} \tag{by definition} $$
+$$ t_{i,r_0}^{end} < t_{abs}(e_{i+1,r_0}^{grant}) \tag{single-vote} $$
+$$ t_{abs}(e_{i+1,r_0}^{grant}) \le t_{abs}(e_{i+1}^{quorum}) \tag{causality} $$
+$$ t_{abs}(e_{i+1}^{quorum}) \le lease_{i+1}.start \tag{by definition} $$
