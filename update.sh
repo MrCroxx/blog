@@ -10,12 +10,12 @@ git add .
 git commit -m "update"
 git push origin master
 
-# UPDATE GENERATED BLOG
 
-rm -r public/*
-hugo
-cd public
+# UPDATE GENERATED BLOG
+# coding
+rm -r build/coding/*
+hugo --baseURL=https://blog.mrcroxx.com --destination=build/coding
+cd build/coding
 git add .
 git commit -m "update"
 git push origin master
-
