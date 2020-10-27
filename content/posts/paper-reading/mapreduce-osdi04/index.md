@@ -163,7 +163,7 @@ master会定期ping每个worker。如果在一定时间内没有收到worker的�
 
 当一个起初被worker A执行的*map*任务因A发生故障而随后被worker B执行时，所有正在执行*reduce*任务的worker会被告知这个*map*任务被重新执行。任何没从worker A中读取完数据的*reduce*任务将会从worker B中读取数据。
 
-MapReduce可以弹性处理大规模worker故障。例如，在MapReduce操作中，由于在正在运行的集群中的网络维护工作导致了80台机器在几分钟内同时变得不可访问。MapReduce的master会简单地重新执行不可访问的worker的机器上已完成的工作，并继续执行后续任务，最终完成珍格格MapReduce操作。
+MapReduce可以弹性处理大规模worker故障。例如，在MapReduce操作中，由于在正在运行的集群中的网络维护工作导致了80台机器在几分钟内同时变得不可访问。MapReduce的master会简单地重新执行不可访问的worker的机器上已完成的工作，并继续执行后续任务，最终完成整个MapReduce操作。
 
 #### 3.3.2 master故障
 
