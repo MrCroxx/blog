@@ -13,7 +13,7 @@ resources:
   src: paper-reading.jpg
 ---
 
-*本篇文章是对论文[In Search of an Understandable Consensus Algorithm (Extended Version)](http://pages.cs.wisc.edu/~remzi/Classes/739/Spring2004/Papers/raft.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
+*本篇文章是对论文[Spanner: Google’s Globally-Distributed Database](https://dl.acm.org/doi/pdf/10.1145/2491245)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
 
 <!--more-->
