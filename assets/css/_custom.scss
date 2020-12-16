@@ -6,6 +6,12 @@
     & * {
         text-indent: 0;
     }
+
+    .admonition-content {
+        > p {
+            text-indent: 2rem;
+        }
+    }
 }
 
 .archive-item-date {
