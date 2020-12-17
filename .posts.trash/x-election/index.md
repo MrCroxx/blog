@@ -2,7 +2,7 @@
 title: "深入浅出etcd/raft —— 0x04 Raft选举"
 date: 2020-12-16T19:47:49+08:00
 lastmod: 2020-12-16T19:47:52+08:00
-draft: false
+draft: true
 keywords: []
 description: ""
 tags: ["etcd", "Raft"]
