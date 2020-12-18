@@ -48,4 +48,4 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 7. 日志 —— etcd/raft中快照
 8. 集群变更 —— simple
 9. 集群变更 —— joint
-10. linearizable —— ReadIndex分析
+10. Linearizable Read —— Log Read、ReadIndex、Lease Read
