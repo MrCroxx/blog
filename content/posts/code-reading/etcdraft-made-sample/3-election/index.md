@@ -82,29 +82,10 @@ etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、�
 
 ## 2. etcd/raft中Raft选举的实现
 
+本节中，我们将分析etcd/raft中选举部分的实现。
+### 2.1 MsgHup与hup
 
-
-
-
-
-
-# === STALE ===
-
-
-
-
-
-
-
-
-
-
-
-从本文开始，我们将一步一步地分析etcd/raft中对Raft算法的实现。
-
-## 1. MsgHup与hup
-
-在etcd/raft的Raft实现中，无论是选举超时还是开发者通过主动调用`Node`接口的`Campaign`方法，在追踪其源码实现时，我们都能看到它们都是通过让Raft状态机处理`MsgHup`消息实现的：
+在etcd/raft的实现中，选举的触发是通过`MsgHup`消息实现的，无论是主动触发选举还是因*election timeout*超时都是如此：
 
 ```go
 
@@ -134,40 +115,27 @@ func (r *raft) tickElection() {
 
 ```
 
-`MsgHup`消息非常简单，除了`Type`字段外，其它字段都为默认值。接下来，我们来看一下Raft状态机是如何处理`MsgHup`消息的：
+因此，我们可以跟着`MsgHup`的处理流程，分析etcd/raft中选举的实现。正如我们在[《深入浅出etcd/raft —— 0x02 etcd/raft总体设计》](/posts/code-reading/etcdraft-made-sample/2-overview/)中所说，etcd/raft通过`raft`结构体的`Step`方法实现Raft状态机的状态转移。
 
 ```go
 
-
-// *** raft.go ***
-
-switch m.Type {
+func (r *raft) Step(m pb.Message) error {
+	// ... ...
+	switch m.Type {
 	case pb.MsgHup:
 		if r.preVote {
 			r.hup(campaignPreElection)
 		} else {
 			r.hup(campaignElection)
-    }
-    
-    // ... ...
-
+		}
+	// ... ...
+	}
+	// ... ...
 }
 
 ```
 
-Raft状态机对`MsgHup`消息的处理也非常简单，其会根据配置中是否开启了预投票优化（pre vote），使用不同类型的参数调用`hup`方法。
-
-{{< admonition info 提示 >}}
-
-预投票（pre vote）机制在Diego Ongaro的博士论文《CONSENSUS: BRIDGING THEORY AND PRACTICE》的*9.6 Preventing disruptions when a server rejoins the cluster*的一节中提到，这里简单介绍下其优化的问题。
-
-当产生网络分区时，节点数少于法定数量（quorum）的分区中的任何节点都无法赢得选举。如果没有优化，它们在选举失败后，会不断地增大term并进入下一轮选举。这会导致这些节点的term远大于能够成功选举的分区的节点的term。当这些节点的网络恢复后，它们会重新加入集群。因为它们的term更大，它们可能会使集群当前的leader退位并通过一轮选举选出新的leader。
-
-为了避免这一问题，可以在真正的投票前，先进行一轮“预投票”。当节点选举超时或想主动成为leader时，它需要先向所有的节点发送预投票请求。收到预投票请求的节点会按照与投票请求相同的方式判断是否为其投票，但是自己不会进入**candidate**状态，而是等到真正投票时才可能变为**candidate**。发起预投票的节点只有收到法定数量的节点的投票时，才能进入真正的投票阶段。这样，在达不到法定数量节点的分区中，节点都无法真正进入投票阶段。这样，它们的term也不会增大，避免了重新加入集群时的问题。
-
-{{< /admonition >}}
-
-`hup`方法的源码如下：
+`Step`方法在处理`MsgHup`消息时，会根据当前配置中是否开启了`Pre-Vote`机制，以不同的参数调用`hup`方法。
 
 ```go
 
@@ -196,7 +164,7 @@ func (r *raft) hup(t CampaignType) {
 
 ```
 
-在`hup`方法中，其首先会检查当前节点是否已经是leader，如果已经是leader会直接返回。接下来，会通过`promotable`方法判断当前节点能否被提拔为leader。
+`hup`方法会对节点当前状态进行一些检查，如果检查通过才会试图让当前节点发起投票或预投票。首先，`hup`会检查当前节点是否已经是leader，如果已经是leader那么直接返回。接下来，`hup`通过`promotable()`方法判断当前节点能否提升为leader。
 
 ```go
 
@@ -209,19 +177,172 @@ func (r *raft) promotable() bool {
 
 ```
 
-`promotable`的判定规则有三条：
+`promotable()`的判定规则有三条：
 
 1. 当前节点是否已被集群移除。（通过`ProgressTracker.ProgressMap`映射中是否有当前节点的id的映射判断。当节点被从集群中移除后，被移除的节点id会被从该映射中移除。我们会在后续讲解集群配置变更的文章中详细分析其实现。）
 2. 当前节点是否为learner节点。
 3. 当前节点是否还有未被保存到稳定存储中的快照。
 
-这三条规则中，只要有一条为真，那么当前节点就无法成为leader。在`hup`方法中，除了当前节点的`promotable`需要为真，其还需要判断一条规则：
+这三条规则中，只要有一条为真，那么当前节点就无法成为leader。在`hup`方法中，除了需要`promotable()`为真，还需要判断一条规则：
 
 1. 当前的节点已提交的日志中，是否有还未被应用的集群配置变更`ConfChange`消息。
 
-如果当前节点已提交的日志中还有未应用的`ConfChange`消息，那么该节点也无法提拔为leader。
+如果当前节点已提交的日志中还有未应用的`ConfChange`消息，那么该节点也无法提升为leader。
 
 只有当以上条件都满足后，`hup`方法才会调用`campaign`方法，根据配置，开始投票或预投票。
 
-## 2. campaign方法与raft状态转移
+### 2.2 campaign
 
+`campaign`是用来发起投票或预投票的重要方法。
+
+```go
+
+// campaign transitions the raft instance to candidate state. This must only be
+// called after verifying that this is a legitimate transition.
+func (r *raft) campaign(t CampaignType) {
+	if !r.promotable() {
+		// This path should not be hit (callers are supposed to check), but
+		// better safe than sorry.
+		r.logger.Warningf("%x is unpromotable; campaign() should have been called", r.id)
+	}
+	var term uint64
+	var voteMsg pb.MessageType
+	if t == campaignPreElection {
+		r.becomePreCandidate()
+		voteMsg = pb.MsgPreVote
+		// PreVote RPCs are sent for the next term before we've incremented r.Term.
+		term = r.Term + 1
+	} else {
+		r.becomeCandidate()
+		voteMsg = pb.MsgVote
+		term = r.Term
+	}
+	if _, _, res := r.poll(r.id, voteRespMsgType(voteMsg), true); res == quorum.VoteWon {
+		// We won the election after voting for ourselves (which must mean that
+		// this is a single-node cluster). Advance to the next state.
+		if t == campaignPreElection {
+			r.campaign(campaignElection)
+		} else {
+			r.becomeLeader()
+		}
+		return
+	}
+	var ids []uint64
+	{
+		idMap := r.prs.Voters.IDs()
+		ids = make([]uint64, 0, len(idMap))
+		for id := range idMap {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	}
+	for _, id := range ids {
+		if id == r.id {
+			continue
+		}
+		r.logger.Infof("%x [logterm: %d, index: %d] sent %s request to %x at term %d",
+			r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), voteMsg, id, r.Term)
+
+		var ctx []byte
+		if t == campaignTransfer {
+			ctx = []byte(t)
+		}
+		r.send(pb.Message{Term: term, To: id, Type: voteMsg, Index: r.raftLog.lastIndex(), LogTerm: r.raftLog.lastTerm(), Context: ctx})
+	}
+}
+
+```
+
+因为调用`campaign`的方法不止有`hup`，`campaign`方法首先还是会检查`promotable()`是否为真。
+
+```go
+
+	if t == campaignPreElection {
+		r.becomePreCandidate()
+		voteMsg = pb.MsgPreVote
+		// PreVote RPCs are sent for the next term before we've incremented r.Term.
+		term = r.Term + 1
+	} else {
+		r.becomeCandidate()
+		voteMsg = pb.MsgVote
+		term = r.Term
+	}
+
+```
+
+在开启**Pre-Vote**后，首次调用`campaign`时，参数为`campaignPreElection`。此时会调用`becomePreCandidate`方法，该方法不会修改当前节点的`Term`值，因此发送的`MsgPreVote`消息的`Term`应为当前的`Term + 1 `。而如果没有开启**Pre-Vote**或已经完成预投票进入正式投票的流程时，会调用`becomeCandidate`方法。该方法会增大当前节点的`Term`，因此发送`MsgVote`消息的`Term`就是此时的`Term`。`becomeXXX`用来将当前状态机的状态与相关行为修改为相应的角色，我们会在后文详细分析其实现与修改后的行为。
+
+接下来，`campaign`方法开始发送投票请求。在向其它节点发送请求之前，该节点会先投票给自己：
+
+```go
+
+		if _, _, res := r.poll(r.id, voteRespMsgType(voteMsg), true); res == quorum.VoteWon {
+		// We won the election after voting for ourselves (which must mean that
+		// this is a single-node cluster). Advance to the next state.
+		if t == campaignPreElection {
+			r.campaign(campaignElection)
+		} else {
+			r.becomeLeader()
+		}
+		return
+	}
+
+```
+
+`poll`方法会在更新本地的投票状态并获取当前投票结果。如果节点投票给自己后就赢得了选举，这说明集群是以单节点的模式启动的，那么如果当前是预投票阶段当前节点就能立刻开启投票流程、如果已经在投票流程中就直接当选leader即可。如果集群不是以单节点的模式运行的，那么就需要向其它有资格投票的节点发送投票请求：
+
+```go
+
+	var ids []uint64
+	{
+		idMap := r.prs.Voters.IDs()
+		ids = make([]uint64, 0, len(idMap))
+		for id := range idMap {
+			ids = append(ids, id)
+		}
+		sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	}
+	for _, id := range ids {
+		if id == r.id {
+			continue
+		}
+		r.logger.Infof("%x [logterm: %d, index: %d] sent %s request to %x at term %d",
+			r.id, r.raftLog.lastTerm(), r.raftLog.lastIndex(), voteMsg, id, r.Term)
+
+		var ctx []byte
+		if t == campaignTransfer {
+			ctx = []byte(t)
+		}
+		r.send(pb.Message{Term: term, To: id, Type: voteMsg, Index: r.raftLog.lastIndex(), LogTerm: r.raftLog.lastTerm(), Context: ctx})
+	}
+
+```
+
+请求的`Term`字段就是我们之前记录的`term`，即预投票阶段为当前`Term + 1`、投票阶段为当前的`Term`。
+
+### 2.3 Step方法与step
+
+
+
+# === STALE ===
+
+```go
+
+func (r *raft) becomePreCandidate() {
+
+	// ... ...
+
+	// Becoming a pre-candidate changes our step functions and state,
+	// but doesn't change anything else. In particular it does not increase
+	// r.Term or change r.Vote.
+	r.step = stepCandidate
+	r.prs.ResetVotes()
+	r.tick = r.tickElection
+	r.lead = None
+	r.state = StatePreCandidate
+	r.logger.Infof("%x became pre-candidate at term %d", r.id, r.Term)
+}
+
+```
+
+在`becomePreCandidate`中，仅修改的`raft`结构体的`step`行为（`step`字段对应着不同角色的节点处理一些类型消息时的不同行为，可能的行为有`stepLeader`、`stepFollower`、和`stepCandidate`）和`state`状态，并重置记录的投票、当前的leader字段`lead`、和`tickElection`。
