@@ -87,9 +87,13 @@ etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、�
 
 当一个节点收到了term比自己低的消息时，原本的逻辑是直接忽略该消息，因为term比自己低的消息仅可能是因网络延迟的迟到的旧消息。然而，开启了这些机制后，在如下的场景中会出现问题：
 
-**场景1：** 在开启了**Check Quorum / Leader Lease**后（假设没有开启**Pre-Vote**，开启的情况与下一种情况相同），数量达不到quorum的分区中的leader会退位，此时，该分区中的节点永远都无法选举出leader。当该分区与整个集群的网络恢复后，由于开启了**Check Quorum / Leader Lease**，即使该分区中的节点有更大的term，由于原分区的节点工作正常，它们的选举请求会被丢弃。同时，由于该节点的term比原分区的leader节点的term大，因此它会丢弃原分区的leader的请求。这样，该节点永远都无法重新加入集群，也无法当选新leader。（详见[issue #5451](https://github.com/etcd-io/etcd/pull/5451)、[issue #5468](https://github.com/etcd-io/etcd/pull/5468)）。
+![场景1示意图](assets/check-quorum-leader-lease-bug.svg "场景1示意图")
 
-**场景2：** **Pre-Vote**机制也有类似的问题。假如发起预投票的节点，在预投票通过后正要发起正式投票的请求时出现网络分区。此时，该节点的term会高于原集群的term。而原集群因没有收到真正的投票请求，不会更新term，继续正常运行。在网络分区恢复后，原集群的term低于分区节点的term，但是日志比分区节点更新。此时，该节点发起的预投票请求因没有日志落后会被丢弃，而原集群leader发给该节点的请求会因term比该节点小而被丢弃。同样，该节点永远都无法重新加入集群，也无法当选新leader。（详见[issue #8501](https://github.com/etcd-io/etcd/issues/8501)、[issue #8525](https://github.com/etcd-io/etcd/pull/8525)）。
+**场景1：** 如上图所示，在开启了**Check Quorum / Leader Lease**后（假设没有开启**Pre-Vote**，**Pre-Vote**的问题在下一场景中讨论），数量达不到quorum的分区中的leader会退位，且该分区中的节点永远都无法选举出leader，因此该分区的节点的term会不断增大。当该分区与整个集群的网络恢复后，由于开启了**Check Quorum / Leader Lease**，即使该分区中的节点有更大的term，由于原分区的节点工作正常，它们的选举请求会被丢弃。同时，由于该节点的term比原分区的leader节点的term大，因此它会丢弃原分区的leader的请求。这样，该节点永远都无法重新加入集群，也无法当选新leader。（详见[issue #5451](https://github.com/etcd-io/etcd/pull/5451)、[issue #5468](https://github.com/etcd-io/etcd/pull/5468)）。
+
+![场景2示意图](assets/pre-vote-bug.svg "场景2示意图")
+
+**场景2：** **Pre-Vote**机制也有类似的问题。如上图所示，假如发起预投票的节点，在预投票通过后正要发起正式投票的请求时出现网络分区。此时，该节点的term会高于原集群的term。而原集群因没有收到真正的投票请求，不会更新term，继续正常运行。在网络分区恢复后，原集群的term低于分区节点的term，但是日志比分区节点更新。此时，该节点发起的预投票请求因没有日志落后会被丢弃，而原集群leader发给该节点的请求会因term比该节点小而被丢弃。同样，该节点永远都无法重新加入集群，也无法当选新leader。（详见[issue #8501](https://github.com/etcd-io/etcd/issues/8501)、[issue #8525](https://github.com/etcd-io/etcd/pull/8525)）。
 
 **场景3：** 在更复杂的情况中，比如，在变更配置时，开启了原本没有开启的**Pre-Vote**机制。此时可能会出现与上一条类似的情况，即可能因term更高但是log更旧的节点的存在导致整个集群的死锁，所有节点都无法预投票成功。这种情况比上一种情况更危险，上一种情况只有之前分区的节点无法加入集群，在这种情况下，整个集群都会不可用。（详见[issue #8501](https://github.com/etcd-io/etcd/issues/8501)、[issue #8525](https://github.com/etcd-io/etcd/pull/8525)）。
 
