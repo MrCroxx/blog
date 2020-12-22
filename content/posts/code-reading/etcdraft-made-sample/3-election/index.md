@@ -588,4 +588,81 @@ case m.Term < r.Term:
 
 ### 2.4 becomeXXX与stepXXX
 
+在上文中我们介绍过，`becomeXXX`函数用于将切换Raft状态机的角色，`stepXXX`是Raft状态机的相应角色下状态转移的行为。etcd/raft中`becomeXXX`共有四种：`becomeFollower`、`becomeCandidate`、`becomePreCandidate`、`becomeLeader`，`stepXXX`共有三种：`stepLeader`、`stepCandidate`、`stepFollower`，`becomeCandidate`和`becomePreCandidate`相应的行为均为`stepCandidate`。
+
+本节中，我们将介绍`becomeXXX`和`stepXXX`中与选举相关的逻辑。
+
+#### 2.4.1 Candidate、PreCandidate
+
+`Candidate`和`PreCandidate`的行为有很多相似之处，本节我们将分析二者行为并比对异同之处。
+
+```go
+
+func (r *raft) becomeCandidate() {
+	// ... ...
+	r.step = stepCandidate
+	r.reset(r.Term + 1)
+	r.tick = r.tickElection
+	r.Vote = r.id
+	r.state = StateCandidate
+	r.logger.Infof("%x became candidate at term %d", r.id, r.Term)
+}
+
+func (r *raft) becomePreCandidate() {
+	// ... ...
+	// Becoming a pre-candidate changes our step functions and state,
+	// but doesn't change anything else. In particular it does not increase
+	// r.Term or change r.Vote.
+	r.step = stepCandidate
+	r.prs.ResetVotes()
+	r.tick = r.tickElection
+	r.lead = None
+	r.state = StatePreCandidate
+	r.logger.Infof("%x became pre-candidate at term %d", r.id, r.Term)
+}
+
+```
+
+首先，`becomeCandidate`与`becomePreCandidate`
+
+
+```go
+
+func (r *raft) reset(term uint64) {
+	if r.Term != term {
+		r.Term = term
+		r.Vote = None
+	}
+	r.lead = None
+
+	r.electionElapsed = 0
+	r.heartbeatElapsed = 0
+	r.resetRandomizedElectionTimeout()
+
+	r.abortLeaderTransfer()
+
+	r.prs.ResetVotes()
+	r.prs.Visit(func(id uint64, pr *tracker.Progress) {
+		*pr = tracker.Progress{
+			Match:     0,
+			Next:      r.raftLog.lastIndex() + 1,
+			Inflights: tracker.NewInflights(r.prs.MaxInflight),
+			IsLearner: pr.IsLearner,
+		}
+		if id == r.id {
+			pr.Match = r.raftLog.lastIndex()
+		}
+	})
+
+	r.pendingConfIndex = 0
+	r.uncommittedSize = 0
+	r.readOnly = newReadOnly(r.readOnly.option)
+}
+
+```
+
+#### 2.4.2 Follower
+
+#### 2.4.3 Leader
+
 ***施工中... ...***
