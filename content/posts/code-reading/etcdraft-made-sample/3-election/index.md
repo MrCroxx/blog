@@ -23,11 +23,17 @@ resources:
 
 本文首先会简单介绍etcd/raft对Raft选举部分的算法优化，然后通过源码分析etcd/raft的选举实现。
 
+{{< admonition info 提示 >}}
+
+由于选举是Raft算法中重要且复杂的部分，因此其代码分布比较零散。只想了解etcd/raft中对Raft算法做出的优化的读者可以只看本文的第一章。对于想要深入etcd/raft源码实现的读者，建议自己先按照自己的节奏阅读源码，对于不太理解的地方可以参考本文的分析，如果直接从本文的分析入手，可能会感觉有些绕。
+
+{{< /admonition >}}
+
 ## 1. Raft选举算法优化
 
 在leader选举方面，etcd/raft对《In Search of an Understandable Consensus Algorithm (Extended Version)》中介绍的基本Raft算法做了三种优化。这三种优化都在Diego Ongaro的博士论文《CONSENSUS: BRIDGING THEORY AND PRACTICE》的*6.4 Processing read-only queries more efficiently*和*9.6 Preventing disruptions when a server rejoins the cluster*中有提到。
 
-etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、和**Leader Lease**。在这三种优化中，只有**Pre-Vote**和**Leader Lease**最初是对选举过程的优化，**Check Quorum**期初是为了更高效地实现线性一致性读（Linearizable Read）而做出的优化，但是由于**Leader Lease**需要依赖**Check Quorum**，因此我们也将其放在这里一起讲解。本系列将etcd/raft对实现线性一致性读的优化留在了后续的文章中，本文仅介绍为了实现更高效的线性一致性读需要在选举部分做出的优化。
+etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、和**Leader Lease**。在这三种优化中，只有**Pre-Vote**和**Leader Lease**最初是对选举过程的优化，**Check Quorum**期初是为了更高效地实现线性一致性读（Linearizable Read）而做出的优化，但是由于**Leader Lease**需要依赖**Check Quorum**，因此笔者也将其放在这里一起讲解。本系列将etcd/raft对实现线性一致性读的优化留在了后续的文章中，本文仅介绍为了实现更高效的线性一致性读需要在选举部分做出的优化。
 
 除此之外，etcd/raft还实现了**Leader Transfer**，即主动地进行leader的交接。其实现方式比较简单，只需要让希望成为新leader节点主动发起投票请求即可，这里不再过多讲解。需要注意的是，**Leader Transfer**不保证交接一定成功，只有希望成为新leader的节点能够得到数量达到quorum的选票时才能当选leader，**Leader Transfer**类型的投票不受**Pre-Vote**、**Check Quorum**、**Leader Lease**机制约束。
 
@@ -69,7 +75,7 @@ etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、�
 
 **Leader Lease**机制对投票引入了一条新的约束以解决这一问题：当节点在*election timeout*超时前，如果收到了leader的消息，那么它不会为其它发起投票或预投票请求的节点投票。也就是说，**Leader Lease**机制会阻止了正常工作的集群中的节点给其它节点投票。
 
-**Leader Lease**需要依赖**Check Quorum**机制才能正常工作。接下来我们通过一个例子说明其原因。
+**Leader Lease**需要依赖**Check Quorum**机制才能正常工作。接下来笔者通过一个例子说明其原因。
 
 假如在一个5个节点组成的Raft集群中，出现了下图中的分区情况：*Node 1*与*Node 2*互通，*Node 3*、*Node 4*、*Node 5*之间两两互通、*Node 5*与任一节点不通。在网络分区前，*Node 1*是集群的leader。
 
@@ -104,7 +110,7 @@ etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、�
 
 ## 2. etcd/raft中Raft选举的实现
 
-本节中，我们将分析etcd/raft中选举部分的实现。
+本节中，笔者将分析etcd/raft中选举部分的实现。
 ### 2.1 MsgHup与hup
 
 在etcd/raft的实现中，选举的触发是通过`MsgHup`消息实现的，无论是主动触发选举还是因*election timeout*超时都是如此：
@@ -137,7 +143,7 @@ func (r *raft) tickElection() {
 
 ```
 
-因此，我们可以跟着`MsgHup`的处理流程，分析etcd/raft中选举的实现。正如我们在[《深入浅出etcd/raft —— 0x02 etcd/raft总体设计》](/posts/code-reading/etcdraft-made-sample/2-overview/)中所说，etcd/raft通过`raft`结构体的`Step`方法实现Raft状态机的状态转移。
+因此可以跟着`MsgHup`的处理流程，分析etcd/raft中选举的实现。正如笔者在[《深入浅出etcd/raft —— 0x02 etcd/raft总体设计》](/posts/code-reading/etcdraft-made-sample/2-overview/)中所说，etcd/raft通过`raft`结构体的`Step`方法实现Raft状态机的状态转移。
 
 ```go
 
@@ -165,7 +171,7 @@ func (r *raft) Step(m pb.Message) error {
 | `campaignElection` | 表示正常的选举阶段（仅超时选举，不包括**Leader Transfer**）。 |
 | `campaignTransfer` | 表示**Leader Transfer**阶段。 |
 
-接下来我们进入`hup`的实现。
+接下来对`hup`的实现进行分析。
 
 ```go
 
@@ -209,7 +215,7 @@ func (r *raft) promotable() bool {
 
 `promotable()`的判定规则有三条：
 
-1. 当前节点是否已被集群移除。（通过`ProgressTracker.ProgressMap`映射中是否有当前节点的id的映射判断。当节点被从集群中移除后，被移除的节点id会被从该映射中移除。我们会在后续讲解集群配置变更的文章中详细分析其实现。）
+1. 当前节点是否已被集群移除。（通过`ProgressTracker.ProgressMap`映射中是否有当前节点的id的映射判断。当节点被从集群中移除后，被移除的节点id会被从该映射中移除。笔者会在后续讲解集群配置变更的文章中详细分析其实现。）
 2. 当前节点是否为learner节点。
 3. 当前节点是否还有未被保存到稳定存储中的快照。
 
@@ -300,7 +306,7 @@ func (r *raft) campaign(t CampaignType) {
 
 ```
 
-在开启**Pre-Vote**后，首次调用`campaign`时，参数为`campaignPreElection`。此时会调用`becomePreCandidate`方法，该方法不会修改当前节点的`Term`值，因此发送的`MsgPreVote`消息的`Term`应为当前的`Term + 1 `。而如果没有开启**Pre-Vote**或已经完成预投票进入正式投票的流程或是**Leader Transfer**时（即使开启了**Pre-Vote**，**Leader Transfer**也不会进行预投票），会调用`becomeCandidate`方法。该方法会增大当前节点的`Term`，因此发送`MsgVote`消息的`Term`就是此时的`Term`。`becomeXXX`用来将当前状态机的状态与相关行为切换相应的角色，我们会在后文详细分析其实现与修改后的行为。
+在开启**Pre-Vote**后，首次调用`campaign`时，参数为`campaignPreElection`。此时会调用`becomePreCandidate`方法，该方法不会修改当前节点的`Term`值，因此发送的`MsgPreVote`消息的`Term`应为当前的`Term + 1 `。而如果没有开启**Pre-Vote**或已经完成预投票进入正式投票的流程或是**Leader Transfer**时（即使开启了**Pre-Vote**，**Leader Transfer**也不会进行预投票），会调用`becomeCandidate`方法。该方法会增大当前节点的`Term`，因此发送`MsgVote`消息的`Term`就是此时的`Term`。`becomeXXX`用来将当前状态机的状态与相关行为切换相应的角色，笔者会在后文详细分析其实现与修改后的行为。
 
 接下来，`campaign`方法开始发送投票请求。在向其它节点发送请求之前，该节点会先投票给自己：
 
@@ -348,11 +354,11 @@ func (r *raft) campaign(t CampaignType) {
 
 ```
 
-请求的`Term`字段就是我们之前记录的`term`，即预投票阶段为当前`Term + 1`、投票阶段为当前的`Term`。
+请求的`Term`字段就是之前记录的`term`，即预投票阶段为当前`Term + 1`、投票阶段为当前的`Term`。
 
 ### 2.3 Step方法与step
 
-在前文中，我们提到过`Step`函数是Raft状态机状态转移的入口方法，`Step`方法的参数是Raft消息。`Step`方法会检查消息的`Term`字段，对不同的情况进行不同的处理。`Step`方法还会对与选举相关的一些的消息进行特殊的处理。最后，`Step`会调用`raft`接口体`step`字段中记录的函数签名。`step`字段的定义如下：
+在前文中，笔者提到过`Step`函数是Raft状态机状态转移的入口方法，`Step`方法的参数是Raft消息。`Step`方法会检查消息的`Term`字段，对不同的情况进行不同的处理。`Step`方法还会对与选举相关的一些的消息进行特殊的处理。最后，`Step`会调用`raft`接口体`step`字段中记录的函数签名。`step`字段的定义如下：
 
 ```go
 
@@ -426,7 +432,7 @@ etcd/raft使用`Term`为0的消息作为本地消息，`Step`不会对本地消�
 对于`Term`大于当前节点的`Term`的消息，如果消息类型为`MsgVote`或`MsgPreVote`，先要检查这些消息是否需要处理。其判断规则如下：
 
 1. `force`：如果该消息的`CampaignType`为`campaignTransfer`，`force`为真，表示该消息必须被处理。
-2. `inLease`：如果开启了**Check Quorum**（开启**Check Quorum**会自动开启**Leader Lease**），且*election timout*超时前收到过leader的消息，那么`inLease`为真，表示当前Leader Lease还没有过期。
+2. `inLease`：如果开启了**Check Quorum**（开启**Check Quorum**会自动开启**Leader Lease**），且*election timeout*超时前收到过leader的消息，那么`inLease`为真，表示当前Leader Lease还没有过期。
 
 如果`!force && inLease`，说明该消息不需要被处理，可以直接返回。
 
@@ -503,7 +509,7 @@ case m.Term < r.Term:
 
 #### 2.3.4 不通过step处理的情况
 
-除了在预处理阶段中直接丢弃的消息外，还有一些消息不会通过`step`字段记录的函数处理。我们先来介绍这些消息，之后分角色介绍`step`与`becomeXXX`在不同情况下的处理方式。
+除了在预处理阶段中直接丢弃的消息外，还有一些消息不会通过`step`字段记录的函数处理。笔者先来介绍这些消息，之后分角色介绍`step`与`becomeXXX`在不同情况下的处理方式。
 
 ```go
 
@@ -576,7 +582,7 @@ case m.Term < r.Term:
 
 ```
 
-第一种情况是我们熟悉的`MsgHup`消息，这种消息的处理见[2.1节](#21-msghup与hup)。
+第一种情况是大家熟悉的`MsgHup`消息，这种消息的处理见[2.1节](#21-msghup与hup)。
 
 第二种情况是`MsgVote`和`MsgPreVote`消息。首先需要判断该节点能否为其投票。其判断规则有3条：
 
@@ -584,7 +590,7 @@ case m.Term < r.Term:
 2. 如果该节点还没有投过票且当前term内还没有leader，那么该节点可以为其投票。
 3. 如果这是`MsgPreVote`消息且其`Term`大于当前节点的`Term`，那么该节点可以为其投票。
 
-如果满足以上3个条件中的任一条，且该消息中的`Index`和`Term`至少与当前节点的日志一样新，那么该节点为其发送相应的投票消息。如果该消息的是`MsgVote`消息，该节点需要记录其将选票投给了谁，并重置`election timout`的计时器。
+如果满足以上3个条件中的任一条，且该消息中的`Index`和`Term`至少与当前节点的日志一样新，那么该节点为其发送相应的投票消息。如果该消息的是`MsgVote`消息，该节点需要记录其将选票投给了谁，并重置`election timeout`的计时器。
 
 否则，节点会为其发送一条`Reject`为真的消息，以避免[1.4节](#14-引入的新问题与解决方案)中提到的问题。
 
@@ -592,13 +598,13 @@ case m.Term < r.Term:
 
 ### 2.4 becomeXXX与stepXXX
 
-在上文中我们介绍过，`becomeXXX`函数用于将切换Raft状态机的角色，`stepXXX`是Raft状态机的相应角色下状态转移的行为。etcd/raft中`becomeXXX`共有四种：`becomeFollower`、`becomeCandidate`、`becomePreCandidate`、`becomeLeader`，`stepXXX`共有三种：`stepLeader`、`stepCandidate`、`stepFollower`，`becomeCandidate`和`becomePreCandidate`相应的行为均为`stepCandidate`。
+在上文中笔者介绍过，`becomeXXX`函数用于将切换Raft状态机的角色，`stepXXX`是Raft状态机的相应角色下状态转移的行为。etcd/raft中`becomeXXX`共有四种：`becomeFollower`、`becomeCandidate`、`becomePreCandidate`、`becomeLeader`，`stepXXX`共有三种：`stepLeader`、`stepCandidate`、`stepFollower`，`becomeCandidate`和`becomePreCandidate`相应的行为均为`stepCandidate`。
 
-本节中，我们将介绍`becomeXXX`和`stepXXX`中与选举相关的逻辑。
+本节中，笔者将介绍`becomeXXX`和`stepXXX`中与选举相关的逻辑。
 
 #### 2.4.1 Candidate、PreCandidate
 
-`Candidate`和`PreCandidate`的行为有很多相似之处，本节我们将分析二者行为并比对异同之处。
+`Candidate`和`PreCandidate`的行为有很多相似之处，本节笔者将分析二者行为并比对异同之处。
 
 ```go
 
@@ -625,13 +631,6 @@ func (r *raft) becomePreCandidate() {
 	r.logger.Infof("%x became pre-candidate at term %d", r.id, r.Term)
 }
 
-```
-
-首先，`becomeCandidate`与`becomePreCandidate`
-
-
-```go
-
 func (r *raft) reset(term uint64) {
 	if r.Term != term {
 		r.Term = term
@@ -646,27 +645,291 @@ func (r *raft) reset(term uint64) {
 	r.abortLeaderTransfer()
 
 	r.prs.ResetVotes()
-	r.prs.Visit(func(id uint64, pr *tracker.Progress) {
-		*pr = tracker.Progress{
-			Match:     0,
-			Next:      r.raftLog.lastIndex() + 1,
-			Inflights: tracker.NewInflights(r.prs.MaxInflight),
-			IsLearner: pr.IsLearner,
-		}
-		if id == r.id {
-			pr.Match = r.raftLog.lastIndex()
-		}
-	})
+	
+	// ... ...
 
-	r.pendingConfIndex = 0
-	r.uncommittedSize = 0
-	r.readOnly = newReadOnly(r.readOnly.option)
 }
 
 ```
 
-#### 2.4.2 Follower
+预选举与选举的区别在主要在于预选举不会改变状态机的term也不会修改当前term的该节点投出的选票。下表列出了`becomePreCandidate`和`becomeCandidate`修改或未修改的与选举相关的重要字段：
 
-#### 2.4.3 Leader
+| 重要字段<div style="width: 6em"></div> | becomePreCandidate | becomCandidate | 描述 |
+| :-: | :-: | :-: | :- |
+| `step` | `stepCandidate` | `stepCandidate` | `step`行为 |
+| `tick` | `tickElection` | `tickElection` | `tick`行为 |
+| `Vote` | *mot modified* | *current node*.`id` | 当前term将选票投给谁 |
+| `state` | `StatePreCandidate` | `StateCandidate` | 状态机角色 |
+| `lead` | None | None | 当前term的leader |
+| `prs.Votes` | *rest* | *reset* | 收到的选票 |
 
-***施工中... ...***
+无论是`PreCandidate`还是`PreCandidate`，其行为都是`stepCandidate`。其中，部分字段是通过`reset`函数修改的。`reset`方法用于状态机切换角色时初始化相关字段。因为切换到`PreCandidate`严格来说并不算真正地切换角色，因此`becomePreCandidate`中没有调用`reset`方法，而`becomeCandidate`、`becomeLeader`、`becomeFollower`都调用了`reset`方法。本文仅关注`reset`中与选举有关的部分，`reset`中还有一些与日志复制相关的逻辑，笔者会在后续的文章中分析。
+
+接下来分析`stepCandiate`中与选举相关的逻辑：
+
+```go
+
+// stepCandidate is shared by StateCandidate and StatePreCandidate; the difference is
+// whether they respond to MsgVoteResp or MsgPreVoteResp.
+func stepCandidate(r *raft, m pb.Message) error {
+	// Only handle vote responses corresponding to our candidacy (while in
+	// StateCandidate, we may get stale MsgPreVoteResp messages in this term from
+	// our pre-candidate state).
+	var myVoteRespType pb.MessageType
+	if r.state == StatePreCandidate {
+		myVoteRespType = pb.MsgPreVoteResp
+	} else {
+		myVoteRespType = pb.MsgVoteResp
+	}
+	switch m.Type {
+	case pb.MsgProp:
+		r.logger.Infof("%x no leader at term %d; dropping proposal", r.id, r.Term)
+		return ErrProposalDropped
+	case pb.MsgApp:
+		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
+		r.handleAppendEntries(m)
+	case pb.MsgHeartbeat:
+		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
+		r.handleHeartbeat(m)
+	case pb.MsgSnap:
+		r.becomeFollower(m.Term, m.From) // always m.Term == r.Term
+		r.handleSnapshot(m)
+	case myVoteRespType:
+		gr, rj, res := r.poll(m.From, m.Type, !m.Reject)
+		r.logger.Infof("%x has received %d %s votes and %d vote rejections", r.id, gr, m.Type, rj)
+		switch res {
+		case quorum.VoteWon:
+			if r.state == StatePreCandidate {
+				r.campaign(campaignElection)
+			} else {
+				r.becomeLeader()
+				r.bcastAppend()
+			}
+		case quorum.VoteLost:
+			// pb.MsgPreVoteResp contains future term of pre-candidate
+			// m.Term > r.Term; reuse r.Term
+			r.becomeFollower(r.Term, None)
+		}
+	case pb.MsgTimeoutNow:
+		r.logger.Debugf("%x [term %d state %v] ignored MsgTimeoutNow from %x", r.id, r.Term, r.state, m.From)
+	}
+	return nil
+}
+
+```
+
+从如上代码中，可以看到`PreCandidate`或`Candidate`对不同种消息的处理方式：
+
+1. `MsgProp`、`MsgTimeoutNow`：丢弃。
+2. `MsgApp`、`MsgHeartbeat`、`MsgSnap`：收到了来自leader的消息，转为follower。
+3. 相应地`MsgPreVoteResp`或`MsgVoteResp`：通过`poll`记录选票并获取当前选举状态。
+
+在条件3中，当前节点在获取选举状态后，会根据不同的状态做出不同的处理：
+
+1. `VotePending`：暂无选举结果，不做处理。
+2. `VoteWon`：赢得选举，如果当前状态机的角色是`PreCandidate`，那么调用`campaign`进行正式选举；如果当前状态机的角色是`Candidate`，那么当选leader，并向集群广播`MsgAppend`消息以通知集群中节点已有leader产生。
+3. `VoteLost`：选举失败，变为follower。
+
+{{< admonition info 提示 >}}
+
+`stepXXX`中处理的消息都是已经在`Step`中预处理后的消息，有些消息可能被过滤掉了。其详细的逻辑见[2.3节](#23-step方法与step)。
+
+{{< /admonition >}}
+
+#### 2.4.2 Leader
+
+leader中与选举相关逻辑的比重较少，这里简单介绍一下。
+
+首先，是`becomeLeader`及其修改的选举相关的重要字段：
+
+```go
+
+func (r *raft) becomeLeader() {
+	// ... ...
+	r.step = stepLeader
+	r.reset(r.Term)
+	r.tick = r.tickHeartbeat
+	r.lead = r.id
+	r.state = StateLeader
+	// ... ...
+}
+
+```
+
+| 重要字段<div style="width: 6em"></div> | becomeLeader | 描述 |
+| :-: | :-: | :-: | :- |
+| `step` | `stepLeader` | `step`行为 |
+| `tick` | `tickHeartbeat` | `tick`行为 |
+| `Vote` | None or *not modified* | 当前term将选票投给谁，如果term没有更新，那么不会修改该字段。 |
+| `state` | `StateLeader` | 状态机角色 |
+| `lead` | *current node*.id | 当前term的leader |
+| `prs.Votes` | *rest* | 收到的选票 |
+
+接下来，分析`stepLeader`中与选举相关的逻辑：
+
+```go
+
+func stepLeader(r *raft, m pb.Message) error {
+	// These message types do not require any progress for m.From.
+	switch m.Type {
+	case pb.MsgBeat:
+		r.bcastHeartbeat()
+		return nil
+	case pb.MsgCheckQuorum:
+		// The leader should always see itself as active. As a precaution, handle
+		// the case in which the leader isn't in the configuration any more (for
+		// example if it just removed itself).
+		//
+		// TODO(tbg): I added a TODO in removeNode, it doesn't seem that the
+		// leader steps down when removing itself. I might be missing something.
+		if pr := r.prs.Progress[r.id]; pr != nil {
+			pr.RecentActive = true
+		}
+		if !r.prs.QuorumActive() {
+			r.logger.Warningf("%x stepped down to follower since quorum is not active", r.id)
+			r.becomeFollower(r.Term, None)
+		}
+		// Mark everyone (but ourselves) as inactive in preparation for the next
+		// CheckQuorum.
+		r.prs.Visit(func(id uint64, pr *tracker.Progress) {
+			if id != r.id {
+				pr.RecentActive = false
+			}
+		})
+		return nil
+	// ... ...
+	}
+
+	// All other message types require a progress for m.From (pr).
+	pr := r.prs.Progress[m.From]
+	if pr == nil {
+		r.logger.Debugf("%x no progress available for %x", r.id, m.From)
+		return nil
+	}
+	switch m.Type {
+	// ... ...
+	case pb.MsgTransferLeader:
+		if pr.IsLearner {
+			r.logger.Debugf("%x is learner. Ignored transferring leadership", r.id)
+			return nil
+		}
+		leadTransferee := m.From
+		lastLeadTransferee := r.leadTransferee
+		if lastLeadTransferee != None {
+			if lastLeadTransferee == leadTransferee {
+				r.logger.Infof("%x [term %d] transfer leadership to %x is in progress, ignores request to same node %x",
+					r.id, r.Term, leadTransferee, leadTransferee)
+				return nil
+			}
+			r.abortLeaderTransfer()
+			r.logger.Infof("%x [term %d] abort previous transferring leadership to %x", r.id, r.Term, lastLeadTransferee)
+		}
+		if leadTransferee == r.id {
+			r.logger.Debugf("%x is already leader. Ignored transferring leadership to self", r.id)
+			return nil
+		}
+		// Transfer leadership to third party.
+		r.logger.Infof("%x [term %d] starts to transfer leadership to %x", r.id, r.Term, leadTransferee)
+		// Transfer leadership should be finished in one electionTimeout, so reset r.electionElapsed.
+		r.electionElapsed = 0
+		r.leadTransferee = leadTransferee
+		if pr.Match == r.raftLog.lastIndex() {
+			r.sendTimeoutNow(leadTransferee)
+			r.logger.Infof("%x sends MsgTimeoutNow to %x immediately as %x already has up-to-date log", r.id, leadTransferee, leadTransferee)
+		} else {
+			r.sendAppend(leadTransferee)
+		}
+	}
+	return nil
+}
+
+```
+
+`stepLeader`中处理的消息可以分为两类，一类是不需要知道谁是发送者的消息（大多数为本地消息），另一类需要知道谁是发送者的消息（大多数为来自其它节点的消息）。
+
+`stepLeader`中对第一类消息的处理方式如下：
+
+1. `MsgBeat`：该消息为*heartbeat timeout*超时后通知leader广播心跳消息的消息。因此，收到该消息后，广播心跳消息。
+2. `MsgCheckQuorum`：该消息为开启**Check Quorum**时*election timeout*超时后通知leader进行相关操作的消息。因此，检查活跃的节点数是否达到quorum，如果无法达到，那么退位为follower（其相关操作涉及`ProgressTracker`，笔者会在后续的文章中分析，这里只需要知道其作用即可）。
+
+第二类消息中，与选举相关的只有`MsgTransferLeader`消息：
+
+1. 忽略来自learner的`MsgTransferLeader`消息。
+2. 判断是否正在进行**Leader Transfer**，如果正在进行但转移的目标相同，那么不再做处理；如果正在进行但转移的目标不同，那么打断正在进行的**Leader Transfer**，而执行新的转移。
+3. 如果转移目标是当前节点，而当前节点已经是leader了，那么不做处理。
+4. 记录转移目标，以用做第2步中是否打断上次转移的依据。
+5. 判断目标的日志是否跟上了leader。如果跟上了，向其发送`MsgTimeoutNow`消息，让其立即超时并进行新的选举；否则正常向其发送日志。
+
+#### 2.4.3 Follower
+
+follower中与选举相关的逻辑不是很多。
+
+首先，还是对`becomeFollower`中的与选举相关的逻辑进行分析：
+
+```go
+
+func (r *raft) becomeFollower(term uint64, lead uint64) {
+	r.step = stepFollower
+	r.reset(term)
+	r.tick = r.tickElection
+	r.lead = lead
+	r.state = StateFollower
+	r.logger.Infof("%x became follower at term %d", r.id, r.Term)
+}
+
+```
+
+| 重要字段<div style="width: 6em"></div> | becomeFollower | 描述 |
+| :-: | :-: | :-: | :- |
+| `step` | `stepFollower` | `step`行为 |
+| `tick` | `tickElection` | `tick`行为 |
+| `state` | `StateFollower` | 状态机角色 |
+| `lead` | 参数`lead` | 当前term的leader |
+
+接下来分析`stepFollower`中对与选举相关的消息的处理：
+
+```go
+
+func stepFollower(r *raft, m pb.Message) error {
+	switch m.Type {
+	// ... ...
+	case pb.MsgApp:
+		r.electionElapsed = 0
+		r.lead = m.From
+		// ... ...
+	case pb.MsgHeartbeat:
+		r.electionElapsed = 0
+		r.lead = m.From
+		// ... ...
+	case pb.MsgSnap:
+		r.electionElapsed = 0
+		r.lead = m.From
+		// ... ...
+	case pb.MsgTransferLeader:
+		if r.lead == None {
+			r.logger.Infof("%x no leader at term %d; dropping leader transfer msg", r.id, r.Term)
+			return nil
+		}
+		m.To = r.lead
+		r.send(m)
+	case pb.MsgTimeoutNow:
+		r.logger.Infof("%x [term %d] received MsgTimeoutNow from %x and starts an election to get leadership.", r.id, r.Term, m.From)
+		// Leadership transfers never use pre-vote even if r.preVote is true; we
+		// know we are not recovering from a partition so there is no need for the
+		// extra round trip.
+		r.hup(campaignTransfer)
+	// ... ...
+	return nil
+}
+
+```
+
+可以看到，follower在收到来自leader的`MsgApp`、`MsgHeartbeat`、`MsgSnap`消息后，会更新当前记录的leader并重置`election timeout`定时器。而收到应发给leader的消息后，会把消息转发给leader（如`MsgTransferLeader`消息，这里给出的代码中还省略了一些消息）。因此，这里真正需要关心的与选举相关的消息只有`MsgTimeoutNow`。
+
+在[2.4.2节](#242-leader)中可以看到，`MsgTimeoutNow`消息是发生**Leader Transfer**时，leader通知目标节点立即超时并发起选举请求的消息。因此，这里直接以`campaignTransfer`作为参数调用了`hup`方法。在[2.1节](#21-msghup与hup)和[2.2节](#22-campaign)中可以看到，`hup`和`campaign`方法对`campaignTransfer`和`campaignVote`的处理几乎一致，只有在写入发起投票的消息时，如果进行的是**Leader Transfer**，那么会将`campaignTransfer`写入到消息的`Context`字段中。在消息的接收方处理该消息时，如果`Context`字段为`campaignTransfer`，那么不会直接忽略该消息，这一点我们可以在[2.3.2节](#232-对term大于当前节点term的消息的预处理)中看到。
+
+## 3. 总结
+
+本文首先介绍了etcd/raft实现的Raft选举优化，并介绍了使用选举优化后引入的新问题与解决方案，接着对etcd/raft中与选举有关的源码层层深入地分析。
+
+由于选举是Raft算法中重要且复杂的部分，因此其代码分布比较零散。只想了解etcd/raft中对Raft算法做出的优化的读者可以只看本文的第一章。对于想要深入etcd/raft源码实现的读者，建议自己先按照自己的节奏阅读源码，对于不太理解的地方可以参考本文的分析，如果直接从本文的分析入手，可能会感觉有些绕。
