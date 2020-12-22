@@ -34,7 +34,15 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 
 另外，本系列不会对引用的代码中的注释进行翻译，其原因有二：一来，etcd/raft模块中的注释描述的十分详细，建议读者要详细地阅读一遍etcd/raft模块中所有的注释；二来，笔者的水平有限，翻译的过程中难免会有词不达意的情况，而etcd/raft模块中的注释往往会提及很多细节，为了避免误导读者，就不做翻译了。不过相信能看到这里的读者都有丰富的英文论文阅读经验了，不需要笔者多此一举的翻译。
 
-## 2. 施工路线图
+## 2. 目录
+
+- [深入浅出etcd/raft —— 0x00 引言](/posts/code-reading/etcdraft-made-sample/0-introduction/)
+- [深入浅出etcd/raft —— 0x01 raftexample](/posts/code-reading/etcdraft-made-sample/1-raftexample/)
+- [深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-sample/2-overview/)
+- [深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)
+
+
+## 3. 施工路线图
 
 本系列仍在施工中，之后可能反复修改其中内容与顺序等。本节中保存了当前的施工路线图。
 
