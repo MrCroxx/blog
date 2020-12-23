@@ -52,7 +52,7 @@ raft服务器和其集群中的对等节点（peer）会参与共识的达成。
 
 简单来说，raftexample的设计可以用一张图来表示。
 
-![raftexample设计图](assets/raftexample.png "raftexample设计图")
+![raftexample设计图](assets/design.svg "raftexample设计图")
 
 接下来，我们自下而上地学习raftexample的实现。
 
