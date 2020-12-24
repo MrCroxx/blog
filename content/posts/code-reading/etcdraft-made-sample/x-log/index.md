@@ -1,7 +1,7 @@
 ---
 title: "深入浅出etcd/raft —— 0x02 Raft日志"
-date: 2020-12-15T13:37:28+08:00
-lastmod: 2020-12-16T17:20:51+08:00
+date: 2020-12-23T12:30:17+08:00
+lastmod: 2020-12-23T12:30:20+08:00
 draft: true
 keywords: []
 description: ""
