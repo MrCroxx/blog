@@ -64,7 +64,7 @@ params:
       copy: true
       maxShownLines: 10000
     comment:
-      enable: true
+      enable: false
       gitalk:
         enable: true
         owner: MrCroxx
