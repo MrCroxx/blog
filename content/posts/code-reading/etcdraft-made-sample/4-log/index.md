@@ -382,7 +382,7 @@ func newLogWithSize(storage Storage, logger Logger, maxNextEntsSize uint64) *raf
 
 
 
-`maybeAppend`是`raftLog`收到新日志时对其进行处理的方法，其源码如下：
+`append`与`maybeAppend`是向`raftLog`写入日志的方法。二者的区别在于`append`不会检查给定的日志切片是否与已有日志有冲突，因此leader向`raftLog`中追加日志时会调用该函数；而`maybeAppend`会检查是否有冲突并找到冲突位置，并试图通过覆盖本地日志的方式解决冲突。但是，二者都会检查给定的日志起点是否在`committed`索引位置之前，如果在其之前会引起panic（违背了Raft算法的**Log Matching**性质）。源码如下：
 
 ```go
 
@@ -460,7 +460,7 @@ func (l *raftLog) findConflict(ents []pb.Entry) uint64 {
 `maybeAppend`会根据`findConflict`的返回值确定接下来的处理方式：
 
 1. 如果返回0，说明既没有冲突又没有新日志，直接进行下一步处理。
-2. 如果返回值小于当前的`committed`索引，说明`committed`前的日志发生了冲突，这违背了Raft算法保证的**Log Matching**属性，因此会引起panic。
+2. 如果返回值小于当前的`committed`索引，说明`committed`前的日志发生了冲突，这违背了Raft算法保证的**Log Matching**性质，因此会引起panic。
 3. 如果返回值大于`committed`，既可能是冲突发生在`committed`之后，也可能是有新日志，但二者的处理方式都是相同的，即从将从冲突处或新日志处开始的日志覆盖或追加到当前日志中即可。
 
 除了会引起panic的情况外，该方法接下来会调用`commitTo`方法，更新当前的`committed`索引为给定的新日志中最后一条日志的index（`lastnewi`）和传入的新的`committed`中较小的一个。`commitTo`方法保证了`committed`索引只会前进而不会回退，而使用`lastnewi`和传入的`committed`中的最小值则是因为传入的数据可能有如下两种情况：
