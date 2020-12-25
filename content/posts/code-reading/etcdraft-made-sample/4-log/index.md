@@ -419,9 +419,9 @@ func (l *raftLog) append(ents ...pb.Entry) uint64 {
 
 ```
 
-`maybeAppend`方法会检查参数的合法性，当可以追加时，其会返回追加的最后一条日志的index与true，否则返回0与false。其参数有需要追加的日志的第一个条目的`index`、这批日志条目的`term`、新确认的`committed`索引、和待追加的日志条目`ents`。
+`maybeAppend`方法会检查参数的合法性，当可以追加时，其会返回追加的最后一条日志的index与true，否则返回0与false。其需要的参数有这批日志的前一个日志条目的index与term（用于校验匹配）、leader最新确认的`committed`索引、和待追加的日志`ents`。
 
-首先，`maybeAppend`方法会检查这批日志的第一个条目的index和这批日志的term与`raftLog`对应条目的index与term是否匹配，如果不匹配则返回(0, false)。当首条日志匹配时，其会调用`findConflict`方法寻找待追加的日志与已有日志的第一个冲突条目的index或第一条新日志的index。在进一步分析前，先看一下`findConflict`的实现方式：
+首先，`maybeAppend`方法会检查这批日志的前一个条目的index和这批日志的term与`raftLog`对应条目的index与term是否匹配，如果不匹配则返回(0, false)。如果匹配无误，其会调用`findConflict`方法寻找待追加的日志与已有日志的第一个冲突条目的index或第一条新日志的index。在进一步分析前，先看一下`findConflict`的实现方式：
 
 ```go
 
