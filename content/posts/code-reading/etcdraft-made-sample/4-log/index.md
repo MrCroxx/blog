@@ -21,11 +21,44 @@ resources:
 
 本文会对etcd/raft中Raft日志复制算法的实现与优化进行分析。这里假定读者阅读过Diego Ongaro的《In Search of an Understandable Consensus Algorithm (Extended Version)》（这里有笔者的[翻译](/posts/paper-reading/raft-extended/)，笔者英语水平一般，欢迎指正。），其中提到的部分，本文中不会做详细的解释。对etcd/raft的总体结构不熟悉的读者，可以先阅读[《深入浅出etcd/raft —— 0x02 etcd/raft总体设计》](/posts/code-reading/etcdraft-made-sample/2-overview/)。
 
-## 1. etcd/raft中的日志结构
+本文首先介绍了etcd/raft中日志复制部分的优化。由于etcd/raft中对日志复制的优化大部分属于实现上的优化，这些优化是在系统中很常见的优化，因此本文会一笔带过其理论部分，而着重于讲解etcd/raft中日志复制的实现。
 
-为了深入分析etcd/raft中日志复制的实现与优化，首先我们需要了解etcd/raft中Raft日志结构的实现方式。
+## 1. etcd/raft日志复制优化
 
-### 1.1 raftLog的设计
+本节将介绍etcd/raft中日志复制部分采用的优化。
+
+### 1.1 快速回退
+
+在《In Search of an Understandable Consensus Algorithm (Extended Version)》和《CONSENSUS: BRIDGING THEORY AND PRACTICE》介绍Raft算法基本概念时，提到了一种快速回退*next index*的方法。当follower拒绝leader的AppendEntries RPC（`MsgApp`）请求时，follower会通过响应消息（`MsgAppResp`）的一个字段（`RejectHint`）告知leader日志冲突的位置与当前term的第一条日志的index。这样，leader可以直接将该follower的*next index*回退到该位置，然后继续以“一次回退一条”的方式检查冲突。
+
+etcd/raft中也实现了类似的优化，但是其将follower的最后一条日志作为该字段的值。正如Diego Ongaro所说，故障不会经常发生，因此出现很多不一致的日志条目的可能性不大（etcd/raft该部分的作者也是这样想的，详见[pull#2021](https://github.com/etcd-io/etcd/pull/2021)），所以回退到follower的最后一条日志后继续检查冲突即可。
+
+### 1.2 并行写入
+
+《CONSENSUS: BRIDGING THEORY AND PRACTICE》的*10.2.1 Writing to the leader’s disk in parallel*介绍了一种减少Raft算法关键路径上的磁盘写入的优化。在朴素的实现方式中，leader需要先将新日志写入本地稳定存储之后再为follower复制这些日志，这会大大增加处理的延迟。
+
+事实上，这次关键路径上的磁盘写入是可以优化的。leader可以在为follower复制日志的同时将这些日志写入其本地稳定存储。为了简化实现，leader自己的*match index*表示其写入到了稳定存储的最后一条日志的索引。当当前term的某日志被大多数的*match index*覆盖时，leader便可以使*commit index*前进到该节点处。这种优化是安全的，通过这种优化，leader甚至可以在日志写入本地稳定存储完成之前提交日志。
+
+### 1.3 微批处理
+
+微批处理是各种系统提高吞吐量的常用方式，etcd/raft也不例外。在etcd/raft的实现中。并不是所有地方都是收到消息后立刻对其进行处理的，而是会积累一定量的消息，之后一起处理，以充分地利用I/O。
+
+在etcd/raft的实现中，有两处体现了这种设计，一处是网络，一处是存储：
+
+- 网络：leader在为稳定的follower复制日志时，会用一条消息复制多条日志，且每次可能同时发送多条消息。后文会介绍相关实现。
+- 存储：在前文中笔者介绍过数据的存储时etcd/raft的使用者的责任，使用者需要将`Ready`结构体中的`HardStates`、`Entries`、`Snapshot`保存到稳定存储，然后在处理完所有字段后调用`Advance`方法以接收下一批数据。`Ready`和`Advance`的设计即体现了微批处理的思想。
+
+### 1.4 流水线化
+
+流水线（pipeline）同样是各种系统常用的提高吞吐量的方式。在etcd/raft的实现中，leader在向follower发送完日志复制请求后，不会等待follower响应，而是立即更新其*nextIndex*，并继续处理，以提高吞吐量。
+
+在正常且稳定的情况下，消息应恰好一次且有序到达。但是在异常情况下，可能出现消息丢失、消息乱序、消息超时等等情况，在前文[深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)介绍`Step`方法时，我们已经看到了一些对过期消息的处理方式，重复的地方本文不再赘述。当follower收到过期的日志复制请求时，会拒绝该请求，随后follower会回退其*nextIndex*以重传之后的日志。
+
+## 2. etcd/raft中的日志结构
+
+在分析etcd/raft的日志复制的实现时，首先要了解etcd/raft中Raft日志结构的实现方式。etcd/raft中Raft日志是通过结构体`raftLog`实现的。本节将介绍`raftLog`的设计与实现。
+
+### 2.1 raftLog的设计
 
 etcd/raft中Raft日志是通过`raftLog`结构体记录的。`raftLog`结构体中，既有还未持久化的数据，也有已经持久化到稳定存储的数据；其中数据既有日志条目，也有快照。如果直观的给出`raftLog`中数据的逻辑结构，其大概如下图所示。
 
@@ -60,7 +93,7 @@ etcd/raft中Raft日志是通过`raftLog`结构体记录的。`raftLog`结构体�
 
 {{< /admonition >}}
 
-### 1.2 Storage的设计与实现
+### 2.2 Storage的设计与实现
 
 `Storage`接口定义了etcd/raft中需要的读取稳定存储中日志、快照、状态等方法。
 
@@ -132,7 +165,7 @@ type MemoryStorage struct {
 
 `MemoryStorage`的实现不是很复杂，其中很多逻辑是在处理越界和*dummy entry*，这里不再占用篇幅详细解释。此外，`MemoryStorage`通过互斥锁保证其操作是线程安全的。
 
-### 1.3 unstable的设计与实现
+### 2.3 unstable的设计与实现
 
 `unstable`结构体中保存了还未被保存到稳定存储中的快照或日志条目。
 
@@ -257,7 +290,7 @@ func (u *unstable) shrinkEntriesArray() {
 
 ```
 
-### 1.4 raftLog的实现
+### 2.4 raftLog的实现
 
 在介绍了`Storage`接口和`unstable`结构体后，接下来继续看`raftLog`的具体实现。`raftLog`结构体源码如下：
 
@@ -288,7 +321,7 @@ type raftLog struct {
 
 ```
 
-可以看到，`raftLog`由`Storage`接口实例`storage`和`unstable`结构体实例`unstable`组成。在[1.1节](#11-raftlog的设计)提到的4个常用索引中，`committed`和`applied`索引是通过`raftLog`的字段实现的，而`firstIndex`和`lastIndex`是通过`raftLog`的方法实现的：
+可以看到，`raftLog`由`Storage`接口实例`storage`和`unstable`结构体实例`unstable`组成。在[2.1节](#21-raftlog的设计)提到的4个常用索引中，`committed`和`applied`索引是通过`raftLog`的字段实现的，而`firstIndex`和`lastIndex`是通过`raftLog`的方法实现的：
 
 ```go
 
@@ -316,7 +349,7 @@ func (l *raftLog) lastIndex() uint64 {
 
 ```
 
-`firstIndex`和`lastIndex`的实现方式在[1.3节](#13-unstable的设计与实现)中已经介绍过，这里不再赘述。`raftLog`在创建时，会将`unstable`的`offset`置为`storage`的*last index + 1*，并将`committed`和`applied`置为`storage`的*forst index - 1*。
+`firstIndex`和`lastIndex`的实现方式在[2.3节](#23-unstable的设计与实现)中已经介绍过，这里不再赘述。`raftLog`在创建时，会将`unstable`的`offset`置为`storage`的*last index + 1*，并将`committed`和`applied`置为`storage`的*forst index - 1*。
 
 ```go
 
@@ -382,7 +415,7 @@ func newLogWithSize(storage Storage, logger Logger, maxNextEntsSize uint64) *raf
 
 
 
-`append`与`maybeAppend`是向`raftLog`写入日志的方法。二者的区别在于`append`不会检查给定的日志切片是否与已有日志有冲突，因此leader向`raftLog`中追加日志时会调用该函数；而`maybeAppend`会检查是否有冲突并找到冲突位置，并试图通过覆盖本地日志的方式解决冲突。但是，二者都会检查给定的日志起点是否在`committed`索引位置之前，如果在其之前会引起panic（违背了Raft算法的**Log Matching**性质）。源码如下：
+`append`与`maybeAppend`是向`raftLog`写入日志的方法。二者的区别在于`append`不会检查给定的日志切片是否与已有日志有冲突，因此leader向`raftLog`中追加日志时会调用该函数；而`maybeAppend`会检查是否有冲突并找到冲突位置，并试图通过覆盖本地日志的方式解决冲突。但是，二者都会检查给定的日志起点是否在`committed`索引位置之前，如果在其之前，这违背了Raft算法的**Log Matching**性质，因此会引起panic（其实follower不会将`committed`之前的日志传给该函数，因此永远不会进入该分支）。源码如下：
 
 ```go
 
@@ -546,4 +579,102 @@ func (l *raftLog) mustCheckOutOfBounds(lo, hi uint64) error {
 
 当`slice`确保给定范围没有越界后，如果这段范围跨了stable和unstable两部分，那么该方法会分别从`Storage`获取$[lo,\text{unstable.offset})$、从`unstable`获取$[\text{unstable.offset},hi)$；否则直接从其中一部分获取完整的切片。在返回切片前，`silce`还会按照`maxSize`参数限制返回的切片长度。
 
-## 2. 
+## 3. 复制进度跟踪
+
+在《In Search of an Understandable Consensus Algorithm (Extended Version)》中，leader只通过 *nextInext[]* 和 *matchIndex[]* 来跟踪follower的日志进度。而etcd/raft为了解耦不同情况下的日志复制逻辑并实现一些日志复制相关的优化，还需要记录一些其它信息。因此，etcd/raft中leader使用`Progress`结构体来跟踪每个follower（和learner）的日志复制进度。
+
+`Progess`结构体是leader用来跟踪follower日志复制进度的结构，即“表示从leader视角看到的follower的进度”。leader会为每个follower（和learner）维护各自的`Progress`结构。官方提供了`Progress`的[设计文档](https://github.com/etcd-io/etcd/blob/master/raft/design.md)，该文档简单介绍了其设计与功能。
+
+`Progress`的结构如下：
+
+```go
+
+// Progress represents a follower’s progress in the view of the leader. Leader
+// maintains progresses of all followers, and sends entries to the follower
+// based on its progress.
+//
+// NB(tbg): Progress is basically a state machine whose transitions are mostly
+// strewn around `*raft.raft`. Additionally, some fields are only used when in a
+// certain State. All of this isn't ideal.
+type Progress struct {
+	Match, Next uint64
+	// State defines how the leader should interact with the follower.
+	//
+	// When in StateProbe, leader sends at most one replication message
+	// per heartbeat interval. It also probes actual progress of the follower.
+	//
+	// When in StateReplicate, leader optimistically increases next
+	// to the latest entry sent after sending replication message. This is
+	// an optimized state for fast replicating log entries to the follower.
+	//
+	// When in StateSnapshot, leader should have sent out snapshot
+	// before and stops sending any replication message.
+	State StateType
+
+	// PendingSnapshot is used in StateSnapshot.
+	// If there is a pending snapshot, the pendingSnapshot will be set to the
+	// index of the snapshot. If pendingSnapshot is set, the replication process of
+	// this Progress will be paused. raft will not resend snapshot until the pending one
+	// is reported to be failed.
+	PendingSnapshot uint64
+
+	// RecentActive is true if the progress is recently active. Receiving any messages
+	// from the corresponding follower indicates the progress is active.
+	// RecentActive can be reset to false after an election timeout.
+	//
+	// TODO(tbg): the leader should always have this set to true.
+	RecentActive bool
+
+	// ProbeSent is used while this follower is in StateProbe. When ProbeSent is
+	// true, raft should pause sending replication message to this peer until
+	// ProbeSent is reset. See ProbeAcked() and IsPaused().
+	ProbeSent bool
+
+	// Inflights is a sliding window for the inflight messages.
+	// Each inflight message contains one or more log entries.
+	// The max number of entries per message is defined in raft config as MaxSizePerMsg.
+	// Thus inflight effectively limits both the number of inflight messages
+	// and the bandwidth each Progress can use.
+	// When inflights is Full, no more message should be sent.
+	// When a leader sends out a message, the index of the last
+	// entry should be added to inflights. The index MUST be added
+	// into inflights in order.
+	// When a leader receives a reply, the previous inflights should
+	// be freed by calling inflights.FreeLE with the index of the last
+	// received entry.
+	Inflights *Inflights
+
+	// IsLearner is true if this progress is tracked for a learner.
+	IsLearner bool
+}
+
+```
+
+`Progress`中有两个重要的索引：`match`与`next`。`match`表示leader所知的该follower的日志中匹配的日志条目的最高index，如果leader不知道该follower的日志状态时，`match`为0；`next`表示leader接下来要给该follower发送的日志的第一个条目的index。根据Raft算法论文，`next`是可能因异常回退的，而`match`是单调递增的。`next`小于`match`的节点会被认为是落后的节点。
+
+为了更加清晰地处理leader为follower复制日志的各种情况，etcd/raft将leader向follower复制日志的行为分成三种，记录在`Progress`的`State`字段中：
+
+1. `StateProbe`：当leader刚刚当选时，或当follower拒绝了leader复制的日志时，该follower的进度状态会变为`StateProbe`类型。在该状态下，leader每次仅为follower发送一条`MsgApp`消息，且leader会根据follower发送的相应的`MsgAppResp`消息调整该follower的进度。
+2. `StateReplicate`：该状态下的follower处于稳定状态，leader会优化为其复制日志的速度，每次可能发送多条`MsgApp`消息（受`Progress`的流控限制，后文会详细介绍）。
+3. `StateSnapshot`：当follower所需的日志已被压缩无法访问时，leader会将该follower的进度置为`StateSnapshot`状态，并向该follower发送快照。leader不会为处于`StateSnapshot`状态的follower发送任何的`MsgApp`消息，直到其成功收到快照。
+
+{{< admonition info 提示 >}}
+
+每条`MsgApp`消息可以包含多个日志条目。
+
+{{< /admonition >}}
+
+`Progress`中的`PendingSnapshot`、`ProbeSent`字段是`StateProebe`和`StateSnapshot`状态下需要记录的字段，后文会详细讲解。
+
+`Progress`中的`RecentActive`字段用来标识该follower最近是否是“活跃”的。该字段除了用于**Check Quorum**外（详见[深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)），在日志复制时，leader不会将不活跃的follower转为`StateSnapshot`状态或发送快照。（这是为了修复[issue#3378](https://github.com/etcd-io/etcd/issues/3778)中提到的问题，感兴趣的读者可以查看该issue和[issue#3976](https://github.com/etcd-io/etcd/issues/3778)）。
+
+`Progress`的`Inflights`字段是对日志复制操作进行流控的字段。虽然`Config`的`MaxSizePerMsg`字段限制了每条`MsgApp`消息的字节数，但是在`StateReplicate`状态下优化日志复制时，每次可能会发送多条`MsgApp`消息。因此，`Config`中又加入了`MaxInflightMsgs`字段来限制每次发送的`MsgApp`消息数。`Inflights`实现了`MaxInflightMsgs`字段配置的流控。
+
+`Inflight`结构体实现了一个动态扩容的FIFO队列，其中记录了每条`MsgApp`的`Index`字段的值，以在收到`MsgAppResp`的ack时释放队列。`Inflight`的实现也比较简单，感兴趣的读者可以自行阅读源码学习其实现，这里不再赘述。
+
+我们可以将`Progress`的三种状态看做在大小不同的`Inflight`下的行为（其实并不是这样实现的）:
+
+1. `StateProbe` => `Inflight.size = 1`
+2. `StateReplicate` => `Inflight.size = MaxInflightMsgs`
+3. `StateSnapshot` => `Inflight.size = 0`
+
