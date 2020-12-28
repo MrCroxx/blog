@@ -858,7 +858,19 @@ func stepLeader(r *raft, m pb.Message) error {
 2. 判断是否正在进行**Leader Transfer**，如果正在进行但转移的目标相同，那么不再做处理；如果正在进行但转移的目标不同，那么打断正在进行的**Leader Transfer**，而执行新的转移。
 3. 如果转移目标是当前节点，而当前节点已经是leader了，那么不做处理。
 4. 记录转移目标，以用做第2步中是否打断上次转移的依据。
-5. 判断目标的日志是否跟上了leader。如果跟上了，向其发送`MsgTimeoutNow`消息，让其立即超时并进行新的选举；否则正常向其发送日志。
+5. 判断转移目标的日志是否跟上了leader。如果跟上了，向其发送`MsgTimeoutNow`消息，让其立即超时并进行新的选举；否则正常向其发送日志。如果转移目标的日志没有跟上leader，则leader在处理转移目标对其日志复制消息的响应时，会判断其是否跟上了leader，如果那时跟上了则向其发送`MsgTimeoutNow`消息，让其立即超时并进行新的选举。这部分代码可在处理`MsgAppResp`消息时找到：
+
+```go
+
+// Transfer leadership is in progress.
+if m.From == r.leadTransferee && pr.Match == r.raftLog.lastIndex() {
+	r.logger.Infof("%x sent MsgTimeoutNow to %x after received MsgAppResp", r.id, m.From)
+	r.sendTimeoutNow(m.From)
+}
+
+```
+
+此处代码只会在follower跟上了其*match index*才会执行，详情请见本系列后续文章。
 
 #### 2.4.3 Follower
 
