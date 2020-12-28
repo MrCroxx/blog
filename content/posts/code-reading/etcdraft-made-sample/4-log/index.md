@@ -721,3 +721,124 @@ func (pr *Progress) IsPaused() bool {
 }
 
 ```
+
+### 3.3 状态转换与更新回退
+
+在进一步分析etcd/raft的日志复制实现时，需要先简单了解`BecomeXXX`在进行状态转换时的做的操作及更新进度、回退进度的操作。
+
+```go
+
+// BecomeProbe transitions into StateProbe. Next is reset to Match+1 or,
+// optionally and if larger, the index of the pending snapshot.
+func (pr *Progress) BecomeProbe() {
+	// If the original state is StateSnapshot, progress knows that
+	// the pending snapshot has been sent to this peer successfully, then
+	// probes from pendingSnapshot + 1.
+	if pr.State == StateSnapshot {
+		pendingSnapshot := pr.PendingSnapshot
+		pr.ResetState(StateProbe)
+		pr.Next = max(pr.Match+1, pendingSnapshot+1)
+	} else {
+		pr.ResetState(StateProbe)
+		pr.Next = pr.Match + 1
+	}
+}
+
+```
+
+`BecomeProbe`分为两种情况，一种是从`StateSnapshot`进入`StateProbe`状态，当leader得知follower成功应用了快照后，需要调用`Node`的`ReportSnapshot`方法，该方法会调用`BecomeProbe`将该follower的进度状态转为`StateProbe`。此时，可以将*next index*置为该快照的index的下一条。在一般情况下，则从*match index*处开始检测冲突（`Next`是下一条应为该follower发送的日志的index，因此应为当前认为的最后一条匹配日志的index+1）。
+
+```go
+
+// BecomeReplicate transitions into StateReplicate, resetting Next to Match+1.
+func (pr *Progress) BecomeReplicate() {
+	pr.ResetState(StateReplicate)
+	pr.Next = pr.Match + 1
+}
+
+// BecomeSnapshot moves the Progress to StateSnapshot with the specified pending
+// snapshot index.
+func (pr *Progress) BecomeSnapshot(snapshoti uint64) {
+	pr.ResetState(StateSnapshot)
+	pr.PendingSnapshot = snapshoti
+}
+
+```
+
+`BecomeReplicate`和`BecomeSnapshot`逻辑都很简单，在重置状态后，二者分别设置了相应的*next index*和正在发送的快照的index。
+
+接下来分析更新*match index*和*next index*与回退*next index*的相关逻辑：
+
+```go
+
+// MaybeUpdate is called when an MsgAppResp arrives from the follower, with the
+// index acked by it. The method returns false if the given n index comes from
+// an outdated message. Otherwise it updates the progress and returns true.
+func (pr *Progress) MaybeUpdate(n uint64) bool {
+	var updated bool
+	if pr.Match < n {
+		pr.Match = n
+		updated = true
+		pr.ProbeAcked()
+	}
+	pr.Next = max(pr.Next, n+1)
+	return updated
+}
+
+// OptimisticUpdate signals that appends all the way up to and including index n
+// are in-flight. As a result, Next is increased to n+1.
+func (pr *Progress) OptimisticUpdate(n uint64) { pr.Next = n + 1 }
+
+```
+
+`MaybeUpdate`会根据传入的index更新`Match`和`Next`到更高的值，如果`Match`更新，则会返回true，否则返回false。其调用者会根据返回值判断该follower是否跟上了复制进度。
+
+```go
+
+// MaybeDecrTo adjusts the Progress to the receipt of a MsgApp rejection. The
+// arguments are the index the follower rejected to append to its log, and its
+// last index.
+//
+// Rejections can happen spuriously as messages are sent out of order or
+// duplicated. In such cases, the rejection pertains to an index that the
+// Progress already knows were previously acknowledged, and false is returned
+// without changing the Progress.
+//
+// If the rejection is genuine, Next is lowered sensibly, and the Progress is
+// cleared for sending log entries.
+func (pr *Progress) MaybeDecrTo(rejected, last uint64) bool {
+	if pr.State == StateReplicate {
+		// The rejection must be stale if the progress has matched and "rejected"
+		// is smaller than "match".
+		if rejected <= pr.Match {
+			return false
+		}
+		// Directly decrease next to match + 1.
+		//
+		// TODO(tbg): why not use last if it's larger?
+		pr.Next = pr.Match + 1
+		return true
+	}
+
+	// The rejection must be stale if "rejected" does not match next - 1. This
+	// is because non-replicating followers are probed one entry at a time.
+	if pr.Next-1 != rejected {
+		return false
+	}
+
+	pr.Next = max(min(rejected, last+1), 1)
+	pr.ProbeSent = false
+	return true
+}
+
+```
+
+`MaybeDecrTo`的参数有follower拒绝的`MsgApp`请求的index（`rejected`，即`MsgApp`或`MsgAppResp`的`Index`）和该follower最后一条日志的索引（`last`，即`MsgAppResp`的`RejectHint`）。其中，`rejected`参数是用来判断该消息是否是过期的消息的，其判断逻辑如下：
+
+- 如果follower的状态为`StateReplicate`，`Next`应该是跟上`Match`的进度的，那么如果`rejected`不大于`Match`，那么该消息过期。
+- 在其它状态下，`Next`可能没有跟上`Match`的进度，因此不能通过`Match`判断。由于其它状态下至多只会为其发送一条日志复制请求，因此只要`rejected`不等于`Next-1`，该消息就是过期的。
+
+`MaybeDecrTo`不会对过期的消息进行处理。否则，将回退`Next`。`Next`的回退有两种方案：
+
+- 回退一条日志。即新的`Next`为上一条`Next-1`，这里的`Next-1`即为发送`MsgApp`时用于日志匹配的`Index`字段的值，也是`rejected`的值。
+- 快速回退，回退到该follower的最后一条日志。即新的`Next`为该follower最后一条日志的后一条日志的index，即`last+1`。
