@@ -583,6 +583,8 @@ func (l *raftLog) mustCheckOutOfBounds(lo, hi uint64) error {
 
 在《In Search of an Understandable Consensus Algorithm (Extended Version)》中，leader只通过 *nextInext[]* 和 *matchIndex[]* 来跟踪follower的日志进度。而etcd/raft为了解耦不同情况下的日志复制逻辑并实现一些日志复制相关的优化，还需要记录一些其它信息。因此，etcd/raft中leader使用`Progress`结构体来跟踪每个follower（和learner）的日志复制进度。
 
+### 3.1 Progress结构体
+
 `Progess`结构体是leader用来跟踪follower日志复制进度的结构，即“表示从leader视角看到的follower的进度”。leader会为每个follower（和learner）维护各自的`Progress`结构。官方提供了`Progress`的[设计文档](https://github.com/etcd-io/etcd/blob/master/raft/design.md)，该文档简单介绍了其设计与功能。
 
 `Progress`的结构如下：
@@ -652,6 +654,23 @@ type Progress struct {
 
 `Progress`中有两个重要的索引：`match`与`next`。`match`表示leader所知的该follower的日志中匹配的日志条目的最高index，如果leader不知道该follower的日志状态时，`match`为0；`next`表示leader接下来要给该follower发送的日志的第一个条目的index。根据Raft算法论文，`next`是可能因异常回退的，而`match`是单调递增的。`next`小于`match`的节点会被认为是落后的节点。
 
+`Progress`的一些常用的方法如下表所示：
+
+| 方法<div style="width: 14em"></div> | 描述 |
+| :-: | - |
+| `ResetState(state StateType)` | 重置状态为目标状态，该方法会清空所有状态记录的数据。该方法由`BecomeXXX`方法调用。 | 
+| `BecomeProbe()` | 将follower转为Probe状态。 |
+| `BecomeReplicate()` | 将follower转为Replicate状态。 |
+| `BecomeSnapshot(snapshoti uint64)` | 将follower转为Snapshot状态，并指定需要为其发送的快照的index。 |
+| `MaybeUpdate(n uint64) bool` | 用于更新follower的进度（*match index*），如果传入的进度比当前进度旧，则不会更新进度并返回false，该方法还会根据传入的进度更新*next index*。leader会在收到来自follower的`MsgAppResp`消息时调用该方法。 |
+| `OptimisticUpdate(n uint64)` | 不做检查直接更新*next index*，用于`StateReplicate`状态下日志复制流水线优化。 |
+| `MaybeDecrTo(rejected, last uint64) bool` | 用于回退*next index*，该方法会根据参数判断是否需要回退，如果参数是来自过期的消息，那么不会回退。如果回退，则会返回true。 |
+| `IsPaused() bool` | 判断为该follower发送消息的发送窗口是否阻塞，发送窗口大小与该follower的状态和`Raft`的配置有关。 |
+
+以上的很多方法都与follower的状态有关，因此这里先介绍`Progress`中规定的3中follower状态。
+
+### 3.2 follower的3种状态
+
 为了更加清晰地处理leader为follower复制日志的各种情况，etcd/raft将leader向follower复制日志的行为分成三种，记录在`Progress`的`State`字段中：
 
 1. `StateProbe`：当leader刚刚当选时，或当follower拒绝了leader复制的日志时，该follower的进度状态会变为`StateProbe`类型。在该状态下，leader每次仅为follower发送一条`MsgApp`消息，且leader会根据follower发送的相应的`MsgAppResp`消息调整该follower的进度。
@@ -678,3 +697,27 @@ type Progress struct {
 2. `StateReplicate` => `Inflight.size = MaxInflightMsgs`
 3. `StateSnapshot` => `Inflight.size = 0`
 
+我们可以从`IsPaused`方法中看到这一逻辑：
+
+```go
+
+// IsPaused returns whether sending log entries to this node has been throttled.
+// This is done when a node has rejected recent MsgApps, is currently waiting
+// for a snapshot, or has reached the MaxInflightMsgs limit. In normal
+// operation, this is false. A throttled node will be contacted less frequently
+// until it has reached a state in which it's able to accept a steady stream of
+// log entries again.
+func (pr *Progress) IsPaused() bool {
+	switch pr.State {
+	case StateProbe:
+		return pr.ProbeSent
+	case StateReplicate:
+		return pr.Inflights.Full()
+	case StateSnapshot:
+		return true
+	default:
+		panic("unexpected state")
+	}
+}
+
+```
