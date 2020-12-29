@@ -1499,3 +1499,17 @@ func (r *raft) handleHeartbeat(m pb.Message) {
 本文会对etcd/raft中Raft日志复制算法的实现与优化进行分析。由于etcd/raft中对日志复制的优化大部分属于实现上的优化，因此本文讲解优化理论的部分较少，而讲解etcd/raft中日志复制实现的部分较多。
 
 因为日志复制的逻辑涉及到的方面多、逻辑复杂、经过数年的版本演进部分逻辑难以理解，因此本文详细地分析了etcd/raft中与日志复制相关的几乎所有逻辑，以供读者参考。这里不建议读者通读本文讲解实现的部分，而是按照自己的节奏阅读源码，在遇到难以理解的部分时可以将本文作为补充参考。
+
+## 参考文献
+
+<div class="reference">
+
+[1] Ongaro D, Ousterhout J. In search of an understandable consensus algorithm[C]//2014 {USENIX} Annual Technical Conference ({USENIX}{ATC} 14). 2014: 305-319.
+
+[2] Ongaro D, Ousterhout J. In search of an understandable consensus algorithm (extended version)[J]. Retrieved July, 2016, 20: 2018.
+
+[3] Ongaro D. Consensus: Bridging theory and practice[D]. Stanford University, 2014.
+
+[4] [Raft 笔记(五) – Log replication. 我叫尤加利（技术博客）](https://youjiali1995.github.io/raft/etcd-raft-log-replication/)
+
+</div>
