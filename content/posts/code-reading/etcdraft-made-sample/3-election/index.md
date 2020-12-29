@@ -945,3 +945,17 @@ func stepFollower(r *raft, m pb.Message) error {
 本文首先介绍了etcd/raft实现的Raft选举优化，并介绍了使用选举优化后引入的新问题与解决方案，接着对etcd/raft中与选举有关的源码层层深入地分析。
 
 由于选举是Raft算法中重要且复杂的部分，因此其代码分布比较零散。只想了解etcd/raft中对Raft算法做出的优化的读者可以只看本文的第一章。对于想要深入etcd/raft源码实现的读者，建议自己先按照自己的节奏阅读源码，对于不太理解的地方可以参考本文的分析，如果直接从本文的分析入手，可能会感觉有些绕。
+
+## 参考文献
+
+<div class="reference">
+
+[1] Ongaro D, Ousterhout J. In search of an understandable consensus algorithm[C]//2014 {USENIX} Annual Technical Conference ({USENIX}{ATC} 14). 2014: 305-319.
+
+[2] Ongaro D, Ousterhout J. In search of an understandable consensus algorithm (extended version)[J]. Retrieved July, 2016, 20: 2018.
+
+[3] Ongaro D. Consensus: Bridging theory and practice[D]. Stanford University, 2014.
+
+[4] [Raft 笔记(四) – Leader election. 我叫尤加利（技术博客）](https://youjiali1995.github.io/raft/etcd-raft-leader-election/)
+
+</div>
