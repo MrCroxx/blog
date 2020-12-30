@@ -41,16 +41,18 @@ etcd/raft中也实现了类似的优化，但是其将follower的最后一条日
 
 事实上，这次关键路径上的磁盘写入是可以优化的。leader可以在为follower复制日志的同时将这些日志写入其本地稳定存储。为了简化实现，leader自己的*match index*表示其写入到了稳定存储的最后一条日志的索引。当当前term的某日志被大多数的*match index*覆盖时，leader便可以使*commit index*前进到该节点处。这种优化是安全的，通过这种优化，leader甚至可以在日志写入本地稳定存储完成之前提交日志。
 
-### 1.3 微批处理
+### 1.3 批处理与流水线
 
-微批处理是各种系统提高吞吐量的常用方式，etcd/raft也不例外。在etcd/raft的实现中。并不是所有地方都是收到消息后立刻对其进行处理的，而是会积累一定量的消息，之后一起处理，以充分地利用I/O。
+《CONSENSUS: BRIDGING THEORY AND PRACTICE》的*10.2.2 Batching and pipelining*介绍了Raft算法实现时的批处理与流水线优化。批处理与流水线是各种系统提高吞吐量的常用方式，etcd/raft也不例外。
 
-在etcd/raft的实现中，有两处体现了这种设计，一处是网络，一处是存储：
+#### 1.3.1 批处理
+
+简而言之，批处理（batch）就是在消息到来时先推迟对消息的处理，等到消息积累到一定数量或者经过一段时间后一起处理这批消息，在损失可接受的延迟的情况下提高系统吞吐量。在etcd/raft的实现中主要有两处使用了批处理的设计，一处是网络，一处是存储：
 
 - 网络：leader在为稳定的follower复制日志时，会用一条消息复制多条日志，且每次可能同时发送多条消息。后文会介绍相关实现。
 - 存储：在前文中笔者介绍过数据的存储时etcd/raft的使用者的责任，使用者需要将`Ready`结构体中的`HardStates`、`Entries`、`Snapshot`保存到稳定存储，然后在处理完所有字段后调用`Advance`方法以接收下一批数据。`Ready`和`Advance`的设计即体现了微批处理的思想。
 
-### 1.4 流水线化
+#### 1.3.2 流水线
 
 流水线（pipeline）同样是各种系统常用的提高吞吐量的方式。在etcd/raft的实现中，leader在向follower发送完日志复制请求后，不会等待follower响应，而是立即更新其*nextIndex*，并继续处理，以提高吞吐量。
 
@@ -1143,7 +1145,7 @@ leader在调用`bcastAppend`方法时，会向所有其它节点广播`MsgApp`�
 
 如果该消息携带的日志非空，该方法还会更新该follower的进度状态：
 
-- 如果节点处于`StateReplicate`状态，此时通过流水线的方式优化日志复制速度，直接更新其`Next`索引（详见[1.4节](#14-流水线化)），并通过`Inflights`进行流控（详见[3.2节](#32-follower的3种状态)）。
+- 如果节点处于`StateReplicate`状态，此时通过流水线的方式优化日志复制速度，直接更新其`Next`索引（详见[1.3节](#13-批处理与流水线)），并通过`Inflights`进行流控（详见[3.2节](#32-follower的3种状态)）。
 - 如果节点处于`StateProbe`状态，此时将`ProbeSent`置为true，阻塞后续的消息，直到收到确认。
 
 在分析了`MsgApp`消息的生成方式后，接下来分析`MsgSnap`消息的生成：
@@ -1494,7 +1496,114 @@ func (r *raft) handleHeartbeat(m pb.Message) {
 
 最后，如果该节点的*match index*小于leader当前最后一条日志，则为其调用`sendAppend`方法来复制新日志。
 
-## 5. 总结
+## 5. Q & A
+
+### 5.1 为什么raftLog使用了unstable也能保证安全性？
+
+etcd/raft为了能够批处理网络与磁盘I/O，在`raftLog`中设计了一段还未保存到稳定存储的`unstable`段。在阅读日志复制部分代码时，有些读者可能会有这一疑惑：
+
+- follower回复`MsgAppResp`请求时`Index`字段为整个`raftLog`的*last index*，其中包括了`unstable`段。而leader会根据`MsgAppResp`的`Index`字段更新follower的*match index*，且leader会根据quorum的*match index*计算*committed index*。那么会不会出现被commit的日志其实还没有被quorum的节点保存到稳定存储从而无法保证安全性的情况？
+
+显然，如果日志在commit之前没有被quorum的节点保存到稳定存储，那么的确存在日志丢失的情况。在《Consensus: Bridging theory and practice》的*11.7.3 Avoiding persistent storage writes*中确实提到了这种设计<sup>引用1</sup>。但是etcd/raft中，其实并不会出现没有被quorum节点保存到稳定存储就commit的情况。这与`Ready`要求的字段处理顺序有关。
+
+首先，正如上文提到，因为etcd/raft中的网络操作也是批处理设计，因此`send`方法只是将消息放入信箱，而不是立刻将其发出（etcd/raft也没有通信模块）。因此，当follower收到`MsgApp`请求时，执行的操作实际上是（不考虑特殊情况）：
+
+1. 将新日志追加到`unstable`中。
+2. 将包含`unstable`的*last index*的`MsgAppResp`消息放入信箱，等待发送。
+
+当用户收到下一个`Ready`结构体时，其收到的其实是如下内容：
+
+```go
+
+// node.go
+func newReady(r *raft, prevSoftSt *SoftState, prevHardSt pb.HardState) Ready {
+	rd := Ready{
+		Entries:          r.raftLog.unstableEntries(),
+		CommittedEntries: r.raftLog.nextEnts(),
+		Messages:         r.msgs,
+	}
+	if softSt := r.softState(); !softSt.equal(prevSoftSt) {
+		rd.SoftState = softSt
+	}
+	if hardSt := r.hardState(); !isHardStateEqual(hardSt, prevHardSt) {
+		rd.HardState = hardSt
+	}
+	if r.raftLog.unstable.snapshot != nil {
+		rd.Snapshot = *r.raftLog.unstable.snapshot
+	}
+	if len(r.readStates) != 0 {
+		rd.ReadStates = r.readStates
+	}
+	rd.MustSync = MustSync(r.hardState(), prevHardSt, len(rd.Entries))
+	return rd
+}
+
+// log.go
+func (l *raftLog) unstableEntries() []pb.Entry {
+	if len(l.unstable.entries) == 0 {
+		return nil
+	}
+	return l.unstable.entries
+}
+
+```
+
+可以看到，`Ready`结构体的`Entries`字段是全量的`unstable`段的日志，`Messages`字段是全量的信箱中的消息。而`Ready`结构体的处理顺序必须满足如下顺序：
+
+1. 先将`Ready`的`Entries`、`HardState`、`Snapshot`保存到稳定存储（如果值非空）。
+2. 再发送`Ready`的`Messages`字段中的消息。
+
+因此，在etcd/raft模块的使用者将含有`unstable`的*last index*的`MsgAppResp`消息发出之前，`unstable`中的所有日志已经被保存到了稳定存储中。所以，当leader收到该`MsgAppResp`并根据其`Index`字段更新该follower的*match index*时，*match index*之前的消息确实被保存到了该follower的稳定存储中。
+
+关于稳定存储与安全性，《Consensus: Bridging theory and practice》给出了更详细的描述与形式化的证明，这里<sup>引用2</sup>再摘录部分与本问题相关的段落，便于读者参考。
+
+{{< admonition quota 引用1 >}}
+
+*11.7.3 Avoiding persistent storage writes*
+
+Many papers suggest using replication rather than stable storage for durability. For example, in Viewstamped Replication Revisited, servers do not write log entries to stable storage. When a server restarts, its log is not used for voting until it learns the current information (its disk is only used as an optimization to avoid network transfers). The trade-off is that data loss is possible in catastrophic events. For example, if a majority of the cluster were to restart simultaneously, the cluster would have potentially lost entries and would not be able to form a new view. Raft could be extended in similar ways to support disk-less operation, but we think the risk of availability or data loss usually outweighs the benefits.
+
+{{< /admonition >}}
+
+{{< admonition quota 引用2 >}}
+
+*3.8 Persisted state and server restarts*
+
+... ...
+
+Each server also persists new log entries before they are counted towards the entries’ commitment; this prevents committed entries from being lost or “uncommitted” when servers restart.
+
+... ...
+
+The state machine can either be volatile or persistent. A volatile state machine must be recovered after restarts by reapplying log entries (after applying the latest snapshot; see Chapter 5). A persistent state machine, however, has already applied most entries after a restart; to avoid reapplying them, its last applied index must also be persistent.
+
+... ...
+
+If a server loses any of its persistent state, it cannot safely rejoin the cluster with its prior identity. Such a server can usually be added back into the cluster with a new identity by invoking a cluster membership change (see Chapter 4). If a majority of the cluster loses its persistent state, however, log entries may be lost and progress on cluster membership changes will not be possible; to proceed, a system administrator would need to admit the possibility of data loss.
+
+{{< /admonition >}}
+
+### 5.2 Entries、HardState、Snapshot持久化顺序
+
+在处理`Ready`结构体时，除了要保证先持久化再发送消息的顺序，需要持久化的字段的保存顺序也值得关注。官方的建议是按照`Entries`、`HardState`、`Snapshot`的顺序持久化。因为在`raft`初始化加载`HardState`时，会检查*commit index*是否在[*snapshot last index*, *log last index*)范围内，
+
+```go
+
+// raft.go
+func (r *raft) loadState(state pb.HardState) {
+	if state.Commit < r.raftLog.committed || state.Commit > r.raftLog.lastIndex() {
+		r.logger.Panicf("%x state.commit %d is out of range [%d, %d]", r.id, state.Commit, r.raftLog.committed, r.raftLog.lastIndex())
+	}
+	r.raftLog.committed = state.Commit
+	r.Term = state.Term
+	r.Vote = state.Vote
+}
+
+```
+
+在etcd的预写日志`wal`的实现中，`Entries`和`HardState`时同步落盘的，以避免重启时不一致的问题。
+
+## 6. 总结
 
 本文会对etcd/raft中Raft日志复制算法的实现与优化进行分析。由于etcd/raft中对日志复制的优化大部分属于实现上的优化，因此本文讲解优化理论的部分较少，而讲解etcd/raft中日志复制实现的部分较多。
 
@@ -1512,4 +1621,5 @@ func (r *raft) handleHeartbeat(m pb.Message) {
 
 [4] [Raft 笔记(五) – Log replication. 我叫尤加利（技术博客）](https://youjiali1995.github.io/raft/etcd-raft-log-replication/)
 
+[5] [Raft协议实现学习之—初始化和Leader Election过程. BUCKET & HAMMER（技术博客）](https://liqul.github.io/blog/etcd_raft_3)（其中对`unstable`的讨论存在问题，但该文仍提出了一些很好的问题）
 </div>
