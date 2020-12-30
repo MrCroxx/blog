@@ -70,6 +70,12 @@ etcd/raft中Raft日志是通过`raftLog`结构体记录的。`raftLog`结构体�
 
 `raftLog`中的数据，按照是否已持久化到稳定存储，可分为两部分：已持久化到稳定存储的部分（stable）和还未持久化到稳定存储的部分（unstable）。无论是stable的部分还是unstable的部分中，都可能包含快照或日志，且每部分的快照中包含的已压缩的日志比该部分相应的未压缩的日志更旧。需要注意的是，在etcd/raft的实现中，在同一时刻，`raftLog`中的4个段可能并不是同时存在的。
 
+{{< admonition info 提示 >}}
+
+关于日志unstable段对算法安全性的讨论详见[5.1节](#51-为什么raftlog使用了unstable也能保证安全性)。
+
+{{< /admonition >}}
+
 在etcd/raft的日志操作中，有4个经常使用的索引：
 
 | 索引名 | 描述 |
@@ -1583,7 +1589,7 @@ If a server loses any of its persistent state, it cannot safely rejoin the clust
 
 {{< /admonition >}}
 
-### 5.2 Entries、HardState、Snapshot持久化顺序
+### 5.2 Entries、HardState、Snapshot持久化顺序有要求吗？
 
 在处理`Ready`结构体时，除了要保证先持久化再发送消息的顺序，需要持久化的字段的保存顺序也值得关注。官方的建议是按照`Entries`、`HardState`、`Snapshot`的顺序持久化。因为在`raft`初始化加载`HardState`时，会检查*commit index*是否在[*snapshot last index*, *log last index*)范围内，
 
