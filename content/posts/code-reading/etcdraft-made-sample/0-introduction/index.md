@@ -41,6 +41,7 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 - [深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-sample/2-overview/)
 - [深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)
 - [深入浅出etcd/raft —— 0x04 Raft日志](/posts/code-reading/etcdraft-made-sample/4-log/)
+- [深入浅出etcd/raft —— 0x05 Raft成员变更](/posts/code-reading/etcdraft-made-sample/5-confchange/)
 
 ## 3. 施工路线图
 

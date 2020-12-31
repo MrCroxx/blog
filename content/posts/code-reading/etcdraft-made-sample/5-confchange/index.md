@@ -1,5 +1,5 @@
 ---
-title: "深入浅出etcd/raft —— 0x05 成员变更"
+title: "深入浅出etcd/raft —— 0x05 Raft成员变更"
 date: 2020-12-29T16:36:16+08:00
 lastmod: 2020-12-29T16:36:19+08:00
 draft: false
