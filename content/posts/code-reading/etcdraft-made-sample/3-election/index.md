@@ -35,7 +35,7 @@ resources:
 
 etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、和**Leader Lease**。在这三种优化中，只有**Pre-Vote**和**Leader Lease**最初是对选举过程的优化，**Check Quorum**期初是为了更高效地实现线性一致性读（Linearizable Read）而做出的优化，但是由于**Leader Lease**需要依赖**Check Quorum**，因此笔者也将其放在这里一起讲解。本系列将etcd/raft对实现线性一致性读的优化留在了后续的文章中，本文仅介绍为了实现更高效的线性一致性读需要在选举部分做出的优化。
 
-除此之外，etcd/raft还实现了**Leader Transfer**，即主动地进行leader的交接。其实现方式比较简单，只需要让希望成为新leader节点主动发起投票请求即可，这里不再过多讲解。需要注意的是，**Leader Transfer**不保证交接一定成功，只有希望成为新leader的节点能够得到数量达到quorum的选票时才能当选leader，**Leader Transfer**类型的投票不受**Pre-Vote**、**Check Quorum**、**Leader Lease**机制约束。
+除此之外，etcd/raft还实现了**Leader Transfer**，即主动地进行leader的交接。其实现方式比较简单，只需要让希望成为新leader节点主动发起投票请求即可，这里不再过多讲解。需要注意的是，**Leader Transfer**不保证交接一定成功，只有目标节点能够得到数量达到quorum的选票时才能当选leader，**Leader Transfer**类型的投票不受**Pre-Vote**、**Check Quorum**、**Leader Lease**机制约束。
 
 ### 1.1 Pre-Vote
 
@@ -105,8 +105,8 @@ etcd/raft实现的与选举有关的优化有**Pre-Vote**、**Check Quorum**、�
 
 为了解决以上问题，节点在收到term比自己低的请求时，需要做特殊的处理。处理逻辑也很简单：
 
-1. 如果收到了term比当前节点term低的消息，且集群开启了**Check Quorum / Leader Lease**或**Pre-Vote**，那么发送一条term为当前term的消息，触发term低的节点成为follower。（针对**场景1**、**场景2**）
-2. 对于term比当前节点term第的预投票请求，无论是否开启了**Check Quorum / Leader Lease**或**Pre-Vote**，都要通过一条term为当前term的消息，迫使其转为follower并更新term。（针对**场景3**）
+1. 如果收到了term比当前节点term低的leader的消息，且集群开启了**Check Quorum / Leader Lease**或**Pre-Vote**，那么发送一条term为当前term的消息，令term低的节点成为follower。（针对**场景1**、**场景2**）
+2. 对于term比当前节点term低的预投票请求，无论是否开启了**Check Quorum / Leader Lease**或**Pre-Vote**，都要通过一条term为当前term的消息，迫使其转为follower并更新term。（针对**场景3**）
 
 ## 2. etcd/raft中Raft选举的实现
 
@@ -444,7 +444,7 @@ etcd/raft使用`Term`为0的消息作为本地消息，`Step`不会对本地消�
 
 在转为follower时，新的`Term`就是该消息的`Term`。如果消息类型是`MsgApp`、`MsgHeartbeat`、`MsgSnap`，说明这是来自leader的消息，那么将`lead`字段直接置为该消息的发送者的id，否则暂时不知道当前的leader节点是谁。
 
-#### 2.3.3 对Term大于当前节点Term的消息的预处理
+#### 2.3.3 对Term小于当前节点Term的消息的预处理
 
 最后，如果消息的`Term`比当前`Term`小，因存在[1.4节](#14-引入的新问题与解决方案)中提到的问题，除了忽略消息外，还要做额外的处理：
 
@@ -584,7 +584,7 @@ case m.Term < r.Term:
 
 如果满足以上3个条件中的任一条，且该消息中的`Index`和`Term`至少与当前节点的日志一样新，那么该节点为其发送相应的投票消息。如果该消息的是`MsgVote`消息，该节点需要记录其将选票投给了谁，并重置`election timeout`的计时器。
 
-否则，节点会为其发送一条`Reject`为真的消息，以避免[1.4节](#14-引入的新问题与解决方案)中提到的问题。
+否则，节点会拒绝该请求，为其发送一条`Reject`为true的`MsgVoteResp`或`MsgPreVote`消息。，以避免[1.4节](#14-引入的新问题与解决方案)中提到的问题。
 
 除了这些情况外，消息都会通过`step`字段记录的函数，按照不同的节点角色进行处理。
 
