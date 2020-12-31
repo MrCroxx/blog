@@ -6,7 +6,7 @@ draft: false
 keywords: []
 description: ""
 tags: ["etcd", "Raft"]
-categories: ["Code Reading"]
+categories: ["深入浅出etcd/raft"]
 author: ""
 resources:
 - name: featured-image
@@ -439,16 +439,8 @@ etcd/raft使用`Term`为0的消息作为本地消息，`Step`不会对本地消�
 对于`Term`大于当前节点的`Term`的消息，`Step`还需要判断是否需要切换自己的身份为follower，其判断规则如下：
 
 1. 如果消息为`MsgPreVote`消息，那么不需要转为follower。
-2. 如果消息为`MsgPreVoteResp`且`Reject`字段不为真时<sup>注1</sup>，那么不需要转为follower。
+2. 如果消息为`MsgPreVoteResp`且`Reject`字段不为真时，那么不需要转为follower。
 3. 否则，转为follower。
-
-{{< admonition warning 注1 >}}
-
-初次接触Raft算法的读者需要注意，Raft的通信模型不是**Request-Respone**模型的，例如，如果节点不同意`MsgPreVote`或`MsgVote`，那么节点不会发送`MsgPreVoteResp`或`MsgVoteResp`。
-
-因此，如果收到了`Reject`为真的`MsgPreVoteResp`或`MsgVoteResp`消息，不代表该节点的请求被发送`MsgPreVoteResp`或`MsgVoteResp`消息的节点拒绝，而是节点应该立即放弃选举并转为follower，以优化效率并避免[1.4节](#14-引入的新问题与解决方案)中提到的问题。
-
-{{< /admonition >}}
 
 在转为follower时，新的`Term`就是该消息的`Term`。如果消息类型是`MsgApp`、`MsgHeartbeat`、`MsgSnap`，说明这是来自leader的消息，那么将`lead`字段直接置为该消息的发送者的id，否则暂时不知道当前的leader节点是谁。
 

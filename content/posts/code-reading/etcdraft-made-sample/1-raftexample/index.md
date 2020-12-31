@@ -6,7 +6,7 @@ draft: false
 keywords: []
 description: ""
 tags: ["etcd", "Raft"]
-categories: ["Code Reading"]
+categories: ["深入浅出etcd/raft"]
 author: ""
 resources:
 - name: featured-image
