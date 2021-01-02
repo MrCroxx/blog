@@ -1,7 +1,7 @@
 ---
 title: "深入浅出etcd/raft —— 0x00 引言"
 date: 2020-12-10T22:03:56+08:00
-lastmod: 2020-12-14T13:06:28+08:00
+lastmod: 2021-01-02T16:28:04+08:00
 draft: false
 keywords: []
 description: ""
@@ -42,19 +42,22 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 - [深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)
 - [深入浅出etcd/raft —— 0x04 Raft日志](/posts/code-reading/etcdraft-made-sample/4-log/)
 - [深入浅出etcd/raft —— 0x05 Raft成员变更](/posts/code-reading/etcdraft-made-sample/5-confchange/)
+- [深入浅出etcd/raft —— 0x06 只读请求优化](/posts/code-reading/etcdraft-made-sample/6-readonly/)
 
 ## 3. 施工路线图
 
 本系列仍在施工中，之后可能反复修改其中内容与顺序等。本节中保存了当前的施工路线图。
 
-1. 引言
-2. raftexample分析
-3. etcd/raft整体架构与状态机简要分析
-4. 选举 —— etcd/raft中选举优化
-5. 选举 —— etcd/raft实现分析
-5. 日志 —— etcd/raft中日志实现
-6. 日志 —— etcd/raft中日志复制
-7. 日志 —— etcd/raft中快照
-8. 集群变更 —— simple
-9. 集群变更 —— joint
-10. Linearizable Read —— Log Read、ReadIndex、Lease Read
+- [x] 引言
+- [x] raftexample分析
+- [x] etcd/raft整体架构与状态机简要分析
+- [x] 选举 —— etcd/raft中选举优化
+- [x] 选举 —— etcd/raft实现分析
+- [x] 日志 —— etcd/raft中日志实现
+- [x] 日志 —— etcd/raft中日志复制
+- [x] 日志 —— etcd/raft中快照
+- [x] 集群变更 —— simple
+- [x] 集群变更 —— joint
+- [x] Linearizable Read —— Log Read、ReadIndex、Lease Read
+- [ ] 集群变更 —— joint（apply-time confchange修复[issue#12359](https://github.com/etcd-io/etcd/issues/12359)）
+- [ ] 附录 —— etcd/raft中所有消息使用的字段描述
