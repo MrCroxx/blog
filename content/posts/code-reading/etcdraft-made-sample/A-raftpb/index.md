@@ -1,7 +1,7 @@
 ---
 title: "深入浅出etcd/raft —— 附录A raftpb消息"
-date: 2020-12-28T11:23:15+08:00
-lastmod: 2020-12-28T11:23:22+08:00
+date: 2021-01-02T16:28:24+08:00
+lastmod: 2021-01-02T16:28:27+08:00
 draft: true
 keywords: []
 description: ""
