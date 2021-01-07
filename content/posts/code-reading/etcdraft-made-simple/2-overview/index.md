@@ -20,7 +20,7 @@ resources:
 
 ## 0. 引言
 
-在[《深入浅出etcd/raft —— 0x01 raftexample》](/posts/code-reading/etcdraft-made-sample/1-raftexample/)中，我们通过对一个官方提供的基于etcd/raft实现的简单kvstore简单地介绍了etcd/raft的使用，以对etcd/raft有一个初步认识。想要深入分析etcd/raft中对Raft算法的实现与优化，首先，我们必须先要了解etcd/raft的总体设计。
+在[《深入浅出etcd/raft —— 0x01 raftexample》](/posts/code-reading/etcdraft-made-simple/1-raftexample/)中，我们通过对一个官方提供的基于etcd/raft实现的简单kvstore简单地介绍了etcd/raft的使用，以对etcd/raft有一个初步认识。想要深入分析etcd/raft中对Raft算法的实现与优化，首先，我们必须先要了解etcd/raft的总体设计。
 
 etcd/raft将Raft算法的实现分为了3个模块：Raft状态机、存储模块、传输模块。
 
@@ -132,7 +132,7 @@ type Node interface {
 
 ```
 
-看过本系列第一篇文章[《深入浅出etcd/raft —— 0x01 raftexample》](/posts/code-reading/etcdraft-made-sample/1-raftexample/)的读者对这一接口一定不会陌生。这里，我们再简单回顾一下与`Node`接口交互的方式。
+看过本系列第一篇文章[《深入浅出etcd/raft —— 0x01 raftexample》](/posts/code-reading/etcdraft-made-simple/1-raftexample/)的读者对这一接口一定不会陌生。这里，我们再简单回顾一下与`Node`接口交互的方式。
 
 `Node`结构中的方法按调用时机可以分为三类：
 

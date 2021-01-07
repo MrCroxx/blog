@@ -36,13 +36,13 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 
 ## 2. 目录
 
-- [深入浅出etcd/raft —— 0x00 引言](/posts/code-reading/etcdraft-made-sample/0-introduction/)
-- [深入浅出etcd/raft —— 0x01 raftexample](/posts/code-reading/etcdraft-made-sample/1-raftexample/)
-- [深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-sample/2-overview/)
-- [深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)
-- [深入浅出etcd/raft —— 0x04 Raft日志](/posts/code-reading/etcdraft-made-sample/4-log/)
-- [深入浅出etcd/raft —— 0x05 Raft成员变更](/posts/code-reading/etcdraft-made-sample/5-confchange/)
-- [深入浅出etcd/raft —— 0x06 只读请求优化](/posts/code-reading/etcdraft-made-sample/6-readonly/)
+- [深入浅出etcd/raft —— 0x00 引言](/posts/code-reading/etcdraft-made-simple/0-introduction/)
+- [深入浅出etcd/raft —— 0x01 raftexample](/posts/code-reading/etcdraft-made-simple/1-raftexample/)
+- [深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-simple/2-overview/)
+- [深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-simple/3-election/)
+- [深入浅出etcd/raft —— 0x04 Raft日志](/posts/code-reading/etcdraft-made-simple/4-log/)
+- [深入浅出etcd/raft —— 0x05 Raft成员变更](/posts/code-reading/etcdraft-made-simple/5-confchange/)
+- [深入浅出etcd/raft —— 0x06 只读请求优化](/posts/code-reading/etcdraft-made-simple/6-readonly/)
 
 ## 3. 施工路线图
 
