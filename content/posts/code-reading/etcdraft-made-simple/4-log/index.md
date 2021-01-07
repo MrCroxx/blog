@@ -19,7 +19,7 @@ resources:
 
 ## 0. 引言
 
-本文会对etcd/raft中Raft日志复制算法的实现与优化进行分析。这里假定读者阅读过Diego Ongaro的《In Search of an Understandable Consensus Algorithm (Extended Version)》（这里有笔者的[翻译](/posts/paper-reading/raft-extended/)，笔者英语水平一般，欢迎指正。），其中提到的部分，本文中不会做详细的解释。对etcd/raft的总体结构不熟悉的读者，可以先阅读[《深入浅出etcd/raft —— 0x02 etcd/raft总体设计》](/posts/code-reading/etcdraft-made-sample/2-overview/)。
+本文会对etcd/raft中Raft日志复制算法的实现与优化进行分析。这里假定读者阅读过Diego Ongaro的《In Search of an Understandable Consensus Algorithm (Extended Version)》（这里有笔者的[翻译](/posts/paper-reading/raft-extended/)，笔者英语水平一般，欢迎指正。），其中提到的部分，本文中不会做详细的解释。对etcd/raft的总体结构不熟悉的读者，可以先阅读[《深入浅出etcd/raft —— 0x02 etcd/raft总体设计》](/posts/code-reading/etcdraft-made-simple/2-overview/)。
 
 本文首先介绍了etcd/raft中日志复制部分的优化。由于etcd/raft中对日志复制的优化大部分属于实现上的优化，这些优化是在系统中很常见的优化，因此本文会一笔带过其理论部分，而着重于讲解etcd/raft中日志复制的实现。
 
@@ -56,7 +56,7 @@ etcd/raft中也实现了类似的优化，但是其将follower的最后一条日
 
 流水线（pipeline）同样是各种系统常用的提高吞吐量的方式。在etcd/raft的实现中，leader在向follower发送完日志复制请求后，不会等待follower响应，而是立即更新其*nextIndex*，并继续处理，以提高吞吐量。
 
-在正常且稳定的情况下，消息应恰好一次且有序到达。但是在异常情况下，可能出现消息丢失、消息乱序、消息超时等等情况，在前文[深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)介绍`Step`方法时，介绍了一些对过期消息的处理方式，重复的地方本文不再赘述。当follower收到过期的日志复制请求时，会拒绝该请求，随后follower会回退其*nextIndex*以重传之后的日志。
+在正常且稳定的情况下，消息应恰好一次且有序到达。但是在异常情况下，可能出现消息丢失、消息乱序、消息超时等等情况，在前文[深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-simple/3-election/)介绍`Step`方法时，介绍了一些对过期消息的处理方式，重复的地方本文不再赘述。当follower收到过期的日志复制请求时，会拒绝该请求，随后follower会回退其*nextIndex*以重传之后的日志。
 
 ## 2. etcd/raft中的日志结构
 
@@ -87,11 +87,11 @@ etcd/raft中Raft日志是通过`raftLog`结构体记录的。`raftLog`结构体�
 
 这里需要注意的是，所有的这些索引都是相对于当前节点而不是整个集群的，例如，当index为$i_1$的日志已被集群中数量达到quorum的节点保存到稳定存储时，一些节点可能还不知道$i_1$已被commit。
 
-`raftLog`中unstable的部分保存在`unstable`结构体中，而stable的部分稍有些复杂。为了让使用etcd/raft模块的开发者能够根据自己的需求自定义Raft日志存储，stable的部分不是直接通过内部的结构体实现的。`go.etcd.io/etcd/raft/storage.go`文件中定义了`Storage`接口，只要实现了该接口，都可以用来存储stable日志。在[深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-sample/2-overview/)的引言中，笔者提到`Storage`接口只定义了读取稳定存储中的日志、快照、状态的方法（如下图所示），etcd/raft并不关心也不知道开发者写入稳定存储的方式。那么，etcd/raft是怎样将unstable中的数据写入到稳定存储中的呢？
+`raftLog`中unstable的部分保存在`unstable`结构体中，而stable的部分稍有些复杂。为了让使用etcd/raft模块的开发者能够根据自己的需求自定义Raft日志存储，stable的部分不是直接通过内部的结构体实现的。`go.etcd.io/etcd/raft/storage.go`文件中定义了`Storage`接口，只要实现了该接口，都可以用来存储stable日志。在[深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-simple/2-overview/)的引言中，笔者提到`Storage`接口只定义了读取稳定存储中的日志、快照、状态的方法（如下图所示），etcd/raft并不关心也不知道开发者写入稳定存储的方式。那么，etcd/raft是怎样将unstable中的数据写入到稳定存储中的呢？
 
 ![etcd/raft职责示意图](assets/overview.svg "etcd/raft职责示意图")
 
-在[深入浅出etcd/raft —— 0x01 raftexample](/posts/code-reading/etcdraft-made-sample/1-raftexample/)中，笔者通过了官方提供的raftexample示例，介绍了使用etcd/raft的开发者与`Node`接口打交道并处理`Ready`结构体的方式（在[深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-sample/2-overview/)中也有提到）。其中，开发者需要将`Ready`结构体`Entities`和`Snapshot`字段中的数据保存到稳定存储中，这就是将数据从unstable转移到stable中的过程，这种设计也让etcd/raft不需要依赖稳定存储的具体写入方法。下图直观地表示了follower节点从收到leader发来的日志到将其保存至稳定存储中的大致流程（快照的处理方式也同理）。
+在[深入浅出etcd/raft —— 0x01 raftexample](/posts/code-reading/etcdraft-made-simple/1-raftexample/)中，笔者通过了官方提供的raftexample示例，介绍了使用etcd/raft的开发者与`Node`接口打交道并处理`Ready`结构体的方式（在[深入浅出etcd/raft —— 0x02 etcd/raft总体设计](/posts/code-reading/etcdraft-made-simple/2-overview/)中也有提到）。其中，开发者需要将`Ready`结构体`Entities`和`Snapshot`字段中的数据保存到稳定存储中，这就是将数据从unstable转移到stable中的过程，这种设计也让etcd/raft不需要依赖稳定存储的具体写入方法。下图直观地表示了follower节点从收到leader发来的日志到将其保存至稳定存储中的大致流程（快照的处理方式也同理）。
 
 ![日志复制流程示意图](assets/log-path.svg "日志复制流程示意图")
 
@@ -695,7 +695,7 @@ type Progress struct {
 
 `Progress`中的`PendingSnapshot`、`ProbeSent`字段是`StateProebe`和`StateSnapshot`状态下需要记录的字段，后文会详细讲解。
 
-`Progress`中的`RecentActive`字段用来标识该follower最近是否是“活跃”的。该字段除了用于**Check Quorum**外（详见[深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-sample/3-election/)），在日志复制时，leader不会将不活跃的follower转为`StateSnapshot`状态或发送快照。（这是为了修复[issue#3378](https://github.com/etcd-io/etcd/issues/3778)中提到的问题，感兴趣的读者可以查看该issue和[issue#3976](https://github.com/etcd-io/etcd/issues/3778)）。
+`Progress`中的`RecentActive`字段用来标识该follower最近是否是“活跃”的。该字段除了用于**Check Quorum**外（详见[深入浅出etcd/raft —— 0x03 Raft选举](/posts/code-reading/etcdraft-made-simple/3-election/)），在日志复制时，leader不会将不活跃的follower转为`StateSnapshot`状态或发送快照。（这是为了修复[issue#3378](https://github.com/etcd-io/etcd/issues/3778)中提到的问题，感兴趣的读者可以查看该issue和[issue#3976](https://github.com/etcd-io/etcd/issues/3778)）。
 
 `Progress`的`Inflights`字段是对日志复制操作进行流控的字段。虽然`Config`的`MaxSizePerMsg`字段限制了每条`MsgApp`消息的字节数，但是在`StateReplicate`状态下优化日志复制时，每次可能会发送多条`MsgApp`消息。因此，`Config`中又加入了`MaxInflightMsgs`字段来限制每次发送的`MsgApp`消息数。`Inflights`实现了`MaxInflightMsgs`字段配置的流控。
 
