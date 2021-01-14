@@ -24,9 +24,9 @@ boltdb使用单内存映射文件作为存储（single memory-mapped file on dis
 
 在linux系统中，内存与磁盘间的换入换出是以页为单位的。为了充分利用这一特定，boltdb的数据库文件也是按页组织的，且页大小与操作系统的页大小相等。
 
-由于mmap与unmmap系统调用的开销相对较大，因此boltdb在每次mmap时会预留一部分空间（小于1GB时倍增，超过1GB时每次额外申请1GB），这会产生一些空闲的页；同时，随着对数据库的操作，在更新值<sup>注1</sup>或删除值时，数据库也可能产生空闲页<sup>注2</sup>。为了高效地管理这些空闲页，boltdb学习操作系统引入了一个简化的空闲页表。
+由于mmap与unmmap系统调用的开销相对较大，因此boltdb在每次mmap时会预留一部分空间（小于1GB时倍增，超过1GB时每次额外申请1GB），这会产生一些空闲的页；同时，随着对数据库的操作，在更新值<sup>注1</sup>或删除值时，数据库也可能产生空闲页<sup>注2</sup>。为了高效地管理这些空闲页，boltdb学习操作系统引入了一个简化的空闲页列表。
 
-boltdb的页与空闲页表的实现分别在`page.go`与`freelist.go`中，本文主要围绕这两个文件，分析boltdb中页与空闲页表的设计与实现。
+boltdb的页与空闲页列表的实现分别在`page.go`与`freelist.go`中，本文主要围绕这两个文件，分析boltdb中页与空闲页列表的设计与实现。
 
 {{< admonition info 注1 >}}
 
@@ -75,7 +75,7 @@ type page struct {
 | overflow | 溢出页个数。当单页无法容纳数据时，可以用与该页相邻的页保存溢出的数据（详见后文中介绍）。 |
 | ptr | 页的数据（*Page Body*）的起始位置。 |
 
-boltdb中的页共有三种用途：保存数据库的元数据（*meta page*）1、保存空闲页表(*freelist page*)、保存数据，因为boltdb中数据是按照B+树组织的，因此保存数据的页又可分为分支节点（*branch page*）和叶子节点（*leaf page*）两种。也就是说，boltdb中页的类型共有4种。
+boltdb中的页共有三种用途：保存数据库的元数据（*meta page*）1、保存空闲页列表(*freelist page*)、保存数据，因为boltdb中数据是按照B+树组织的，因此保存数据的页又可分为分支节点（*branch page*）和叶子节点（*leaf page*）两种。也就是说，boltdb中页的类型共有4种。
 
 ### 1.2 page的数据结构
 
@@ -115,7 +115,7 @@ type bucket struct {
 | pageSize | 用来标识改文件采用的页大小。 |
 | flags | 保留字段，未使用。 |
 | root | boltdb记录根bucket的结构体，其包含了该bucket的根页id与bucket编号（单调递增）。 |
-| freelist | 空闲页表的首页id。 |
+| freelist | 空闲页列表的首页id。 |
 | pgid | 下一个分配的页id，即当前最大页id+1，用于mmap扩容时为新页编号。 |
 | txid | 下一个事务的id，全局单调递增。 |
 | checksum | meta页的校验和。 |
@@ -179,11 +179,9 @@ func (n *leafPageElement) value() []byte {
 
 ## 2. freelist
 
-当页被释放或者数据库初始mmap页数大于需要的页数时，会有部分页空闲。根据数据库领域的经验，当数据库容量达到一定值时，其很快还会达到这一值。因此，大部分数据库不会立即释放小空间，而是等较大空间释放时一起回收或者定期回收。boltdb作为一个轻量级的kv数据库，其不会回收申请过的页。因此，boltdb需要维护一个空闲页表，当已使用的页无法容纳数据时，优先使用空闲页表中的空闲页。
+boltdb通过`freelist`实现了空闲页列表。`freelist`本身也储存在`page`中。当数据库初始化或者恢复时，如果能够找到保存在页中的`freelist`，则直接使用该`freelist`，否则扫描数据库，构建新的`freelist`。
 
-boltdb中空闲页表是通过结构体`freelist`实现的，`freelist`本身也通过`page`存储。当数据库初始化或者恢复时，如果能够找到保存在页中的`freelist`，则直接使用该`freelist`，否则扫描数据库，构建新的`freelist`。
-
-### 2.1 freelist的结构
+### 2.1 freelist的逻辑结构
 
 `freelist`结构体中有3个字段：
 
@@ -199,9 +197,24 @@ type freelist struct {
 
 ```
 
-# ？？？？？？？？？？？？？？？？？？？？？？？？
+| 字段<div style="width: 14em"> | 描述 |
+| :-: | :- |
+| `ids []pgid` | 记录已释放的页id的有序列表。 |
+| `pending map[txid][]pgid` | 事务id到事务待释放的页id。 |
+| `cache map[pgid]bool` | 用来快速查找给定id的页是否被释放的缓存。出现在`ids`和`pending`中的页id均为true。 |
 
-其中，`ids`字段是已经释放了的页的id的有序列表。为了减少释放页时对`ids`排序的开销，在释放页时，boltdb不会立即将其有序插入`ids`中，而是先通过`pending`字段按照页所属的事务id（`txid`）保存页id，等到事务提交时再将该事务释放的所有页一并有序插入到`ids`中。这样设计的另一个好处是事务回滚时，可以直接删除`pending`字段中该事务id下保存的页id，而不需要从`ids`中删除。除此之外，为了快速检索页是否被释放，在`cache`中，所有已释放的页（`ids`）和所有待释放的页（`pending`）都被标记为`true`。
+由于boltdb是通过CoW的方式实现的读写事务并发的隔离性，因此当事务可写事务更新页时，其会复制已有的页，并将旧页加入到`pending`中该事务id下的待释放页的列表中。因为此时可能还有读事务在读取旧页，所以不能立刻释放该页，而是要等到所有事务都不再依赖该页时，才能将`pending`中的页加入到`ids`中。对于boltdb中事务的实现笔者会在本系列后面的文章中介绍，这里不再赘述，这里读者只需要了解`pending`的作用即可。
 
-当`freelist`被写入磁盘（页）中时，需要写入`ids`和`pending`中的所有id。因此，保存`freelist`的`page`的结构如下：
+这样做的好处还有，当事务回滚时，可以重用`pending`中还未释放的页（由于该事务还未提交，因此其之前释放的所有页都可被重用）。而且，重用页时对freelist的操作十分简单，只需要将`pending`中该事务id对应的列表清空即可。
 
+### 2.2 freelist的存储结构
+
+当数据库将freelist写入page时，会将`ids`与`pending`中的页id合并在一起写入`ids`。因为如果数据库crash了，那么所有事务都会终止，`pending`中的页都可以安全释放。
+
+因此，保存freelist的page只需要写入有序的空闲页id列表即可，其结构如下：
+
+![freelist的存储结构](assets/freelist-page.svg "freelist的存储结构")
+
+freelist页溢出的处理方式与其它page稍有不同。由于`page`结构体的`count`字段为`uint16`类型，其最大值为65535（`0xFFFF`），假设页大小为4KB，那么`count`字段能表示的最大的freelist只能记录256MB的页。也就是说，即使允许freelist的page溢出，但是由于受`count`字段的限制，其仍无法表示足够大的空间。因此，boltdb在写入freelist的page时，会判断空闲页列表的长度。当空闲页列表长度小于`0xFF`时，采用与其它的类型相同的方式处理；而当空闲页列表长度大于等于`0xFF`时，则用本应写入第一条pgid的位置（`ptr`指向的位置）记录空闲页列表的真实长度，而将真正的空闲页列表往后顺延一个条目的位置写入，同时将`count`置为`0xFF`。其示意图如下：
+
+![大型freelist的存储结构](assets/freelist-page-huge.svg "大型freelist的存储结构")
