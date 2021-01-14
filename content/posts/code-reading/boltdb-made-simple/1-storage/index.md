@@ -179,7 +179,7 @@ func (n *leafPageElement) value() []byte {
 
 ## 2. freelist
 
-boltdb通过`freelist`实现了空闲页列表。`freelist`本身也储存在`page`中。当数据库初始化或者恢复时，如果能够找到保存在页中的`freelist`，则直接使用该`freelist`，否则扫描数据库，构建新的`freelist`。
+boltdb通过`freelist`实现了空闲页列表。boltdb也将`freelist`按照一定格式持久化存储在了`page`中。当数据库初始化或者恢复时，如果能够找到保存在页中的`freelist`，则直接使用该`freelist`，否则扫描数据库，构建新的`freelist`。
 
 ### 2.1 freelist的逻辑结构
 
