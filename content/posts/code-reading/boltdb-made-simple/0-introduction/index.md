@@ -5,7 +5,7 @@ lastmod: 2021-01-05T18:20:40+08:00
 draft: false
 keywords: []
 description: ""
-tags: ["B+Tree"]
+tags: ["boltdb", "B+Tree"]
 categories: ["深入浅出bbolt"]
 author: ""
 resources:
