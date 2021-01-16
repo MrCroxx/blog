@@ -1,9 +1,10 @@
 ---
-title: "深入浅出boltdb —— 0x01 存储"
+title: "深入浅出boltdb —— 0x01 存储与缓存"
 date: 2021-01-05T18:26:19+08:00
 lastmod: 2021-01-05T18:26:22+08:00
 draft: false
 keywords: []
+
 description: ""
 tags: ["B+Tree"]
 categories: ["深入浅出bolt"]
@@ -218,3 +219,306 @@ type freelist struct {
 freelist页溢出的处理方式与其它page稍有不同。由于`page`结构体的`count`字段为`uint16`类型，其最大值为65535（`0xFFFF`），假设页大小为4KB，那么`count`字段能表示的最大的freelist只能记录256MB的页。也就是说，即使允许freelist的page溢出，但是由于受`count`字段的限制，其仍无法表示足够大的空间。因此，boltdb在写入freelist的page时，会判断空闲页列表的长度。当空闲页列表长度小于`0xFF`时，采用与其它的类型相同的方式处理；而当空闲页列表长度大于等于`0xFF`时，则用本应写入第一条pgid的位置（`ptr`指向的位置）记录空闲页列表的真实长度，而将真正的空闲页列表往后顺延一个条目的位置写入，同时将`count`置为`0xFF`。其示意图如下：
 
 ![大型freelist的存储结构](assets/freelist-page-huge.svg "大型freelist的存储结构")
+
+从page读取freelist与将freelist写入page的相应方法如下：
+
+```go
+
+// read initializes the freelist from a freelist page.
+func (f *freelist) read(p *page) {
+	// If the page.count is at the max uint16 value (64k) then it's considered
+	// an overflow and the size of the freelist is stored as the first element.
+	idx, count := 0, int(p.count)
+	if count == 0xFFFF {
+		idx = 1
+		count = int(((*[maxAllocSize]pgid)(unsafe.Pointer(&p.ptr)))[0])
+	}
+
+	// Copy the list of page ids from the freelist.
+	if count == 0 {
+		f.ids = nil
+	} else {
+		ids := ((*[maxAllocSize]pgid)(unsafe.Pointer(&p.ptr)))[idx:count]
+		f.ids = make([]pgid, len(ids))
+		copy(f.ids, ids)
+
+		// Make sure they're sorted.
+		sort.Sort(pgids(f.ids))
+	}
+
+	// Rebuild the page cache.
+	f.reindex()
+}
+
+// write writes the page ids onto a freelist page. All free and pending ids are
+// saved to disk since in the event of a program crash, all pending ids will
+// become free.
+func (f *freelist) write(p *page) error {
+	// Combine the old free pgids and pgids waiting on an open transaction.
+
+	// Update the header flag.
+	p.flags |= freelistPageFlag
+
+	// The page.count can only hold up to 64k elements so if we overflow that
+	// number then we handle it by putting the size in the first element.
+	lenids := f.count()
+	if lenids == 0 {
+		p.count = uint16(lenids)
+	} else if lenids < 0xFFFF {
+		p.count = uint16(lenids)
+		f.copyall(((*[maxAllocSize]pgid)(unsafe.Pointer(&p.ptr)))[:])
+	} else {
+		p.count = 0xFFFF
+		((*[maxAllocSize]pgid)(unsafe.Pointer(&p.ptr)))[0] = pgid(lenids)
+		f.copyall(((*[maxAllocSize]pgid)(unsafe.Pointer(&p.ptr)))[1:])
+	}
+
+	return nil
+}
+
+```
+
+### 2.3 freelist的方法
+
+本节简单介绍freelist提供的方法，以便读者阅读源码时参考。
+
+| 方法<div style="width: 14em"> | 描述 |
+| :-: | :- |
+| `size() int` | 获取freelist序列化为page后的数据大小。 |
+| `count() int` | 获取freelist中页的个数。 |
+| `free_count() int` | `ids`中的空闲页数。 |
+| `pending_count() int` | `pending`中待释放的空闲页数。 |
+| `copyall(dst []pgid)` | 将`ids`与`pending`中的所有空闲页id合并、排序并写入目标位置。该方法在将freelist写入到page时使用。 |
+| `allocate(n int) pgid` | 尝试从freelist中分配n个连续的页，返回首页的页id。 |
+| `free(txid txid, p *page)` | 将页加入给定事务的`pending`列表中。 |
+| `release(txid txid)` | 释放给定事务及其之前事务的`pending`列表中的所有待释放页，将其合并到`ids`中。 |
+| `rollback(txid txid)` | 当事务回滚时调用该方法，删除该事务的`pending`列表记录的页id以复用。 |
+| `freed(pgid pgid) bool` | 返回给定页是否在freelist中。 |
+| `read(p *page)` | 从page中读取并构建freelist。 |
+| `write(p *page) error` | 将freelist写入到page中。 |
+| `reload(p *page)` | 从page中重新加载freelist，该方法先调用`read`方法，接下来从`ids`中过滤掉`pengding`中的页。 |
+| `reindex()` | 重建freelist的缓存。 |
+
+其中，`release`调用的时机为新读写事务启动时。在启动新的读写事务时，boltdb会根据事务id释放所有已完成的事务在`pending`中的页：
+
+```go
+
+func (db *DB) beginRWTx() (*Tx, error) {
+	
+	// ... ...
+
+	// Free any pages associated with closed read-only transactions.
+	var minid txid = 0xFFFFFFFFFFFFFFFF
+	for _, t := range db.txs {
+		if t.meta.txid < minid {
+			minid = t.meta.txid
+		}
+	}
+	if minid > 0 {
+		db.freelist.release(minid - 1)
+	}
+
+	return t, nil
+}
+
+```
+
+## 3. boltdb的缓存策略
+
+boltdb的缓存主要有两个方面，一方面是将数据库文件映射到内存，另一方面是对空闲页的管理。
+
+### 3.1 内存映射文件
+
+#### 3.1.1 boltdb数据库文件结构
+
+boltdb的数据库文件由两个meta页、一个freelist页、和若干个用来保存数据与索引的B+树的branchNode页和leafNode页组成（页可能包含若干个overflow页）。当数据库初始化时，其会将0、1号页初始化为meta页、将2号页初始化为freelist页、将3号页初始化为空的leafNodePage。
+
+由于只有B+树的页是通过CoW方式写入的，所以boltdb设置了两个meta页以进行本地容错。在更新元数据时，boltdb会交替写入两个meta页。这样，如果meta页写入中途数据库挂掉，数据库仍可以使用另一份完整的meta页。
+
+#### 3.1.2 mmap
+
+mmap是boltdb的主要缓存策略。与mmap相关的方法主要有`mmap`、`munmap`、`mmapSize`(位于`db.go`中)：
+
+| 方法<div style="width: 14em"> | 描述 |
+| :-: | :- |
+| `mmap(minsz int) error` | 以内存映射文件的方式打开数据库文件并初始化meta引用。参数`minsz`是最小的mmap大小，其实际mmap大小是通过`mmapSize`方法获取的。 |
+| `munmap() error` | 取消文件的内存映射。 |
+| `mmapSize(size int) (int, error)` | 计算mmap大小，参数`size`是最小大小。 |
+
+```go
+
+// mmap opens the underlying memory-mapped file and initializes the meta references.
+// minsz is the minimum size that the new mmap can be.
+func (db *DB) mmap(minsz int) error {
+	db.mmaplock.Lock()
+	defer db.mmaplock.Unlock()
+
+	info, err := db.file.Stat()
+	if err != nil {
+		return fmt.Errorf("mmap stat error: %s", err)
+	} else if int(info.Size()) < db.pageSize*2 {
+		return fmt.Errorf("file size too small")
+	}
+
+	// Ensure the size is at least the minimum size.
+	var size = int(info.Size())
+	if size < minsz {
+		size = minsz
+	}
+	size, err = db.mmapSize(size)
+	if err != nil {
+		return err
+	}
+
+	// Dereference all mmap references before unmapping.
+	if db.rwtx != nil {
+		db.rwtx.root.dereference()
+	}
+
+	// Unmap existing data before continuing.
+	if err := db.munmap(); err != nil {
+		return err
+	}
+
+	// Memory-map the data file as a byte slice.
+	if err := mmap(db, size); err != nil {
+		return err
+	}
+
+	// Save references to the meta pages.
+	db.meta0 = db.page(0).meta()
+	db.meta1 = db.page(1).meta()
+
+	// Validate the meta pages. We only return an error if both meta pages fail
+	// validation, since meta0 failing validation means that it wasn't saved
+	// properly -- but we can recover using meta1. And vice-versa.
+	err0 := db.meta0.validate()
+	err1 := db.meta1.validate()
+	if err0 != nil && err1 != nil {
+		return err0
+	}
+
+	return nil
+}
+
+// munmap unmaps the data file from memory.
+func (db *DB) munmap() error {
+	if err := munmap(db); err != nil {
+		return fmt.Errorf("unmap error: " + err.Error())
+	}
+	return nil
+}
+
+// mmapSize determines the appropriate size for the mmap given the current size
+// of the database. The minimum size is 32KB and doubles until it reaches 1GB.
+// Returns an error if the new mmap size is greater than the max allowed.
+func (db *DB) mmapSize(size int) (int, error) {
+	// Double the size from 32KB until 1GB.
+	for i := uint(15); i <= 30; i++ {
+		if size <= 1<<i {
+			return 1 << i, nil
+		}
+	}
+
+	// Verify the requested size is not above the maximum allowed.
+	if size > maxMapSize {
+		return 0, fmt.Errorf("mmap too large")
+	}
+
+	// If larger than 1GB then grow by 1GB at a time.
+	sz := int64(size)
+	if remainder := sz % int64(maxMmapStep); remainder > 0 {
+		sz += int64(maxMmapStep) - remainder
+	}
+
+	// Ensure that the mmap size is a multiple of the page size.
+	// This should always be true since we're incrementing in MBs.
+	pageSize := int64(db.pageSize)
+	if (sz % pageSize) != 0 {
+		sz = ((sz / pageSize) + 1) * pageSize
+	}
+
+	// If we've exceeded the max size then only grow up to the max size.
+	if sz > maxMapSize {
+		sz = maxMapSize
+	}
+
+	return int(sz), nil
+}
+
+```
+
+boltdb中mmap会调用Linux的系统调用，其`prot`参数为`PROT_READ`，`flags`为`MAP_SHARED`与数据库配置中`MmapFlags`按位或的结果。
+
+boltdb的mmap大小增长策略如下：最小的mmap大小为32KB，在1GB之前mmap大小每次倍增，在1GB之后每次增长1GB。
+
+#### 3.1.3 数据同步
+
+为了保证事务的ACID，当事务提交时，boltdb需要保证数据被完整地写入到了磁盘中。在介绍boltdb的数据同步策略前，笔者首先简单介绍Linux系统提供的文件数据同步方式。
+
+在Linux中，为了性能考虑，`write/pwrite`等系统调用不会等待设备I/O完成后再返回。`write/pwrite`等系统调用只会更新page cache，而脏页的同步时间由操作系统控制。`sync`系统调用会在page cache中的脏页提交到设备I/O队列后返回，但是不会等待设备I/O完成。如果此时I/O设备故障，则数据还可能丢失。而`fsync`与`fdatasync`则会等待设备I/O完成后返回，以提供最高的同步保证。`fsync`与`fdatasync`的区别在于，`fdatasync`只会更新文件数据和必要的元数据（如文件大小等），而`fsync`会更新文件数据和所有相关的元数据（包括文件修改时间等），由于文件元数据与数据的保存位置可能不同，因此在磁盘上`fsync`往往比`fdatasync`多一次旋转时延。
+
+对于内存映射文件，Linux提供了`msync`系统调用。该系统调用可以更精确地控制同步的内存范围。
+
+虽然boltdb使用了内存映射文件，但是当事务提交时，其还是通过`pwrite + fdatasync`的方式同步刷盘。在Linux的文档中并没有详细说明混用普通文件的同步方式与内存映射文件的同步方式的影响。但是通过实践和mmap的`MAP_SHARED`模式的描述可知，使用SHARED的mmap，当其它进程通过`fdatasync`等系统调用修改底层文件后，修改能通过mmap的内存访问到。
+
+```go
+
+// tx.go
+// write writes any dirty pages to disk.
+func (tx *Tx) write() error {
+
+	// ... ...
+
+			if _, err := tx.db.ops.writeAt(buf, offset); err != nil {
+				return err
+			}
+
+	// ... ...
+
+	// Ignore file sync if flag is set on DB.
+	if !tx.db.NoSync || IgnoreNoSync {
+		if err := fdatasync(tx.db); err != nil {
+			return err
+		}
+	}
+
+	// ... ...
+
+}
+
+```
+
+### 3.2 空闲页管理
+
+正如[引言](0-引言)中所说，boltdb不会将空闲的页归还给操作系统，而是维护了freelist自行管理。然而，在boltdb中，除了freelist，还有一个用来管理单个页的字段`pagePool`。
+
+```go
+
+// tx.go
+// write writes any dirty pages to disk.
+func (tx *Tx) write() error {
+	
+	// ... ...
+
+	// Put small pages back to page pool.
+	for _, p := range pages {
+		// Ignore page sizes over 1 page.
+		// These are allocated using make() instead of the page pool.
+		if int(p.overflow) != 0 {
+			continue
+		}
+
+		buf := (*[maxAllocSize]byte)(unsafe.Pointer(p))[:tx.db.pageSize]
+
+		// See https://go.googlesource.com/go/+/f03c9202c43e0abb130669852082117ca50aa9b1
+		for i := range buf {
+			buf[i] = 0
+		}
+		tx.db.pagePool.Put(buf)
+	}
+
+	return nil
+}
+
+```
