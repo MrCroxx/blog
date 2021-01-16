@@ -6,7 +6,7 @@ draft: false
 keywords: []
 
 description: ""
-tags: ["B+Tree"]
+tags: ["boltdb", "B+Tree"]
 categories: ["深入浅出bolt"]
 author: ""
 resources:
