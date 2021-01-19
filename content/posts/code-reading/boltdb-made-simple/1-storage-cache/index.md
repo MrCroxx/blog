@@ -27,7 +27,7 @@ boltdb使用单内存映射文件作为存储（single memory-mapped file on dis
 
 由于mmap与unmmap系统调用的开销相对较大，因此boltdb在每次mmap时会预留一部分空间（小于1GB时倍增，超过1GB时每次额外申请1GB），这会产生一些空闲的页；同时，随着对数据库的操作，在更新值<sup>注1</sup>或删除值时，数据库也可能产生空闲页<sup>注2</sup>。为了高效地管理这些空闲页，boltdb学习操作系统引入了一个简化的空闲页列表。
 
-boltdb的页与空闲页列表的实现分别在`page.go`与`freelist.go`中，本文主要围绕这两个文件，分析boltdb中页与空闲页列表的设计与实现。
+boltdb的页与空闲页列表的实现分别在`page.go`与`freelist.go`中，本文主要围绕这两个文件，分析boltdb中页与空闲页列表的设计与实现。同时，本文后半部分介绍了boltdb的读写操作与缓存策略。由于boltdb的读写（特别是写入）与事务关系较为密切，因此本文后半部分的分析中可能涉及到一些与事务相关的代码，不了解boltdb事务实现的读者可以先阅读本系列后续的文章。
 
 {{< admonition info 注1 >}}
 
@@ -323,11 +323,25 @@ func (db *DB) beginRWTx() (*Tx, error) {
 
 ```
 
-## 3. boltdb的缓存策略
+## 3. boltdb的读写与缓存策略
 
-boltdb的缓存主要有两个方面，一方面是将数据库文件映射到内存，另一方面是对空闲页的管理。
+boltdb的缓存策略主要有两种，一种是使用mmap的读缓存策略，一种是使用page buffer的写缓存策略。
 
-### 3.1 内存映射文件
+### 3.1 读操作与缓存策略
+
+boltdb在读取数据库文件时，为了避免频繁进行设备I/O，使用了mmap技术作为缓存。当boltdb打开数据库时，其会将数据库文件通过mmap系统调用映射到内存。这样可以避免使用read系统调用读取I/O设备，而是直接以内存访问的方式读取数据。在通过mmap将数据库文件映射到内存后，boltdb会根据数据库文件构建内存数据结构，如meta、freelist、B+Tree结构。
+
+根据使用方式的不同，meta、freelist、B+Tree使用mmap中数据的方式各不相同。
+
+boltdb将其meta直接指向了mmap内存空间的meta page，但仅用来读取，不会直接修改meta page。当创建新事务时，boltdb会复制当前的meta page到一处内存中，作为该事务开始时的meta快照。
+
+freelist和B+Tree都是根据mmap内存空间的page在内存别处构建的数据结构，但二者的构建策略不同。freelist是在打开数据库时完整地读取mmap内存空间中的freelist page构建的；而B+Tree则是在使用中按需构建的，即在读取B+Tree的node时，如果node已经在缓存中构建过，则读取已经构建好的缓存，如果node还没在缓存中构建过，则读取mmap内存空间中的数据，在内存别处构建node的缓存。
+
+boltdb的读操作与缓存策略可通过下图表示：
+
+![boltdb读操作与缓存策略示意图](assets/bolt-read.svg "boltdb读操作与缓存策略示意图")
+
+B+Tree的构建笔者会在本系列后续的文章中介绍，本节只关注与mmap相关的部分。
 
 #### 3.1.1 boltdb数据库文件结构
 
@@ -452,9 +466,82 @@ boltdb中mmap会调用Linux的系统调用，其`prot`参数为`PROT_READ`，`fl
 
 boltdb的mmap大小增长策略如下：最小的mmap大小为32KB，在1GB之前mmap大小每次倍增，在1GB之后每次增长1GB。
 
-#### 3.1.3 数据同步
+### 3.2 写操作与缓存策略
 
-为了保证事务的ACID，当事务提交时，boltdb需要保证数据被完整地写入到了磁盘中。在介绍boltdb的数据同步策略前，笔者首先简单介绍Linux系统提供的文件数据同步方式。
+为了保证事务的ACID性质，数据库系统需要确保事务提交时文件的修改要安全地写入到磁盘或其它I/O设备。由于随机的设备I/O非常耗时，boltdb不会在数据更新时立刻修改底层文件。而是先将修改后的page写入到一块page buffer内存中作为缓存，等事务提交时，再将事务修改的所有page buffer顺序地写入I/O设备。同时，为了保证数据被安全地写入到了I/O设备，boltdb的刷盘采用pwrite+fdatasyc实现。
+
+boltdb的写操作与缓存策略可通过下图表示：
+
+![boltdb写操作与缓存策略示意图](assets/bolt-write.svg "boltdb写操作与缓存策略示意图")
+
+
+
+#### 3.2.1 page buffer（memory->memory）
+
+无论是修改meta、freelist，还是修改或写入新B+Tree的node时，boltdb都会先将数据按照page结构写入mmap内存空间外的page buffer中，等到事务提交时再将page buffer中数据写入到底层数据库文件相应的page处。
+
+分配page buffer的逻辑在`db.go`的`allocate`方法中：
+
+```go
+
+// allocate returns a contiguous block of memory starting at a given page.
+func (db *DB) allocate(count int) (*page, error) {
+	// Allocate a temporary buffer for the page.
+	var buf []byte
+	if count == 1 {
+		buf = db.pagePool.Get().([]byte)
+	} else {
+		buf = make([]byte, count*db.pageSize)
+	}
+	p := (*page)(unsafe.Pointer(&buf[0]))
+	p.overflow = uint32(count - 1)
+
+	// Use pages from the freelist if they are available.
+	if p.id = db.freelist.allocate(count); p.id != 0 {
+		return p, nil
+	}
+
+	// Resize mmap() if we're at the end.
+	p.id = db.rwtx.meta.pgid
+	var minsz = int((p.id+pgid(count))+1) * db.pageSize
+	if minsz >= db.datasz {
+		if err := db.mmap(minsz); err != nil {
+			return nil, fmt.Errorf("mmap allocate error: %s", err)
+		}
+	}
+
+	// Move the page id high water mark.
+	db.rwtx.meta.pgid += pgid(count)
+
+	return p, nil
+}
+
+```
+
+通过这段代码可以看出，`allocate`方法会先创建一段能够容纳给定数量page的连续内存空间，这段空间就是page buffer，然后将这段空间作为page返回给调用者。这样，调用者可以向读写正常page一样读写这段page buffer。
+
+为了避免分配较小的page buffer造成过多的内存碎片，boltdb通过`sync.Pool`类型的字段`pagePool`分配、复用长度为1的page buffer。`pagePool`的定义与初始化代码如下：
+
+```go
+
+	// in struct db
+	pagePool sync.Pool
+
+	// in `db.Open`
+	// Initialize page pool.
+	db.pagePool = sync.Pool{
+		New: func() interface{} {
+			return make([]byte, db.pageSize)
+		},
+	}
+
+```
+
+在分配page buffer时，需要分配的page buffer长度为1，boltdb会通过`pagePool`分配；在事务提交时，boltdb将page buffer中的数据写入到文件后，会将长度为1的page buffer放回`pagePool`。而如果所需的page buffer长度大于1，则boltdb会通过`make`分配page buffer的内存空间。
+
+#### 3.2.2 pwrite + fdatasync（memory->disk）
+
+为了保证事务的ACID性质，当事务提交时，boltdb需要保证数据被完整地写入到了磁盘中。在介绍boltdb的数据同步策略前，笔者首先简单介绍Linux系统提供的文件数据同步方式。
 
 在Linux中，为了性能考虑，`write/pwrite`等系统调用不会等待设备I/O完成后再返回。`write/pwrite`等系统调用只会更新page cache，而脏页的同步时间由操作系统控制。`sync`系统调用会在page cache中的脏页提交到设备I/O队列后返回，但是不会等待设备I/O完成。如果此时I/O设备故障，则数据还可能丢失。而`fsync`与`fdatasync`则会等待设备I/O完成后返回，以提供最高的同步保证。`fsync`与`fdatasync`的区别在于，`fdatasync`只会更新文件数据和必要的元数据（如文件大小等），而`fsync`会更新文件数据和所有相关的元数据（包括文件修改时间等），由于文件元数据与数据的保存位置可能不同，因此在磁盘上`fsync`往往比`fdatasync`多一次旋转时延。
 
@@ -464,17 +551,51 @@ boltdb的mmap大小增长策略如下：最小的mmap大小为32KB，在1GB之�
 
 ```go
 
-// tx.go
 // write writes any dirty pages to disk.
 func (tx *Tx) write() error {
+	// Sort pages by id.
+	pages := make(pages, 0, len(tx.pages))
+	for _, p := range tx.pages {
+		pages = append(pages, p)
+	}
+	// Clear out page cache early.
+	tx.pages = make(map[pgid]*page)
+	sort.Sort(pages)
 
-	// ... ...
+	// Write pages to disk in order.
+	for _, p := range pages {
+		size := (int(p.overflow) + 1) * tx.db.pageSize
+		offset := int64(p.id) * int64(tx.db.pageSize)
 
+		// Write out page in "max allocation" sized chunks.
+		ptr := (*[maxAllocSize]byte)(unsafe.Pointer(p))
+		for {
+			// Limit our write to our max allocation size.
+			sz := size
+			if sz > maxAllocSize-1 {
+				sz = maxAllocSize - 1
+			}
+
+			// Write chunk to disk.
+			buf := ptr[:sz]
 			if _, err := tx.db.ops.writeAt(buf, offset); err != nil {
 				return err
 			}
 
-	// ... ...
+			// Update statistics.
+			tx.stats.Write++
+
+			// Exit inner for loop if we've written all the chunks.
+			size -= sz
+			if size == 0 {
+				break
+			}
+
+			// Otherwise move offset forward and move pointer to next chunk.
+			offset += int64(sz)
+			ptr = (*[maxAllocSize]byte)(unsafe.Pointer(&ptr[sz]))
+		}
+	}
 
 	// Ignore file sync if flag is set on DB.
 	if !tx.db.NoSync || IgnoreNoSync {
@@ -482,24 +603,6 @@ func (tx *Tx) write() error {
 			return err
 		}
 	}
-
-	// ... ...
-
-}
-
-```
-
-### 3.2 空闲页管理
-
-正如[引言](0-引言)中所说，boltdb不会将空闲的页归还给操作系统，而是维护了freelist自行管理。然而，在boltdb中，除了freelist，还有一个用来管理单个页的字段`pagePool`。
-
-```go
-
-// tx.go
-// write writes any dirty pages to disk.
-func (tx *Tx) write() error {
-	
-	// ... ...
 
 	// Put small pages back to page pool.
 	for _, p := range pages {
@@ -522,3 +625,14 @@ func (tx *Tx) write() error {
 }
 
 ```
+
+从上面这段来自`tx.go`的代码中，我们可以看到：在事务提交写入磁盘时，boltdb会先将事务使用的page buffer按照页id排序，然后将page buffer中的内容通过文件的`WriteAt`方法（go语言通过`pwrite`系统调用实现）写入到底层数据库文件中。在完成所有`pwrite`的调用后，boltdb通过`fdatasync`系统调用等待数据安全地同步到磁盘中。最后，boltdb将待释放的长度为1的page buffer放回到`pagePool`中，以复用这些单页，减少内存碎片的影响。
+
+## 4. 总结
+
+总的来说，boltdb的读写操作与缓存策略可以概括如下：
+
+- 读数据库文件时，通过mmap技术将其映射到内存中，避免频繁的设备I/O；不同的数结构在不同时刻读取mmap内存空间的数据完成构建。
+- 写数据库文件时，通过page buffer先写入内存缓存，然后在事务提交时将page buffer中的数据通过pwrite + fdatasync系统调用写入底层文件并确保写入的安全性。
+
+而连接mmap与pwrite + fdatasync的桥梁，是操作系统。操作系统保证了通过`MAP_SHARED`映射的内存空间在底层文件修改时会更新。
