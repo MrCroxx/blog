@@ -54,6 +54,20 @@ B+Tree在B-Tree的基础上，进一步做了一些优化。一棵$m$阶B+Tree�
 
 ## 1. boltdb中B+Tree的实现
 
+boltdb的B+Tree节点实现可分为存储中的实现（mmap memory）与内存中的实现（heap memory）两部分。
+
+B+Tree节点存储部分的实现即branchNodePage与leafNodePage。branchNodePage中每个`branchPageElement`的`pos`与`ksize`字段标识了branch node中的每个key的位置、`pgid`字段标识了该key所对应的孩子节点的页id；leafNodePage中`pos`、`ksize`、`vsize`字段标识的leaf node中每个实际存储的key/value的位置、`flags`字段标识了该元素的类型（是普通的key/value还是bucket）。
+
+虽然boltdb通过mmap的方式将数据库文件映射到了内存中，但是page是copy-on-write的，相当于mmap的page是只读的。因此，boltdb还需要一种通过heap memory表示的B+Tree节点。
+
+B+Tree节点内存部分主要由node结构体实现。本节将详细介绍node结构体及其相关方法的实现。
+
+boltdb中node是按需实例化的，对于不需要修改的node，boltdb直接从page中读取数据；而当boltdb需要修改B+Tree的某个节点时，则会将该节点从page实例化为node。在修改node时，boltdb会为其分配page buffer（dirty page），等到事务提交时，才会将这些page buffer中的数据统一落盘。
+
+本文主要关注boltdb中B+Tree在内存中的实现（heap memory），B+Tree在存储中的实现（mmap memory - page）笔者已经在本系列的[存储与缓存](/posts/code-reading/boltdb-made-simple/1-storage-cache/)中介绍过，这里不再赘述。而node实例化的具体时机与boltdb中cursor的实现有关，因此笔者将其留到了本系列的后续文章中介绍。
+
+### 1.1 node结构体
+
 boltdb中B+Tree的实现主要在`node.go`中。node结构体表示了boltdb中B+Tree的节点，其实现如下：
 
 ```go
@@ -83,7 +97,6 @@ type inode struct {
 
 type inodes []inode
 
-
 ```
 
 | 字段<div style="width: 14em"> | 描述 |
@@ -97,6 +110,8 @@ type inodes []inode
 | `parent *node` | 父节点指针。 |
 | `children nodes` | 初始化时孩子节点列表，用于在调整时索引。 |
 | `inodes inodes` | 该node的内部节点，即该node所包含的元素。 |
+
+### 1.2 node在内存与存储中的关系
 
 node的存储结构即为branchNodePage或leafNodePage，因此，boltdb仅持久化保存了node的`isLeaf`、`pgid`、`inodes`信息，其它信息都是在node创建或加载时指定的。node的`write`、`read`方法揭示了node是怎样被序列化或反序列化的：
 
@@ -230,7 +245,11 @@ func (n *node) dereference() {
 
 ```
 
-`dereference`会递归向下地将整个B+Tree的数据拷贝到heap memory中（非mmap映射的内存空间），以避免unmmap时node还在引用旧的mmap的内存地址。
+`dereference`会递归向下地将整个B+Tree的数据拷贝到heap memory中（非mmap映射的内存空间），以避免unmmap时node还在引用旧的mmap的内存地址。执行`dereference`前后，node在内存中的示意图如下：
+
+![dereference执行前后node在内存中的示意图](assets/dereference.svg "dereference执行前后node在内存中的示意图")
+
+### 1.3 node中用于查询的方法
 
 除了node的字段外，node的一些方法也用来查询或索引数据（leafNode没有孩子，其child指其内部元素，即inode）：
 
@@ -248,6 +267,8 @@ func (n *node) dereference() {
 | `prevSibling() *node` | 当前节点的上一个兄弟节点（通过查询父节点获取）。 |
 
 需要注意的是，这些查询孩子、兄弟的方法，都是继续节点的`inodes`查询的，即节点实时状态；而不是基于`children`查询的，只有在节点调整时才需要使用`children`以便于索引节点。这些方法的实现都非常简单，这里不再赘述。
+
+### 1.4 node中用于修改的方法
 
 node还提供了在当前节点上插入（或修改）与删除inode的`put`、`del`方法：
 
@@ -299,12 +320,15 @@ func (n *node) del(key []byte) {
 }
 
 ```
-
 `put`方法与`del`方法的实现思路相似，二者都是在node的`inodes`上进行二分搜索，找到第一个大于等于用于查询的key（`put`中为`oldKey`，`del`中为`key`）的位置，然后判断当前位置的key与用于查询的key是否相等。若二者相等，则修改或删除该key，否则插入新key或直接返回。此外，因为`del`操作可能导致node的数据填充率低于阈值，因此`del`会将node的`unbalanced`置为true，以便后续操作检查该节点是否需要进行`rebalance`操作。
+
+### 1.5 B+Tree的调整
 
 在上文中笔者介绍过，boltdb只有在需要将B+Tree写入到文件时才需要调整B+Tree的结构，因此`put`和`del`不需要调整B+Tree的结构，实现非常简单。
 
 boltdb的B+Tree实现中，用来调整B+Tree结构的方法有两个：`rebalance`和`spill`。`rebalance`用于检查node是否由于删除了inode而导致数据填充率低于阈值，并将数据填充率低于阈值的node与其兄弟节点合并，`rebalance`还会将只有一个孩子的根节点与该其唯一的孩子合并。`spill`则可以进一步分为两个步骤，`spill`首先会检查并将填充率过高的节点拆分为多个小节点（split），并维护B+Tree的结构，然后将更新后的节点写到新的page中。因此，在事务提交时，boltdb会先对B+Tree执行`rebalance`操作再执行`spill`操作。
+
+#### 1.5.1 rebalance
 
 首先分析`rebalance`的实现：
 
@@ -442,6 +466,8 @@ func (n *node) free() {
 5. 否则，与兄弟节点合并。此时，如果当前节点在父节点中不是首个孩子，则默认与后继兄弟节点合并，否则与前驱兄弟节点合并。合并后，释放占用的page，并递归对父节点执行`rebalance`操作。
 
 注意，这里“释放page”，指将占用的page加到当前事务的`pending`列表中，而不是立即释放，因此此时可能仍有只读事务正在读取旧page。由于在合并时，一定在父节点中删除了当前节点的key，因此父节点会变为`unbalanced`状态，所以需要递归对父节点进行`rebalance`操作。
+
+#### 1.5.2 spill
 
 接下来分析`spill`及相关方法的实现：
 
@@ -622,3 +648,9 @@ func (n *node) spill() error {
 5. 如果当前节点不是根节点，且父节点不是新节点（因为如果父节点是新节点则其会在之后执行`spill`操作），那么递归对父节点执行`spill`操作。
 
 由于boltdb是在需要写文件时才调整B+Tree的结构，因此在`node.go`中只有`rebalance`和`spill`的实现，其调用在事务相关的逻辑中。
+
+## 2. 总结
+
+本文介绍了B-Tree及其变体B+Tree的基本概念，并分析了boltdb中B+Tree的实现。
+
+由于boltdb使用了mmap方式将数据库文件映射到了内存中，且mmap仅作为读取的方式而不作为写入的方式，所以当没有接触过类似实现的读者阅读分析其源码时经常会因混淆mmap memory和heap memory而困惑。对此比较困惑的读者可以再次阅读本系列《深入浅出boltdb —— 0x01 存储与缓存》中[3. boltdb的读写与缓存策略](/posts/code-reading/boltdb-made-simple/1-storage-cache/#3-boltdb的读写与缓存策略)一节。
