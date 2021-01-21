@@ -266,7 +266,7 @@ func (n *node) dereference() {
 | `nextSibling() *node` | 当前节点的下一个兄弟节点（通过查询父节点获取）。 |
 | `prevSibling() *node` | 当前节点的上一个兄弟节点（通过查询父节点获取）。 |
 
-需要注意的是，这些查询孩子、兄弟的方法，都是继续节点的`inodes`查询的，即节点实时状态；而不是基于`children`查询的，只有在节点调整时才需要使用`children`以便于索引节点。这些方法的实现都非常简单，这里不再赘述。
+这些方法的实现都非常简单，这里不再赘述。
 
 ### 1.4 node中用于修改的方法
 
@@ -638,7 +638,7 @@ func (n *node) spill() error {
 
 `spill`方法依次做了如下操作：
 1. 如果当前节点已经执行过`spill`，则跳过当前节点（为了避免特殊情况下node被二次`spill`的问题，详见[pull#227](https://github.com/boltdb/bolt/pull/227)）。
-2. 对`children`中保存初始时的孩子递归调用`spill`方法。
+2. 对`children`中记录的已实例化为node的孩子节点递归调用`spill`方法。
 3. `split`当前节点。
 4. 遍历当前节点拆分出的若干个节点，并执行如下操作：
 	1. 如果当前节点引用的page非空（`split`出的新节点的页引用为空），则将释放当前占用的page。
