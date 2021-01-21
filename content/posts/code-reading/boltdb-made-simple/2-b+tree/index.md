@@ -108,7 +108,7 @@ type inodes []inode
 | `key []byte` | 保存node初始化时的第一个key，用于在调整时索引。 |
 | `pgid pgid` | 当前node在mmap内存中相应的页id。 |
 | `parent *node` | 父节点指针。 |
-| `children nodes` | 初始化时孩子节点列表，用于在调整时索引。 |
+| `children nodes` | 保存已实例化的孩子节点的node，用于`spill`时递归向下更新node。 |
 | `inodes inodes` | 该node的内部节点，即该node所包含的元素。 |
 
 ### 1.2 node在内存与存储中的关系
@@ -245,7 +245,7 @@ func (n *node) dereference() {
 
 ```
 
-`dereference`会递归向下地将整个B+Tree的数据拷贝到heap memory中（非mmap映射的内存空间），以避免unmmap时node还在引用旧的mmap的内存地址。执行`dereference`前后，node在内存中的示意图如下：
+`dereference`会递归向下地将B+Tree中已实例化的node中的数据拷贝到heap memory中（非mmap映射的内存空间），以避免unmmap时node还在引用旧的mmap的内存地址。执行`dereference`前后，node在内存中的示意图如下：
 
 ![dereference执行前后node在内存中的示意图](assets/dereference.svg "dereference执行前后node在内存中的示意图")
 
