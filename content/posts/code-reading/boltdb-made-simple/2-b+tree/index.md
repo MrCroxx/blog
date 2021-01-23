@@ -58,7 +58,7 @@ boltdb的B+Tree节点实现可分为存储中的实现（mmap memory）与内存
 
 B+Tree节点存储部分的实现即branchNodePage与leafNodePage。branchNodePage中每个`branchPageElement`的`pos`与`ksize`字段标识了branch node中的每个key的位置、`pgid`字段标识了该key所对应的孩子节点的页id；leafNodePage中`pos`、`ksize`、`vsize`字段标识的leaf node中每个实际存储的key/value的位置、`flags`字段标识了该元素的类型（是普通的key/value还是bucket）。
 
-虽然boltdb通过mmap的方式将数据库文件映射到了内存中，但是page是copy-on-write的，相当于mmap的page是只读的。因此，boltdb还需要一种通过heap memory表示的B+Tree节点。
+虽然boltdb通过mmap的方式将数据库文件映射到了内存中，但boltdb不会直接修改mmap的内存空间，而是只读mmap内存空间。当需要更新B+Tree的节点时，boltdb会读取mmap内存中相应的page，并在heap memory中构建相应的数据结构来修改，最后再通过pwrite+fdatasync的方式写入底层文件。
 
 B+Tree节点内存部分主要由node结构体实现。本节将详细介绍node结构体及其相关方法的实现。
 
