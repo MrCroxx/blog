@@ -47,9 +47,15 @@ resources:
 
 boltdb除了需要根据bucket的名称（`name`）找到其相应的B+Tree的根节点的pgid（`root`）外，还需要为每个bucket保存一个64为整型值，以便实现生成单调递增的序列号的功能（便于并行程序存储中间结果或实现锁）。这样，bucket的元数据也可以表示为一个key/value对，即$name -> (root,sequence)$，而boltdb也确实是这样实现的。
 
-在boltdb中，bucekt是支持嵌套的，boltdb的数据库元数据meta中只保存了根bucket（即`meta`结构体中的`root`字段），所有签到的bucket组成了一个多叉树型结构，如下图所示。
+在boltdb中，bucekt是支持嵌套的，boltdb的数据库元数据meta中只保存了根bucket（即`meta`结构体中的`root`字段），所有嵌套的bucket组成了一个多叉树型结构，如下图所示。
 
 ![bucket多叉树型结构示意图](assets/bucket.svg "bucket多叉树型结构示意图")
+
+{{< admonition info 提示 >}}
+
+boltdb的root bucket只保存子bucket，而不保存键值对。
+
+{{< /admonition >}}
 
 既然bucket的元数据可以表示为key/value对，而bucket中存储的数据也是key/value对，且bucket是支持嵌套的，所以在boltdb中，bucket的元数据也以key/value的形式保存在其父bucket的B+Tree中叶子节点的元素中，只是该元素的`flag`字段有1位标识了该key/value表示的是bucket。只有根bucket不同，根bucket不需要通过`name`来索引，因此其只需要保存相当于其他bucket的元数据中value的数据，并直接通过boltdb的`meta`结构体的`root`字段索引。
 
@@ -385,7 +391,7 @@ func (b *Bucket) rebalance() {
 
 ```
 
-该方法实现非常简单，首先其遍历了当前`Bucket`对象的`nodes`中缓存的node，调用`rebalance`方法，然后递归遍历`buckets`中缓存的子bucket的`Bucket`示例，调用`rebalance`方法。
+该方法实现非常简单，首先其遍历了当前`Bucket`对象的`nodes`中缓存的node，调用`rebalance`方法，然后递归遍历`buckets`中缓存的子bucket的`Bucket`实例，调用`rebalance`方法。
 
 相比`rebalance`方法，`Bucket`的`spill`方法实现稍微复杂一些：
 
@@ -860,13 +866,452 @@ func (b *Bucket) ForEach(fn func(k, v []byte) error) error {
 
 ```
 
-该方法首先获取了Cursor，并将其移动到B+Tree的第一个key/value处，然后在前进的同时对每个key/value执行传入的闭包，直到Cursor超出了范围后停止。
-
-# 施工中。。。 。。。
+该方法首先获取了Cursor，并将其移动到B+Tree的第一个key/value处，然后在前进的同时对每个key/value执行传入的闭包，没有不再有后继key/value后停止。
 
 ## 2. cursor
 
+游标cursor是boltdb中用来遍历B+Tree访问其中key/value的工具。由于boltdb的B+Tree叶子节点没有实现链指针，因此其cursor实现中通过栈记录了根节点到当前节点的路径，以便于访问前驱或后继key/value。
 
+boltdb的cursor实现主要在`cursor.go`中，由`Cursor`结构体实现，本节将介绍其实现方式。
 
+### 2.1 Cursor结构体
+
+`Cursor`结构体中只有两个字段，其分别记录了`Cursor`所属的`Bucket`实例，与从根节点到当前key/value的路径。用于可以通过其`Bucket`方法获取其所属`Bucket`实例。
+
+```go
+
+// Cursor represents an iterator that can traverse over all key/value pairs in a bucket in sorted order.
+// Cursors see nested buckets with value == nil.
+// Cursors can be obtained from a transaction and are valid as long as the transaction is open.
+//
+// Keys and values returned from the cursor are only valid for the life of the transaction.
+//
+// Changing data while traversing with a cursor may cause it to be invalidated
+// and return unexpected keys and/or values. You must reposition your cursor
+// after mutating data.
+type Cursor struct {
+	bucket *Bucket
+	stack  []elemRef
+}
+
+// Bucket returns the bucket that this cursor was created from.
+func (c *Cursor) Bucket() *Bucket {
+	return c.bucket
+}
+
+```
+
+由于在不需要更新时，Cursor直接通过B+Tree节点的pgid访问mmap memory中的页，只有在需要更新时才会将其实例化为node。因此，在Cursor遍历节点的过程中，不同路径可能既有通过page表示的节点，也可能有通过node表示的节点。因此，`stack`字段记录的节点结构`elemRef`中有page指针`page`、node指针`node`、还有表示位于节点的第几个元素（element或inode）的索引`index`，在访问时，如果`node`为空，则通过`page`访问。
+
+```go
+
+// elemRef represents a reference to an element on a given page/node.
+type elemRef struct {
+	page  *page
+	node  *node
+	index int
+}
+
+// isLeaf returns whether the ref is pointing at a leaf page/node.
+func (r *elemRef) isLeaf() bool {
+	if r.node != nil {
+		return r.node.isLeaf
+	}
+	return (r.page.flags & leafPageFlag) != 0
+}
+
+// count returns the number of inodes or page elements.
+func (r *elemRef) count() int {
+	if r.node != nil {
+		return len(r.node.inodes)
+	}
+	return int(r.page.count)
+}
+
+```
+
+`Cursor`的栈顶元素即为当前Cursor所在位置，`keyValue`方法是`Cursor`用来获取当前键值对的方法，其会根据当前节点是page还是node，通过不同方式获取键值对：
+
+```go
+
+// keyValue returns the key and value of the current leaf element.
+func (c *Cursor) keyValue() ([]byte, []byte, uint32) {
+	ref := &c.stack[len(c.stack)-1]
+	if ref.count() == 0 || ref.index >= ref.count() {
+		return nil, nil, 0
+	}
+
+	// Retrieve value from node.
+	if ref.node != nil {
+		inode := &ref.node.inodes[ref.index]
+		return inode.key, inode.value, inode.flags
+	}
+
+	// Or retrieve value from page.
+	elem := ref.page.leafPageElement(uint16(ref.index))
+	return elem.key(), elem.value(), elem.flags
+}
+
+```
+
+### 2.2 Cursor的方法与实现
+
+`Cursor`结构体提供了移动到第一个或最后一个键值对、移动到前一个或后一个键值对、通过二分查找的方式移动到给定键位置、及删除当前位置的键值对的方法（用户不能指定插入位置，避免破坏B+Tree结构），本节，笔者将依次介绍这些方法的实现。
+
+{{< admonition warning 注意 >}}
+
+当事务删除了key但还未提交时，B+Tree中部分叶子节点可能没有内部元素。此时，应该跳过空节点。这一问题在[pull#452](https://github.com/boltdb/bolt/commit/852d3024fa8d89dcc9a715bab6f4dcd7d59577dd)中修复，其修复方式为在部分方法的实现最外成加入for循环，如果访问到空节点则进入下一次循环继续寻找，相关位置一般还有相应的注释“// If we land on an empty page then move to the next value. https://github.com/boltdb/bolt/issues/450”。后文分析源码中不再赘述。
+
+{{< /admonition >}}
+
+#### 2.2.1 First、Last、first、last
+
+`First`方法与`Last`方法是将Cursor移动到第一个或最后一个键值对处的方法，二者实现方式相似，这里一同介绍。
+
+```go
+
+// First moves the cursor to the first item in the bucket and returns its key and value.
+// If the bucket is empty then a nil key and value are returned.
+// The returned key and value are only valid for the life of the transaction.
+func (c *Cursor) First() (key []byte, value []byte) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	c.stack = c.stack[:0]
+	p, n := c.bucket.pageNode(c.bucket.root)
+	c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
+	c.first()
+
+	// If we land on an empty page then move to the next value.
+	// https://github.com/boltdb/bolt/issues/450
+	if c.stack[len(c.stack)-1].count() == 0 {
+		c.next()
+	}
+
+	k, v, flags := c.keyValue()
+	if (flags & uint32(bucketLeafFlag)) != 0 {
+		return k, nil
+	}
+	return k, v
+
+}
+
+// Last moves the cursor to the last item in the bucket and returns its key and value.
+// If the bucket is empty then a nil key and value are returned.
+// The returned key and value are only valid for the life of the transaction.
+func (c *Cursor) Last() (key []byte, value []byte) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	c.stack = c.stack[:0]
+	p, n := c.bucket.pageNode(c.bucket.root)
+	ref := elemRef{page: p, node: n}
+	ref.index = ref.count() - 1
+	c.stack = append(c.stack, ref)
+	c.last()
+	k, v, flags := c.keyValue()
+	if (flags & uint32(bucketLeafFlag)) != 0 {
+		return k, nil
+	}
+	return k, v
+}
+
+```
+
+`First`与`Last`方法本身并没有移动Cursor的实现，其只获取了bucket中B+Tree的根节点（page或node），并将其加入到`stack`中。真正实现移动Cursor的是`first`与`last`方法（分开实现以便其它方法复用），`first`与`last`方法会以`stack`中栈顶节点作为根节点，将Cursor移动到其下第一个键值对位置。`First`方法与`Last`方法除了设置查找起点外，还会检查`first`方法与`last`方法返回的键值对是否表示bucket，如果是bucket，则将value置为nil返回。`first`与`last`的实现如下：
+
+```go
+
+// first moves the cursor to the first leaf element under the last page in the stack.
+func (c *Cursor) first() {
+	for {
+		// Exit when we hit a leaf page.
+		var ref = &c.stack[len(c.stack)-1]
+		if ref.isLeaf() {
+			break
+		}
+
+		// Keep adding pages pointing to the first element to the stack.
+		var pgid pgid
+		if ref.node != nil {
+			pgid = ref.node.inodes[ref.index].pgid
+		} else {
+			pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+		}
+		p, n := c.bucket.pageNode(pgid)
+		c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
+	}
+}
+
+// last moves the cursor to the last leaf element under the last page in the stack.
+func (c *Cursor) last() {
+	for {
+		// Exit when we hit a leaf page.
+		ref := &c.stack[len(c.stack)-1]
+		if ref.isLeaf() {
+			break
+		}
+
+		// Keep adding pages pointing to the last element in the stack.
+		var pgid pgid
+		if ref.node != nil {
+			pgid = ref.node.inodes[ref.index].pgid
+		} else {
+			pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+		}
+		p, n := c.bucket.pageNode(pgid)
+
+		var nextRef = elemRef{page: p, node: n}
+		nextRef.index = nextRef.count() - 1
+		c.stack = append(c.stack, nextRef)
+	}
+}
+
+```
+
+`first`与`last`循环查找栈顶节点的第一个或最后一个孩子并将其压入栈中，直到栈顶节点为叶子节点。其实现方式也较为简单这里不再赘述。
+
+#### 2.2.2 Next、Prev、next
+
+`Next`方法与`Prev`方法是将Cursor移动到当前键值对的前驱或后继键值对的方法。由于遍历`Bucket`的`ForEach`方法依赖`Next`，而原`Next`方法可能存在[issue#450](https://github.com/boltdb/bolt/issues/450)中的问题，因此其又封装了`next`函数，并通过循环跳过空叶子节点。而`Prev`则不存在这一问题，因此没有封装`prev`方法。
+
+```go
+
+// Next moves the cursor to the next item in the bucket and returns its key and value.
+// If the cursor is at the end of the bucket then a nil key and value are returned.
+// The returned key and value are only valid for the life of the transaction.
+func (c *Cursor) Next() (key []byte, value []byte) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+	k, v, flags := c.next()
+	if (flags & uint32(bucketLeafFlag)) != 0 {
+		return k, nil
+	}
+	return k, v
+}
+
+// next moves to the next leaf element and returns the key and value.
+// If the cursor is at the last leaf element then it stays there and returns nil.
+func (c *Cursor) next() (key []byte, value []byte, flags uint32) {
+	for {
+		// Attempt to move over one element until we're successful.
+		// Move up the stack as we hit the end of each page in our stack.
+		var i int
+		for i = len(c.stack) - 1; i >= 0; i-- {
+			elem := &c.stack[i]
+			if elem.index < elem.count()-1 {
+				elem.index++
+				break
+			}
+		}
+
+		// If we've hit the root page then stop and return. This will leave the
+		// cursor on the last element of the last page.
+		if i == -1 {
+			return nil, nil, 0
+		}
+
+		// Otherwise start from where we left off in the stack and find the
+		// first element of the first leaf page.
+		c.stack = c.stack[:i+1]
+		c.first()
+
+		// If this is an empty page then restart and move back up the stack.
+		// https://github.com/boltdb/bolt/issues/450
+		if c.stack[len(c.stack)-1].count() == 0 {
+			continue
+		}
+
+		return c.keyValue()
+	}
+}
+
+// Prev moves the cursor to the previous item in the bucket and returns its key and value.
+// If the cursor is at the beginning of the bucket then a nil key and value are returned.
+// The returned key and value are only valid for the life of the transaction.
+func (c *Cursor) Prev() (key []byte, value []byte) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+
+	// Attempt to move back one element until we're successful.
+	// Move up the stack as we hit the beginning of each page in our stack.
+	for i := len(c.stack) - 1; i >= 0; i-- {
+		elem := &c.stack[i]
+		if elem.index > 0 {
+			elem.index--
+			break
+		}
+		c.stack = c.stack[:i]
+	}
+
+	// If we've hit the end then return nil.
+	if len(c.stack) == 0 {
+		return nil, nil
+	}
+
+	// Move down the stack to find the last element of the last leaf under this branch.
+	c.last()
+	k, v, flags := c.keyValue()
+	if (flags & uint32(bucketLeafFlag)) != 0 {
+		return k, nil
+	}
+	return k, v
+}
+
+```
+
+`Next`与`Prev`的实现思路类似，这里以`Prev`举例：
+1. 循环遍历栈顶节点，如果在该节点中当前位置之前还有内部元素，则将栈顶元素修改为上一个元素；否则将栈顶元素出栈并继续判断，直到栈为空或找到上一个元素。
+2. 如果栈为空，说明在B+Tree中不存在前驱键值对，直接返回空。
+3. 如果栈非空，说明找到了前驱键值对所在位置，或前驱键值对所在的父级元素的位置。此时，直接调用`last`方法将Cursor移动到以当前栈顶为根的最后一个键值对，该键值对即为前驱键值对。
+4. 检查该键值对是否表示bucket，如果表示bucket则将value置空。返回结果。
+
+#### 2.2.3 Seek、seek、search
+
+`Seek`方法是通过二分查找将Cursor移动到给定key的位置的方法，其实现如下：
+
+```go
+
+// Seek moves the cursor to a given key and returns it.
+// If the key does not exist then the next key is used. If no keys
+// follow, a nil key is returned.
+// The returned key and value are only valid for the life of the transaction.
+func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
+	k, v, flags := c.seek(seek)
+
+	// If we ended up after the last element of a page then move to the next one.
+	if ref := &c.stack[len(c.stack)-1]; ref.index >= ref.count() {
+		k, v, flags = c.next()
+	}
+
+	if k == nil {
+		return nil, nil
+	} else if (flags & uint32(bucketLeafFlag)) != 0 {
+		return k, nil
+	}
+	return k, v
+}
+
+```
+
+`Seek`方法内部通过`seek`移动Cursor，`seek`方法会把Cursor移动到大于等于给定key的位置，即key不存在时会移动到下一个key的位置。如果`seek`将Cursor移动到了某节点的所有内部元素之后，`Seek`方法会使其正确移动到后继键值对处。同样`Seek`也会将表示bucket的value置空返回。接下分析`seek`方法的实现。
+
+```go
+
+// seek moves the cursor to a given key and returns it.
+// If the key does not exist then the next key is used.
+func (c *Cursor) seek(seek []byte) (key []byte, value []byte, flags uint32) {
+	_assert(c.bucket.tx.db != nil, "tx closed")
+
+	// Start from root page/node and traverse to correct page.
+	c.stack = c.stack[:0]
+	c.search(seek, c.bucket.root)
+	ref := &c.stack[len(c.stack)-1]
+
+	// If the cursor is pointing to the end of page/node then return nil.
+	if ref.index >= ref.count() {
+		return nil, nil, 0
+	}
+
+	// If this is a bucket then return a nil value.
+	return c.keyValue()
+}
+
+```
+
+`seek`方法首先将`stack`置空，然后从调用`search`方法，从根节点开始二分查找并移动Cursor，最后判断是否找到并返回结果。`search`方法是递归查找key并移动Cursor的方法，其实现如下：
+
+```go
+
+// search recursively performs a binary search against a given page/node until it finds a given key.
+func (c *Cursor) search(key []byte, pgid pgid) {
+	p, n := c.bucket.pageNode(pgid)
+	if p != nil && (p.flags&(branchPageFlag|leafPageFlag)) == 0 {
+		panic(fmt.Sprintf("invalid page type: %d: %x", p.id, p.flags))
+	}
+	e := elemRef{page: p, node: n}
+	c.stack = append(c.stack, e)
+
+	// If we're on a leaf page/node then find the specific node.
+	if e.isLeaf() {
+		c.nsearch(key)
+		return
+	}
+
+	if n != nil {
+		c.searchNode(key, n)
+		return
+	}
+	c.searchPage(key, p)
+}
+
+func (c *Cursor) searchNode(key []byte, n *node) {
+	var exact bool
+	index := sort.Search(len(n.inodes), func(i int) bool {
+		// TODO(benbjohnson): Optimize this range search. It's a bit hacky right now.
+		// sort.Search() finds the lowest index where f() != -1 but we need the highest index.
+		ret := bytes.Compare(n.inodes[i].key, key)
+		if ret == 0 {
+			exact = true
+		}
+		return ret != -1
+	})
+	if !exact && index > 0 {
+		index--
+	}
+	c.stack[len(c.stack)-1].index = index
+
+	// Recursively search to the next page.
+	c.search(key, n.inodes[index].pgid)
+}
+
+func (c *Cursor) searchPage(key []byte, p *page) {
+	// Binary search for the correct range.
+	inodes := p.branchPageElements()
+
+	var exact bool
+	index := sort.Search(int(p.count), func(i int) bool {
+		// TODO(benbjohnson): Optimize this range search. It's a bit hacky right now.
+		// sort.Search() finds the lowest index where f() != -1 but we need the highest index.
+		ret := bytes.Compare(inodes[i].key(), key)
+		if ret == 0 {
+			exact = true
+		}
+		return ret != -1
+	})
+	if !exact && index > 0 {
+		index--
+	}
+	c.stack[len(c.stack)-1].index = index
+
+	// Recursively search to the next page.
+	c.search(key, inodes[index].pgid)
+}
+
+// nsearch searches the leaf node on the top of the stack for a key.
+func (c *Cursor) nsearch(key []byte) {
+	e := &c.stack[len(c.stack)-1]
+	p, n := e.page, e.node
+
+	// If we have a node then search its inodes.
+	if n != nil {
+		index := sort.Search(len(n.inodes), func(i int) bool {
+			return bytes.Compare(n.inodes[i].key, key) != -1
+		})
+		e.index = index
+		return
+	}
+
+	// If we have a page then search its leaf elements.
+	inodes := p.leafPageElements()
+	index := sort.Search(int(p.count), func(i int) bool {
+		return bytes.Compare(inodes[i].key(), key) != -1
+	})
+	e.index = index
+}
+
+```
+
+`search`方法首先将当前page或node记录在`stack`中，此时`index`取值还未确定，需要进一步搜索：
+1. 如果当前节点是叶子节点，则调用`nsearch`方法，二分查找其内部元素，确定index值并返回。
+2. 如果当前节点不是叶子节点，则递归调用`searchNode`或`searchPage`方法（取决于当前节点是否已被实例化为node），二分查找内部key，确定index值（下一个要查找的孩子）。
 
 ## 3. 总结
+
+本文介绍了boltdb中bucket与cursor的概念与实现。
+
+bucket与cursor是基于B+Tree的封装，且部分面向用户，虽然其实现并不复杂，但对于刚接触的读者可能较难理解。
