@@ -880,8 +880,8 @@ func (r *raft) becomeLeader() {
 		r.logger.Panic("empty entry was dropped")
 	}
 	// As a special case, don't count the initial empty entry towards the
-	// uncommitted log quota. This is because we want to preserve the
-	// behavior of allowing one entry larger than quota if the current
+	// uncommitted log quote. This is because we want to preserve the
+	// behavior of allowing one entry larger than quote if the current
 	// usage is zero.
 	r.reduceUncommittedSize([]pb.Entry{emptyEnt})
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
@@ -1563,7 +1563,7 @@ func (l *raftLog) unstableEntries() []pb.Entry {
 
 关于稳定存储与安全性，《Consensus: Bridging theory and practice》给出了更详细的描述与形式化的证明，这里<sup>引用2</sup>再摘录部分与本问题相关的段落，便于读者参考。
 
-{{< admonition quota 引用1 >}}
+{{< admonition quote 引用1 >}}
 
 *11.7.3 Avoiding persistent storage writes*
 
@@ -1571,7 +1571,7 @@ Many papers suggest using replication rather than stable storage for durability.
 
 {{< /admonition >}}
 
-{{< admonition quota 引用2 >}}
+{{< admonition quote 引用2 >}}
 
 *3.8 Persisted state and server restarts*
 

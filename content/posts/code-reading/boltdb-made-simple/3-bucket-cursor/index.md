@@ -333,7 +333,7 @@ func (b *Bucket) node(pgid pgid, parent *node) *node {
 
 1. 检查当前`Bucket`的`nodes`字段是否记录了该pgid，如果记录存在，说明当前事务已经实例化了该node，因此直接返回记录中缓存的node即可。
 2. 如果还没打开过，则实例化新node并缓存，同时设置node的部分字段。
-3. 选择需要读取的page，如果当前bucket不是inline bucket，则通过事务实例获取传入的pgid相应的page的指针（事务需要记录需要更新的page，以便事务提交后释放）；否则，直接使用bucket的虚拟页。
+3. 选择需要读取的page，如果当前bucket不是inline bucket，则通过事务实例获取传入的pgid相应的page的指针（如果page被修改，该方法会返回page buffer，否则返回mmap中的page）；否则，直接使用bucket的虚拟页。
 4. 调用该node的`read`方法，读取page数据并构建node，同时将该node记录到当前bucket的`nodes`字段中。
 5. 更新统计变量，返回node实例。
 
