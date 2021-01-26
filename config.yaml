@@ -2,6 +2,7 @@
 defaultContentLanguage: zh-cn
 languageCode: zh-CN
 hasCJKLanguage: true
+enableEmoji: true
 title: 叉鸽 MrCroxx 的博客
 theme: LoveIt
 author:
