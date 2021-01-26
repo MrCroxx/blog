@@ -56,7 +56,7 @@ etcd/raft的`ConfChangeV2`既支持简单的“one at a time”的成员变更�
 
 另外，需要注意的是，同一时间只能有一个正在进行的配置变更操作，在提议配置变更请求时，如果已经在进行配置变更，那么该提议会被丢弃（被改写成一条无任何意义的日志条目）。
 
-{{< admonition quota 引文1 >}}
+{{< admonition quote 引文1 >}}
 
 The new configuration takes effect on each server as soon as it is added to that server’s log: the $C_{new}$ entry is replicated to the $C_{new}$ servers, and a majority of the new configuration is used to determine the $C_{new}$ entry’s commitment. This means that servers do not wait for configuration entries to be committed, and each server always uses the latest configuration found in its log.
 
@@ -67,7 +67,7 @@ As with the single-server configuration change algorithm, each server starts usi
 {{< /admonition >}}
 
 
-{{< admonition quota 引文2 >}}
+{{< admonition quote 引文2 >}}
 
 Note that contrary to Joint Consensus as outlined in the Raft paper, configuration changes become active when they are *applied* to the state machine (not when they are appended to the log).
 
@@ -372,7 +372,7 @@ etcd/raft中新配置是在*apply-time*生效的，也就是说，如果etcd/raf
 
 而对于合法的`ConfChange`，除了将其追加到日志中外，还需要修改`raft`结构体的`pendingConfIndex`字段，将其置为$[上一条ConfChange.Index, 当前ConfChange.Index)$的值<sup>引文3</sup>（这里置为了处理该`MsgProp`之前的最后一条日志的index），以供之后遇到`ConfChange`消息时判断当前`ConfChange`是否已经被应用。
 
-{{< admonition quota 引文3 >}}
+{{< admonition quote 引文3 >}}
 
 *pendingConfIndex*字段注释：
 

@@ -31,7 +31,7 @@ boltdb的页与空闲页列表的实现分别在`page.go`与`freelist.go`中，�
 
 {{< admonition info 注1 >}}
 
-为了在保证隔离性的同时支持“读读并发”、“读写并发”（boltdb不支持“写写并发”，即同一时刻只能有一个执行中的可写事务），boltdb在更新页时采用了CoW技术（copy-on-wriite）。在可写事务更新页时，boltdb首先会复制原页，然后在副本上更新，再将引用修改为新页上。这样，当可写事务更新页时，只读事务还可以读取原来的页；当只读提交时，boltdb会释放不再使用的页。这样，便实现了在支持“读读并发”、“读写并发”的同时保证事务的隔离性。
+为了在保证隔离性的同时支持“读读并发”、“读写并发”（boltdb不支持“写写并发”，即同一时刻只能有一个执行中的可写事务），boltdb在更新页时采用了[Shadow Paging](https://en.wikipedia.org/wiki/Shadow_paging)技术，其通过[copy-on-write](https://en.wikipedia.org/wiki/Copy-on-write)实现。在可写事务更新页时，boltdb首先会复制原页，然后在副本上更新，再将引用修改为新页上。这样，当可写事务更新页时，只读事务还可以读取原来的页；当事务提交时，boltdb会释放不再使用的页。这样，便实现了在支持“读读并发”、“读写并发”的同时保证事务的隔离性。
 
 {{< /admonition >}}
 
@@ -40,7 +40,7 @@ boltdb的页与空闲页列表的实现分别在`page.go`与`freelist.go`中，�
 boltdb不会将空闲的页归还给系统。其原因有二：
 
 1. 在不断增大的数据库中，被释放的页之后还会被重用。
-2. boltdb为了保证读写并发的隔离性，使用CoW来更新页，因此会在任意位置产生空闲页，而不只是在文件末尾产生空闲页（详见[issue#308](https://github.com/boltdb/bolt/issues/308#issuecomment-74811638)）。
+2. boltdb为了保证读写并发的隔离性，使用copy-on-write来更新页，因此会在任意位置产生空闲页，而不只是在文件末尾产生空闲页（详见[issue#308](https://github.com/boltdb/bolt/issues/308#issuecomment-74811638)）。
 
 {{< /admonition >}}
 
@@ -204,7 +204,7 @@ type freelist struct {
 | `pending map[txid][]pgid` | 事务id到事务待释放的页id。 |
 | `cache map[pgid]bool` | 用来快速查找给定id的页是否被释放的缓存。出现在`ids`和`pending`中的页id均为true。 |
 
-由于boltdb是通过CoW的方式实现的读写事务并发的隔离性，因此当事务可写事务更新页时，其会复制已有的页，并将旧页加入到`pending`中该事务id下的待释放页的列表中。因为此时可能还有读事务在读取旧页，所以不能立刻释放该页，而是要等到所有事务都不再依赖该页时，才能将`pending`中的页加入到`ids`中。对于boltdb中事务的实现笔者会在本系列后面的文章中介绍，这里不再赘述，这里读者只需要了解`pending`的作用即可。
+由于boltdb是通过copy-on-write的方式实现的读写事务并发的隔离性，因此当事务可写事务更新页时，其会复制已有的页，并将旧页加入到`pending`中该事务id下的待释放页的列表中。因为此时可能还有读事务在读取旧页，所以不能立刻释放该页，而是要等到所有事务都不再依赖该页时，才能将`pending`中的页加入到`ids`中。对于boltdb中事务的实现笔者会在本系列后面的文章中介绍，这里不再赘述，这里读者只需要了解`pending`的作用即可。
 
 这样做的好处还有，当事务回滚时，可以重用`pending`中还未释放的页（由于该事务还未提交，因此其之前释放的所有页都可被重用）。而且，重用页时对freelist的操作十分简单，只需要将`pending`中该事务id对应的列表清空即可。
 
@@ -347,7 +347,7 @@ B+Tree的构建笔者会在本系列后续的文章中介绍，本节只关注�
 
 boltdb的数据库文件由两个meta页、一个freelist页、和若干个用来保存数据与索引的B+树的branchNode页和leafNode页组成（页可能包含若干个overflow页）。当数据库初始化时，其会将0、1号页初始化为meta页、将2号页初始化为freelist页、将3号页初始化为空的leafNodePage。
 
-由于只有B+树的页是通过CoW方式写入的，所以boltdb设置了两个meta页以进行本地容错。在更新元数据时，boltdb会交替写入两个meta页。这样，如果meta页写入中途数据库挂掉，数据库仍可以使用另一份完整的meta页。
+由于只有B+树的页是通过copy-on-write方式写入的，所以boltdb设置了两个meta页以进行本地容错。在更新元数据时，boltdb会交替写入两个meta页。这样，如果meta页写入中途数据库挂掉，数据库仍可以使用另一份完整的meta页。
 
 #### 3.1.2 mmap
 
