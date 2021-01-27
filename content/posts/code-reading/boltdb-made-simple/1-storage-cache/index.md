@@ -466,6 +466,12 @@ boltdb中mmap会调用Linux的系统调用，其`prot`参数为`PROT_READ`，`fl
 
 boltdb的mmap大小增长策略如下：最小的mmap大小为32KB，在1GB之前mmap大小每次倍增，在1GB之后每次增长1GB。
 
+{{< admonition warning 注意 >}}
+
+boltdb在进行映射时，mmap大小可能超过数据库文件大小。在访问超出文件大小的mmap部分时会引起`SIGBUS`异常。为了避免访问到超出文件的部分，同时尽可能减少对底层文件大小的的不必要的增长，boltdb选择的是在事务提交时按需增长底层文件大小的策略。其具体实现详见本系列后续文章[深入浅出boltdb —— 0x04 事务](/posts/code-reading/boltdb-made-simple/4-transaction/)。
+
+{{< /admonition >}}
+
 ### 3.2 写操作与缓存策略
 
 为了保证事务的ACID性质，数据库系统需要确保事务提交时文件的修改要安全地写入到磁盘或其它I/O设备。由于随机的设备I/O非常耗时，boltdb不会在数据更新时立刻修改底层文件。而是先将修改后的page写入到一块page buffer内存中作为缓存，等事务提交时，再将事务修改的所有page buffer顺序地写入I/O设备。同时，为了保证数据被安全地写入到了I/O设备，boltdb的刷盘采用pwrite+fdatasyc实现。
