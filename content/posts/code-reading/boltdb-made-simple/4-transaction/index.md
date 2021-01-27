@@ -233,7 +233,7 @@ type Tx struct {
 
 本节将以`Tx`结构体的声明周期的顺序介绍其中方法的实现。
 
-#### 2.2.1 事务的创建
+#### 2.2.1 Tx的初始化
 
 boltdb在创建事务时，会先创建`Tx`实例，设置其`writable`字段，并调用其`init`方法。`init`方法的实现如下所示。
 
@@ -266,7 +266,9 @@ func (tx *Tx) init(db *DB) {
 
 `init`方法还为读写事务初始化了`pages`字段，该字段是用来记录事务写入的dirty page（page buffer）的cache。此外，`init`在初始化读写事务时还会将其`meta`中的`txid + 1`。
 
-#### 2.2.2 事务的提交
+#### 2.2.2 Tx的提交
+
+##### 2.2.2.1 Commit方法
 
 boltdb的用户可以通过`Tx`的`Commit`方法提交非隐式事务。在提交前，用户还可以通过`OnCommit`方法注册事务的回调方法。`OnCommit`与`Commit`方法的实现如下：
 
@@ -381,7 +383,7 @@ func (tx *Tx) Commit() error {
 2. 从root bucket开始执行`rebalance`操作与`spill`操作以调整B+Tree结构，并统计各自所用时间。
 3. 将当前事务`meta`中root bucket的pgid指向copy-on-write后新的root bucket。
 4. 释放旧freelist所在page，并为其分配新page，将其写入相应的page buffer中。
-5. 检查当前已使用的mmap大小`int(tx.meta.pgid+1) * tx.db.pageSize`是否超过了底层数据库文件大小，如果超过了该大小需要更新底层文件的元数据，将其大小更新为已使用的大小（详见下文说明）。
+5. 检查当前已使用的空间大小是否超过了底层数据库文件大小，如果超过了该大小需要通过`grow`方法增大数据库文件大小（详见下文说明）。
 6. 调用`Tx`的`write`方法，通过pwrite+fdatasync系统调用将dirty page写入的层文件，同时统计其耗时。
 7. 如果数据库处于严格模式`StructMode`，调用`Tx`的`Check`方法对数据库进行完整性检查。
 8. 调用`Tx`的`writeMeta`方法，通过pwrite+fdatasync系统调用将meta page写入的层文件。写入时根据事务`txid`交替写入meta page 0 或 1,。
@@ -389,11 +391,192 @@ func (tx *Tx) Commit() error {
 10. 一次调用之前通过`OnCommit`方法注册的回调函数。
 11. 如果步骤4~8出错，则通过`rollback`方法回滚事务。
 
-在`Commit`方法中，有如下几点需要关注：
+在`Commit`方法中，有一些地方需要注意，接下来笔者将依次对其进行介绍与分析。
 
-在第5步中，
+##### 2.2.2.2 grow方法
 
-[pull#453](https://github.com/boltdb/bolt/pull/453)
+第5步中的`grow`方法，是用来增长底层数据库文件大小的方法。在本系列的前文[深入浅出boltdb —— 0x01 存储与缓存](/posts/code-reading/boltdb-made-simple/1-storage-cache/)中，笔者描述boltdb的mmap增长逻辑时埋下了一个伏笔：boltdb的mmap的增长策略是从32KB开始，每次倍增，在达到1GB后每次增长1GB；但是boltdb并不会在mmap的同时修改底层数据库文件大小。这样的问题是：当访问超出了文件大小的mmap空间时，会引起`SIGBUS`异常。为了避免访问越界，同时减少不必要的底层数据库文件增长，boltdb采用了在事务提交时按需增长的策略。
 
-#### 2.2.3 事务的回滚
+boltdb的实现方式是：在为事务分配完所需的页之后、在写入脏页前，先计算其使用了的空间大小（包括freelist中的页），即`int(tx.meta.pgid+1) * tx.db.pageSize`。之后调用`db`的`grow`方法来按需增大底层数据库文件大小。其实现如下：
+
+```go
+
+// grow grows the size of the database to the given sz.
+func (db *DB) grow(sz int) error {
+	// Ignore if the new size is less than available file size.
+	if sz <= db.filesz {
+		return nil
+	}
+
+	// If the data is smaller than the alloc size then only allocate what's needed.
+	// Once it goes over the allocation size then allocate in chunks.
+	if db.datasz < db.AllocSize {
+		sz = db.datasz
+	} else {
+		sz += db.AllocSize
+	}
+
+	// Truncate and fsync to ensure file size metadata is flushed.
+	// https://github.com/boltdb/bolt/issues/284
+	if !db.NoGrowSync && !db.readOnly {
+		if runtime.GOOS != "windows" {
+			if err := db.file.Truncate(int64(sz)); err != nil {
+				return fmt.Errorf("file resize error: %s", err)
+			}
+		}
+		if err := db.file.Sync(); err != nil {
+			return fmt.Errorf("file sync error: %s", err)
+		}
+	}
+
+	db.filesz = sz
+	return nil
+}
+
+```
+
+`grow`方法会判断传入的所需文件大小，如果不需要增长底层文件大小则直接返回。同时，`grow`方法会检查当前mmap大小是否超过了门限`AllocSize`，在mmap大小达到该门限之前`grow`方法会按需增长数据库文件大小，在达到该门限后每次让数据库文件增大`AllocSize`。随后，`grow`方法会根据配置与系统来增长底层文件大小。其中需要注意两点：Windows支持mmap时自动扩展文件大小，而Linux不支持；ext3/ext4文件系统需要通过`fsync`方法强制同步元数据。这里笔者给出与`grow`相关的几个主要记录，以便读者参考：[issue#284](https://github.com/boltdb/bolt/issues/284)、[pull#286](https://github.com/boltdb/bolt/pull/286)、[pull#453](https://github.com/boltdb/bolt/pull/453)。
+
+##### 2.2.2.3 write、writeMeta
+
+`Tx`的`write`方法是将脏页写入到底层数据库文件的方法，其通过pwrite与fdatasync系统调用保证数据安全地写入磁盘。
+
+```go
+
+// write writes any dirty pages to disk.
+func (tx *Tx) write() error {
+	// Sort pages by id.
+	pages := make(pages, 0, len(tx.pages))
+	for _, p := range tx.pages {
+		pages = append(pages, p)
+	}
+	// Clear out page cache early.
+	tx.pages = make(map[pgid]*page)
+	sort.Sort(pages)
+
+	// Write pages to disk in order.
+	for _, p := range pages {
+		size := (int(p.overflow) + 1) * tx.db.pageSize
+		offset := int64(p.id) * int64(tx.db.pageSize)
+
+		// Write out page in "max allocation" sized chunks.
+		ptr := (*[maxAllocSize]byte)(unsafe.Pointer(p))
+		for {
+			// Limit our write to our max allocation size.
+			sz := size
+			if sz > maxAllocSize-1 {
+				sz = maxAllocSize - 1
+			}
+
+			// Write chunk to disk.
+			buf := ptr[:sz]
+			if _, err := tx.db.ops.writeAt(buf, offset); err != nil {
+				return err
+			}
+
+			// Update statistics.
+			tx.stats.Write++
+
+			// Exit inner for loop if we've written all the chunks.
+			size -= sz
+			if size == 0 {
+				break
+			}
+
+			// Otherwise move offset forward and move pointer to next chunk.
+			offset += int64(sz)
+			ptr = (*[maxAllocSize]byte)(unsafe.Pointer(&ptr[sz]))
+		}
+	}
+
+	// Ignore file sync if flag is set on DB.
+	if !tx.db.NoSync || IgnoreNoSync {
+		if err := fdatasync(tx.db); err != nil {
+			return err
+		}
+	}
+
+	// Put small pages back to page pool.
+	for _, p := range pages {
+		// Ignore page sizes over 1 page.
+		// These are allocated using make() instead of the page pool.
+		if int(p.overflow) != 0 {
+			continue
+		}
+
+		buf := (*[maxAllocSize]byte)(unsafe.Pointer(p))[:tx.db.pageSize]
+
+		// See https://go.googlesource.com/go/+/f03c9202c43e0abb130669852082117ca50aa9b1
+		for i := range buf {
+			buf[i] = 0
+		}
+		tx.db.pagePool.Put(buf)
+	}
+
+	return nil
+}
+
+```
+
+从源码可知，`write`方法会将`tx.pages`中记录的脏页，有序地写入到底层文件。其默认的写入方法为go的`os.File.WriteAt`方法，其内部通过pwrite系统调用实现，同时，每次写入大小不超过`maxAllocSize`。在写入后，如果数据库没有启用`NoSync`参数或`IgnoreNoSync`为真（该参数在OpenBSD系统上为真，原因详见该参数注释）时，会通过fdatasync系统调用确保数据安全地写入到磁盘。最后，该方法会把分配的单页大小的page buffer放回pagePool中（详见[《深入浅出boltdb —— 0x01 存储与缓存》3.2.1 page buffer（memory->memory）](/posts/code-reading/boltdb-made-simple/1-storage-cache/#321-page-buffermemory-memory)）。
+
+而对于用来更新元数据的`writeMeta`方法也是如此：
+
+```go
+
+// writeMeta writes the meta to the disk.
+func (tx *Tx) writeMeta() error {
+	// Create a temporary buffer for the meta page.
+	buf := make([]byte, tx.db.pageSize)
+	p := tx.db.pageInBuffer(buf, 0)
+	tx.meta.write(p)
+
+	// Write the meta page to file.
+	if _, err := tx.db.ops.writeAt(buf, int64(p.id)*int64(tx.db.pageSize)); err != nil {
+		return err
+	}
+	if !tx.db.NoSync || IgnoreNoSync {
+		if err := fdatasync(tx.db); err != nil {
+			return err
+		}
+	}
+
+	// Update statistics.
+	tx.stats.Write++
+
+	return nil
+}
+
+// write writes the meta onto a page.
+func (m *meta) write(p *page) {
+	if m.root.root >= m.pgid {
+		panic(fmt.Sprintf("root bucket pgid (%d) above high water mark (%d)", m.root.root, m.pgid))
+	} else if m.freelist >= m.pgid {
+		panic(fmt.Sprintf("freelist pgid (%d) above high water mark (%d)", m.freelist, m.pgid))
+	}
+
+	// Page id is either going to be 0 or 1 which we can determine by the transaction ID.
+	p.id = pgid(m.txid % 2)
+	p.flags |= metaPageFlag
+
+	// Calculate the checksum.
+	m.checksum = m.sum64()
+
+	m.copy(p.meta())
+}
+
+// copy copies one meta object to another.
+func (m *meta) copy(dest *meta) {
+	*dest = *m
+}
+
+```
+
+`writeMeta`方法同样通过pwrite+fdatasync的方式确保元数据被安全地写入到磁盘。同时，该方法会根据当前事务的`txid`来交替写入meta page 0 或 1。这样，即使在数据库写入meta页时挂掉，其重启时可以根据meta页的校验和切换到另一个数据完整的meta页。这样做也不会引起提交的事务数据丢失，因为如果还没写完meta页，那么该事务不会被认为是已提交的；另外，由于boltdb写入page时是copy-on-write的，旧meta页中指向的相应的页也都是有效的。
+
+##### 2.2.2.4 Check
+
+##### 2.2.2.5 close
+
+#### 2.2.3 Tx的回滚
 
