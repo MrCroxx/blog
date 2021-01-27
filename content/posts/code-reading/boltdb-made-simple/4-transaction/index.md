@@ -376,5 +376,24 @@ func (tx *Tx) Commit() error {
 
 ```
 
+`Commit`方法可分为如下几个步骤：
+1. 检查当前事务是否为隐式事务、是否已关闭、是为非读写事务，如果不是，则返回错误（隐式事务提交会引起panic）。
+2. 从root bucket开始执行`rebalance`操作与`spill`操作以调整B+Tree结构，并统计各自所用时间。
+3. 将当前事务`meta`中root bucket的pgid指向copy-on-write后新的root bucket。
+4. 释放旧freelist所在page，并为其分配新page，将其写入相应的page buffer中。
+5. 检查当前已使用的mmap大小`int(tx.meta.pgid+1) * tx.db.pageSize`是否超过了底层数据库文件大小，如果超过了该大小需要更新底层文件的元数据，将其大小更新为已使用的大小（详见下文说明）。
+6. 调用`Tx`的`write`方法，通过pwrite+fdatasync系统调用将dirty page写入的层文件，同时统计其耗时。
+7. 如果数据库处于严格模式`StructMode`，调用`Tx`的`Check`方法对数据库进行完整性检查。
+8. 调用`Tx`的`writeMeta`方法，通过pwrite+fdatasync系统调用将meta page写入的层文件。写入时根据事务`txid`交替写入meta page 0 或 1,。
+9. 调用`close`方法关闭事务。
+10. 一次调用之前通过`OnCommit`方法注册的回调函数。
+11. 如果步骤4~8出错，则通过`rollback`方法回滚事务。
+
+在`Commit`方法中，有如下几点需要关注：
+
+在第5步中，
+
+[pull#453](https://github.com/boltdb/bolt/pull/453)
+
 #### 2.2.3 事务的回滚
 
