@@ -134,7 +134,7 @@ boltdb中事务的原子性是通过[Shadow Paging](https://en.wikipedia.org/wik
 
 上一节介绍了Isolation隔离性对应的4种隔离级别，boltdb实现的是最高的隔离界别：serializable序列化读。在serializable的基础上，boltdb支持“读读并发”与“读写并发”，boltdb中同时可以执行若干个只读事务，但同时只能执行一个读写事务，但只读事务与读写事务之间不影响。
 
-Shadow Paging同样为实现事务隔离提供了支持。为了保证serializable的同时实现读写并发，当读写事务提交时，boltdb不会立即回收其不再使用的页（shadow page），这些页仍在freelist中该事务的`pending`列表中，因为此时这些页可能还在被未完成的只读事务读取。取而代之的是，boltdb会在事务开始时为其分配事务id`txid`，只读事务的`txid`为当前数据库的`txid`，读写事务的`txid`为当前数据库的`txid + 1`。boltdb会记录正在执行的事务的事务id；当事务提交时，boltdb会找到进行中的最小的`txid`，显然，该`txid`之前的只读事务或读写事务都已经完成，因此其中读写事务的shadow page不再需要被读取，此时可以安全地释放这些读写事务的shadow page，即可以freelist中该事务的`pending`列表中的页合并到freelist的`ids`中。
+Shadow Paging同样为实现事务隔离提供了支持。为了保证serializable的同时实现读写并发，当读写事务提交时，boltdb不会立即回收其不再使用的页（shadow page），这些页仍在freelist中该事务的`pending`列表中，因为此时这些页可能还在被未完成的只读事务读取。取而代之的是，boltdb会在事务开始时为其分配事务id`txid`，只读事务的`txid`为当前数据库的`txid`，读写事务的`txid`为当前数据库的`txid + 1`。boltdb会记录正在执行的事务的事务id；当创建读写事务时，boltdb会从只读事务中找到进行中的最小的`txid`，显然，该`txid`之前的读写事务的shadow page不再需要被读取，此时可以安全地释放这些读写事务的shadow page，即可以freelist中该事务的`pending`列表中的页合并到freelist的`ids`中。
 
 Shadow Paging保证了读读并发、读写并发的事务隔离性，boltdb还需要保证最多只有1个读写事务在进行。boltdb的读写事务开始前会申请互斥锁，以避免读写事务并行执行。这里需要注意两点：第一，因为boltdb支持读写并发，所以只读事务不需要申请S锁，否则只有读读事务才能并行执行；第二，在数据库领域，这种锁机制应叫做“latch”而非“lock”，只是其粒度较大。CMU 15-721中较为详细地介绍了Lock与Latch的区别，这里笔者搬运一下其总结表格。
 
@@ -154,9 +154,9 @@ boltdb的读写事务提交时，会通过pwrite系统调用写底层文件，�
 
 # 施工中 。。。 。。。
 
-## 2. Tx
+## 2. boltdb中事务的封装与实现
 
-`tx.go`中的`Tx`结构体，是boltdb事务的封装。本节将分析其实现。
+boltdb将事务封装成了`tx.go`中的`Tx`结构体。但只从`Tx`结构体分析boltdb中事务的封装与实现是不够的。因此，本节将先介绍`Tx`结构体的基本实现，然后按照事务的生命周期的顺序，介绍boltdb中`tx.go`与`db.go`中对事务的封装与实现。
 
 ### 2.1 Tx结构体
 
@@ -229,13 +229,168 @@ type Tx struct {
 | `DeleteBucket(name []byte) error` | `tx.root.DeleteBucket(name)`。删除root bucket的子bucket。 |
 | `ForEach(fn func(name []byte, b *Bucket) error) error` | 遍历root bucket的所有子bucket并执行给定闭包。 |
 
-### 2.2 Tx的声明周期
+### 2.2 事务的生命周期
 
-本节将以`Tx`结构体的声明周期的顺序介绍其中方法的实现。
+本节将按照事务的生命周期，介绍并分析boltdb中事务的封装与实现。
 
-#### 2.2.1 Tx的初始化
+在介绍事务的生命周期前，先简单介绍一下boltdb的`DB`中三把重要的锁：
 
-boltdb在创建事务时，会先创建`Tx`实例，设置其`writable`字段，并调用其`init`方法。`init`方法的实现如下所示。
+| 字段<div style="width:10em"></div> | 描述 |
+| :-: | :- |
+| `rwlock sync.Mutex` | 用来隔离可写事务的互斥锁（注意，不是读写锁）。 |
+| `metalock sync.Mutex` | 用来保护元数据访问的互斥锁。 |
+| `mmaplock sync.RWMutex` | 用来保护mmap操作的读写锁。 |
+
+boltdb支持“读读并发”与“读写并发”，用来隔离事务的锁`rwlock`是互斥锁，只有可写事务需要获取该锁，只读事务不受影响。由于事务开始时，需要复制当时的元数据，因此这里使用了互斥锁`metalock`来保护事务开始时的元数据访问，当事务初始化完成后就会释放`metalock`；另外，只读事务关闭时也需要获取`metalock`，但其目的是保护对`DB`对象的访问，而不时保护`meta`。而`mmaplock`是用来保护mmap操作的读写锁，只读事务会获取`mmaplock`的S锁，而mmap操作会获取`mmaplock`的X锁。这样，当可写事务需要更大的mmap空间时，其需要等待之前的只读事务都执行完毕，以避免只读事务引用的mmap地址失效；对于可写事务本身，其在mmap前会从根`Bucket`实例开始`dereference`操作，以避免可写事务本身引用了旧的mmap地址空间。
+
+这三种锁的获取顺序是：（`rwlock`） $\rightarrow$ `metalock` $\rightarrow$ （`mmaplock`）。
+
+此外，boltdb中还有另一个读写锁`statlock sync.RWMutex`，其作用是保护统计量的访问，这里不作重点介绍。
+
+#### 2.2.1 事务开始
+
+boltdb的用户可以通过`DB`的`Begin`方法启动一个事务，通过`Begin`方法启动的事务需要用户自己控制其提交或回滚（用户还可以通过`Update`或`View`方法启动隐式事务，但二者都是对`Begin`的封装，因此放在最后介绍）。
+
+`Begin`方法的实现如下：
+
+```go
+
+// Begin starts a new transaction.
+// Multiple read-only transactions can be used concurrently but only one
+// write transaction can be used at a time. Starting multiple write transactions
+// will cause the calls to block and be serialized until the current write
+// transaction finishes.
+//
+// Transactions should not be dependent on one another. Opening a read
+// transaction and a write transaction in the same goroutine can cause the
+// writer to deadlock because the database periodically needs to re-mmap itself
+// as it grows and it cannot do that while a read transaction is open.
+//
+// If a long running read transaction (for example, a snapshot transaction) is
+// needed, you might want to set DB.InitialMmapSize to a large enough value
+// to avoid potential blocking of write transaction.
+//
+// IMPORTANT: You must close read-only transactions after you are finished or
+// else the database will not reclaim old pages.
+func (db *DB) Begin(writable bool) (*Tx, error) {
+	if writable {
+		return db.beginRWTx()
+	}
+	return db.beginTx()
+}
+
+```
+
+`Begin`方法会根据事务是否可写，调用`beginRWTx`方法或`beginTx`方法。
+
+接下来首先分析启动只读事务`beginTx`方法的实现：
+
+```go
+
+func (db *DB) beginTx() (*Tx, error) {
+	// Lock the meta pages while we initialize the transaction. We obtain
+	// the meta lock before the mmap lock because that's the order that the
+	// write transaction will obtain them.
+	db.metalock.Lock()
+
+	// Obtain a read-only lock on the mmap. When the mmap is remapped it will
+	// obtain a write lock so all transactions must finish before it can be
+	// remapped.
+	db.mmaplock.RLock()
+
+	// Exit if the database is not open yet.
+	if !db.opened {
+		db.mmaplock.RUnlock()
+		db.metalock.Unlock()
+		return nil, ErrDatabaseNotOpen
+	}
+
+	// Create a transaction associated with the database.
+	t := &Tx{}
+	t.init(db)
+
+	// Keep track of transaction until it closes.
+	db.txs = append(db.txs, t)
+	n := len(db.txs)
+
+	// Unlock the meta pages.
+	db.metalock.Unlock()
+
+	// Update the transaction stats.
+	db.statlock.Lock()
+	db.stats.TxN++
+	db.stats.OpenTxN = n
+	db.statlock.Unlock()
+
+	return t, nil
+}
+
+```
+
+`beginTx`方法执行了如下操作：
+1. 获取`metalock`锁与`mmaplock`的S锁。
+2. 检测数据库是否打开，如果没打开则释放锁并返回错误。
+3. 创建`writable`为false的`Tx`对象，调用`init`方法初始化`Tx`对象（`Tx`对象初始化时会复制当前的`meta`）。
+4. 将事务保存到`DB`的`txs`字段中。
+5. 释放`metalock`。
+6. 更新统计量，返回事务对象`Tx`。
+
+`beginRWTx`方法实现与之相似：
+
+```go
+
+func (db *DB) beginRWTx() (*Tx, error) {
+	// If the database was opened with Options.ReadOnly, return an error.
+	if db.readOnly {
+		return nil, ErrDatabaseReadOnly
+	}
+
+	// Obtain writer lock. This is released by the transaction when it closes.
+	// This enforces only one writer transaction at a time.
+	db.rwlock.Lock()
+
+	// Once we have the writer lock then we can lock the meta pages so that
+	// we can set up the transaction.
+	db.metalock.Lock()
+	defer db.metalock.Unlock()
+
+	// Exit if the database is not open yet.
+	if !db.opened {
+		db.rwlock.Unlock()
+		return nil, ErrDatabaseNotOpen
+	}
+
+	// Create a transaction associated with the database.
+	t := &Tx{writable: true}
+	t.init(db)
+	db.rwtx = t
+
+	// Free any pages associated with closed read-only transactions.
+	var minid txid = 0xFFFFFFFFFFFFFFFF
+	for _, t := range db.txs {
+		if t.meta.txid < minid {
+			minid = t.meta.txid
+		}
+	}
+	if minid > 0 {
+		db.freelist.release(minid - 1)
+	}
+
+	return t, nil
+}
+
+```
+
+`beginRWTx`方法执行了如下操作：
+1. 若事务为只读事务，返回错误。
+2. 获取`rwlock`锁与`metalock`锁，并通过`defer`关键字确保`metalock`会在函数返回前被安全释放。
+3. 检测数据库是否打开，如果没打开则释放锁并返回错误。
+4. 创建`writable`为true的`Tx`对象，调用`init`方法初始化`Tx`对象（`Tx`对象初始化时会复制当前的`meta`），并更新`DB`的`rwtx`字段为当前`Tx`对象。
+5. 释放不再使用的shadow page。
+
+boltdb释放不再使用的shadow page的方法是：找到当前还在执行的读写事务中最小的`txid`，记为`minid`。显然，在该`minid`之前的读写事务产生的shadow page不再会被读取，此时，通过`freelist`的`release`方法释放`txid`不超过`minid-1`的事务产生的shadow page。
+
+接下来分析初始化`Tx`对象时调用的`init`方法：
 
 ```go
 
@@ -266,11 +421,15 @@ func (tx *Tx) init(db *DB) {
 
 `init`方法还为读写事务初始化了`pages`字段，该字段是用来记录事务写入的dirty page（page buffer）的cache。此外，`init`在初始化读写事务时还会将其`meta`中的`txid + 1`。
 
-#### 2.2.2 Tx的提交
+#### 2.2.2 事务提交
+
+boltdb的用户可以通过`Tx`的`Commit`方法提交非隐式事务；而隐式事务的提交则由boltdb调用该方法实现（在调用前会将其`managed`字段置为false以避免返回错误）。在提交前，用户还可以通过`OnCommit`方法注册事务的回调方法。
+
+本节将介绍事务提交的实现。
 
 ##### 2.2.2.1 Commit方法
 
-boltdb的用户可以通过`Tx`的`Commit`方法提交非隐式事务。在提交前，用户还可以通过`OnCommit`方法注册事务的回调方法。`OnCommit`与`Commit`方法的实现如下：
+事务提交方法`Commit`与注册成功提交回调的方法`OnCommit`的实现如下：
 
 ```go
 
@@ -391,13 +550,13 @@ func (tx *Tx) Commit() error {
 10. 一次调用之前通过`OnCommit`方法注册的回调函数。
 11. 如果步骤4~8出错，则通过`rollback`方法回滚事务。
 
-在`Commit`方法中，有一些地方需要注意，接下来笔者将依次对其进行介绍与分析。
+在`Commit`方法中，有一些地方需要注意，接下来笔者将依次对其进行介绍与分析（事务关闭方法在[2.2.4节](#224-事务关闭)中介绍）。
 
 ##### 2.2.2.2 grow方法
 
 第5步中的`grow`方法，是用来增长底层数据库文件大小的方法。在本系列的前文[深入浅出boltdb —— 0x01 存储与缓存](/posts/code-reading/boltdb-made-simple/1-storage-cache/)中，笔者描述boltdb的mmap增长逻辑时埋下了一个伏笔：boltdb的mmap的增长策略是从32KB开始，每次倍增，在达到1GB后每次增长1GB；但是boltdb并不会在mmap的同时修改底层数据库文件大小。这样的问题是：当访问超出了文件大小的mmap空间时，会引起`SIGBUS`异常。为了避免访问越界，同时减少不必要的底层数据库文件增长，boltdb采用了在事务提交时按需增长的策略。
 
-boltdb的实现方式是：在为事务分配完所需的页之后、在写入脏页前，先计算其使用了的空间大小（包括freelist中的页），即`int(tx.meta.pgid+1) * tx.db.pageSize`。之后调用`db`的`grow`方法来按需增大底层数据库文件大小。其实现如下：
+boltdb的实现方式是：在为事务分配完所需的页之后、在写入脏页前，先计算其使用了的空间大小（包括freelist中的页），即`int(tx.meta.pgid+1) * tx.db.pageSize`。之后调用`DB`的`grow`方法来按需增大底层数据库文件大小。其实现如下：
 
 ```go
 
@@ -576,7 +735,197 @@ func (m *meta) copy(dest *meta) {
 
 ##### 2.2.2.4 Check
 
-##### 2.2.2.5 close
+如果数据库处于严格模式`StrictMode`，则在事务提交的第7步中将调用`Check`方法对数据库进行完整性检查。
 
-#### 2.2.3 Tx的回滚
+```go
+
+// Check performs several consistency checks on the database for this transaction.
+// An error is returned if any inconsistency is found.
+//
+// It can be safely run concurrently on a writable transaction. However, this
+// incurs a high cost for large databases and databases with a lot of subbuckets
+// because of caching. This overhead can be removed if running on a read-only
+// transaction, however, it is not safe to execute other writer transactions at
+// the same time.
+func (tx *Tx) Check() <-chan error {
+	ch := make(chan error)
+	go tx.check(ch)
+	return ch
+}
+
+func (tx *Tx) check(ch chan error) {
+	// Check if any pages are double freed.
+	freed := make(map[pgid]bool)
+	all := make([]pgid, tx.db.freelist.count())
+	tx.db.freelist.copyall(all)
+	for _, id := range all {
+		if freed[id] {
+			ch <- fmt.Errorf("page %d: already freed", id)
+		}
+		freed[id] = true
+	}
+
+	// Track every reachable page.
+	reachable := make(map[pgid]*page)
+	reachable[0] = tx.page(0) // meta0
+	reachable[1] = tx.page(1) // meta1
+	for i := uint32(0); i <= tx.page(tx.meta.freelist).overflow; i++ {
+		reachable[tx.meta.freelist+pgid(i)] = tx.page(tx.meta.freelist)
+	}
+
+	// Recursively check buckets.
+	tx.checkBucket(&tx.root, reachable, freed, ch)
+
+	// Ensure all pages below high water mark are either reachable or freed.
+	for i := pgid(0); i < tx.meta.pgid; i++ {
+		_, isReachable := reachable[i]
+		if !isReachable && !freed[i] {
+			ch <- fmt.Errorf("page %d: unreachable unfreed", int(i))
+		}
+	}
+
+	// Close the channel to signal completion.
+	close(ch)
+}
+
+func (tx *Tx) checkBucket(b *Bucket, reachable map[pgid]*page, freed map[pgid]bool, ch chan error) {
+	// Ignore inline buckets.
+	if b.root == 0 {
+		return
+	}
+
+	// Check every page used by this bucket.
+	b.tx.forEachPage(b.root, 0, func(p *page, _ int) {
+		if p.id > tx.meta.pgid {
+			ch <- fmt.Errorf("page %d: out of bounds: %d", int(p.id), int(b.tx.meta.pgid))
+		}
+
+		// Ensure each page is only referenced once.
+		for i := pgid(0); i <= pgid(p.overflow); i++ {
+			var id = p.id + i
+			if _, ok := reachable[id]; ok {
+				ch <- fmt.Errorf("page %d: multiple references", int(id))
+			}
+			reachable[id] = p
+		}
+
+		// We should only encounter un-freed leaf and branch pages.
+		if freed[p.id] {
+			ch <- fmt.Errorf("page %d: reachable freed", int(p.id))
+		} else if (p.flags&branchPageFlag) == 0 && (p.flags&leafPageFlag) == 0 {
+			ch <- fmt.Errorf("page %d: invalid type: %s", int(p.id), p.typ())
+		}
+	})
+
+	// Check each bucket within this bucket.
+	_ = b.ForEach(func(k, v []byte) error {
+		if child := b.Bucket(k); child != nil {
+			tx.checkBucket(child, reachable, freed, ch)
+		}
+		return nil
+	})
+}
+
+```
+
+`Check`方法的完整性检查是对数据库的页完整性的检查，其检查了两方面问题：
+1. 是否存在页被二次释放的问题。
+2. 是否所有页都能索引到，即是否存在既无法直接访问，又无法通过B+Tree索引到，也不在freelist中。
+
+#### 2.2.3 事务回滚
+
+boltdb的用户可以通过`Rollback`手动回滚事务，该方法会检测事务是否为隐式事务，如果是隐式事务则会返回错误（boltdb在回滚隐式事务前会将其`managed`字段置为false以避免返回错误）。`Rollback`方法会调用`rollback`方法进入回滚逻辑。另外，在事务提交时，发生部分错误时会直接调用`rollback`方法回滚事务。
+
+`Rollback`方法与`rollback`方法的实现如下：
+
+```go
+
+// Rollback closes the transaction and ignores all previous updates. Read-only
+// transactions must be rolled back and not committed.
+func (tx *Tx) Rollback() error {
+	_assert(!tx.managed, "managed tx rollback not allowed")
+	if tx.db == nil {
+		return ErrTxClosed
+	}
+	tx.rollback()
+	return nil
+}
+
+func (tx *Tx) rollback() {
+	if tx.db == nil {
+		return
+	}
+	if tx.writable {
+		tx.db.freelist.rollback(tx.meta.txid)
+		tx.db.freelist.reload(tx.db.page(tx.db.meta().freelist))
+	}
+	tx.close()
+}
+
+```
+
+`rollback`中的逻辑非常简单，对于只读事务只需要调用`close`方法关闭事务即可；而对于读写事务，首先要通过`rollback`方法`freelist`中当前事务的`penging`列表中的页，因为这些页会被复用而不需要释放。另外，其还需要调用`freelist`的`reload`方法，其目的是将当前事务分配的页重新加入到`freelist`中。
+
+#### 2.2.4 事务关闭
+
+无论是事务提交还是事务关闭，最后都需要调用`close`方法关闭事务。`close`方法的实现如下：
+
+```go
+
+func (tx *Tx) close() {
+	if tx.db == nil {
+		return
+	}
+	if tx.writable {
+		// Grab freelist stats.
+		// ... ...
+
+		// Remove transaction ref & writer lock.
+		tx.db.rwtx = nil
+		tx.db.rwlock.Unlock()
+
+		// Merge statistics.
+		// ... ...
+
+	} else {
+		tx.db.removeTx(tx)
+	}
+
+	// Clear all references.
+	tx.db = nil
+	tx.meta = nil
+	tx.root = Bucket{tx: tx}
+	tx.pages = nil
+}
+
+// removeTx removes a transaction from the database.
+func (db *DB) removeTx(tx *Tx) {
+	// Release the read lock on the mmap.
+	db.mmaplock.RUnlock()
+
+	// Use the meta lock to restrict access to the DB object.
+	db.metalock.Lock()
+
+	// Remove the transaction.
+	for i, t := range db.txs {
+		if t == tx {
+			last := len(db.txs) - 1
+			db.txs[i] = db.txs[last]
+			db.txs[last] = nil
+			db.txs = db.txs[:last]
+			break
+		}
+	}
+	n := len(db.txs)
+
+	// Unlock the meta pages.
+	db.metalock.Unlock()
+
+	// Merge statistics.
+	// ... ...
+}
+
+```
+
+`close`主要做事务的清理工作并更新统计量（这里将其省略）。对于读写事务，其解除的`DB`对象中`rwtx`字段对其的引用，同时释放了`rwlock`；对于只读事务，其调用了`removeTx`方法。`removeTx`方法首先释放了`mmaplock`的S锁，然后获取`metalock`保护对`DB`对象的访问（而不是保护`meta`对象），然后从`DB`的`txs`字段中删除对当前事务的引用，之后释放`metalock`并更新统计量。
 
