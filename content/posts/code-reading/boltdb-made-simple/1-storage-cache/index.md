@@ -31,7 +31,7 @@ boltdb的页与空闲页列表的实现分别在`page.go`与`freelist.go`中，�
 
 {{< admonition info 注1 >}}
 
-为了在保证隔离性的同时支持“读读并发”、“读写并发”（boltdb不支持“写写并发”，即同一时刻只能有一个执行中的可写事务），boltdb在更新页时采用了[Shadow Paging](https://en.wikipedia.org/wiki/Shadow_paging)技术，其通过[copy-on-write](https://en.wikipedia.org/wiki/Copy-on-write)实现。在可写事务更新页时，boltdb首先会复制原页，然后在副本上更新，再将引用修改为新页上。这样，当可写事务更新页时，只读事务还可以读取原来的页；当事务提交时，boltdb会释放不再使用的页。这样，便实现了在支持“读读并发”、“读写并发”的同时保证事务的隔离性。
+为了在保证隔离性的同时支持“读读并发”、“读写并发”（boltdb不支持“写写并发”，即同一时刻只能有一个执行中的可写事务），boltdb在更新页时采用了[Shadow Paging](https://en.wikipedia.org/wiki/Shadow_paging)技术，其通过[copy-on-write](https://en.wikipedia.org/wiki/Copy-on-write)实现。在可写事务更新页时，boltdb首先会复制原页，然后在副本上更新，再将引用修改为新页上。这样，当可写事务更新页时，只读事务还可以读取原来的页；当创建读写事务时，boltdb会释放不再使用的页。这样，便实现了在支持“读读并发”、“读写并发”的同时保证事务的隔离性。
 
 {{< /admonition >}}
 
