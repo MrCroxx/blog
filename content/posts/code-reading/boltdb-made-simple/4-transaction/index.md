@@ -1,7 +1,7 @@
 ---
 title: "深入浅出boltdb —— 0x04 事务"
 date: 2021-01-26T13:30:24+08:00
-lastmod: 2021-01-26T13:30:27+08:00
+lastmod: 2021-02-05T21:21:25+08:00
 draft: false
 keywords: []
 
@@ -152,8 +152,6 @@ Shadow Paging保证了读读并发、读写并发的事务隔离性，boltdb还�
 
 boltdb的读写事务提交时，会通过pwrite系统调用写底层文件，并通过fdatasync系统调用确保数据被安全写入到磁盘中。因为boltdb的mmap模式为`MAP_SHARED`，因此绕过mmap直接写入底层文件不会影响mmap中数据对底层文件修改的可见性。
 
-# 施工中 。。。 。。。
-
 ## 2. boltdb中事务的封装与实现
 
 boltdb将事务封装成了`tx.go`中的`Tx`结构体。但只从`Tx`结构体分析boltdb中事务的封装与实现是不够的。因此，本节将先介绍`Tx`结构体的基本实现，然后按照事务的生命周期的顺序，介绍boltdb中`tx.go`与`db.go`中对事务的封装与实现。
@@ -245,7 +243,7 @@ boltdb支持“读读并发”与“读写并发”，用来隔离事务的锁`r
 
 这三种锁的获取顺序是：（`rwlock`） $\rightarrow$ `metalock` $\rightarrow$ （`mmaplock`）。
 
-此外，boltdb中还有另一个读写锁`statlock sync.RWMutex`，其作用是保护统计量的访问，这里不作重点介绍。
+此外，boltdb中还有两把锁。其一是读写锁`statlock sync.RWMutex`，其作用是保护统计量的访问，这里不作重点介绍；其二是互斥锁`batchMu`，该锁用来保护数据库实例的`batch`字段，作用较为单一，本文在[2.3.2节](#232-批处理隐式读写事务)介绍。
 
 #### 2.2.1 事务开始
 
@@ -864,7 +862,7 @@ func (tx *Tx) rollback() {
 
 ```
 
-`rollback`中的逻辑非常简单，对于只读事务只需要调用`close`方法关闭事务即可；而对于读写事务，首先要通过`rollback`方法`freelist`中当前事务的`penging`列表中的页，因为这些页会被复用而不需要释放。另外，其还需要调用`freelist`的`reload`方法，其目的是将当前事务分配的页重新加入到`freelist`中。
+`rollback`中的逻辑非常简单，对于只读事务只需要调用`close`方法关闭事务即可；而对于读写事务，首先要通过`freelist`的`rollback`方法，删除当前事务的`penging`列表中记录的页，因为这些页会被复用而不需要释放。另外，其还需要调用`freelist`的`reload`方法，其目的是将当前事务分配的页重新加入到`freelist`中；否则，这些页会无法引用，导致完整性检查失败。
 
 #### 2.2.4 事务关闭
 
@@ -929,3 +927,244 @@ func (db *DB) removeTx(tx *Tx) {
 
 `close`主要做事务的清理工作并更新统计量（这里将其省略）。对于读写事务，其解除的`DB`对象中`rwtx`字段对其的引用，同时释放了`rwlock`；对于只读事务，其调用了`removeTx`方法。`removeTx`方法首先释放了`mmaplock`的S锁，然后获取`metalock`保护对`DB`对象的访问（而不是保护`meta`对象），然后从`DB`的`txs`字段中删除对当前事务的引用，之后释放`metalock`并更新统计量。
 
+### 2.3 内置隐式事务
+
+boltdb除了为用户提供了`Begin`方法来显式地启动读写事务或只读事务，其还提供一些内置的封装好的隐式事务方法，如`Update`、`View`与`Batch`。当用户只需要操作数据库而不需要关心何时提交或回滚时，可以使用这些方法。
+
+#### 2.3.1 隐式读写事务与隐式只读事务
+
+`Update`与`View`分别是通过读写隐式事务与只读隐式事务操作数据库的方法。二者实现如下：
+
+```go
+
+// Update executes a function within the context of a read-write managed transaction.
+// If no error is returned from the function then the transaction is committed.
+// If an error is returned then the entire transaction is rolled back.
+// Any error that is returned from the function or returned from the commit is
+// returned from the Update() method.
+//
+// Attempting to manually commit or rollback within the function will cause a panic.
+func (db *DB) Update(fn func(*Tx) error) error {
+	t, err := db.Begin(true)
+	if err != nil {
+		return err
+	}
+
+	// Make sure the transaction rolls back in the event of a panic.
+	defer func() {
+		if t.db != nil {
+			t.rollback()
+		}
+	}()
+
+	// Mark as a managed tx so that the inner function cannot manually commit.
+	t.managed = true
+
+	// If an error is returned from the function then rollback and return error.
+	err = fn(t)
+	t.managed = false
+	if err != nil {
+		_ = t.Rollback()
+		return err
+	}
+
+	return t.Commit()
+}
+
+// View executes a function within the context of a managed read-only transaction.
+// Any error that is returned from the function is returned from the View() method.
+//
+// Attempting to manually rollback within the function will cause a panic.
+func (db *DB) View(fn func(*Tx) error) error {
+	t, err := db.Begin(false)
+	if err != nil {
+		return err
+	}
+
+	// Make sure the transaction rolls back in the event of a panic.
+	defer func() {
+		if t.db != nil {
+			t.rollback()
+		}
+	}()
+
+	// Mark as a managed tx so that the inner function cannot manually rollback.
+	t.managed = true
+
+	// If an error is returned from the function then pass it through.
+	err = fn(t)
+	t.managed = false
+	if err != nil {
+		_ = t.Rollback()
+		return err
+	}
+
+	if err := t.Rollback(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+```
+
+`Update`与`View`的参数是一个用来操作事务的方法闭包。这两个方法首先创建一个读写事务或只读事务，在执行方法闭包前先将`managed`字段置为true，以阻止用户在传入的方法闭包中手动提交或回滚事务，在执行后在将`managed`字段置为false，以便boltdb提交或回滚事务。
+
+#### 2.3.2 批处理隐式读写事务
+
+每个`Update`操作都要等待磁盘I/O完成才能执行下一个`Update`操作，虽然这保证了事务特性，但是性能较差。boltdb还为用户提供了一个能够将并发的多个读写事务合并为一次事务的方法——`Batch`。虽然通过`Batch`能够减少并发读写事务等待磁盘I/O的开销，但是其对事务中的操作有一定要求：`Batch`中的事务可能被重试若干次（即使某个事务正常，也可能被重试，笔者会在后文分析其原因），因此这要求通过`Batch`执行的操作必须是幂等（idempotent）的，且只有调用者调用的`Batch`方法成功返回后，其变更才保证被永久写入到存储。boltdb中的`Batch`分批操作对用户使透明的，用户只需要像调用`Update`一样调用`Batch`，boltdb就会自动将其分批。
+
+`Batch`方法使用到了`batch`结构体：
+
+```go
+
+type batch struct {
+	db    *DB
+	timer *time.Timer
+	start sync.Once
+	calls []call
+}
+
+type call struct {
+	fn  func(*Tx) error
+	err chan<- error
+}
+
+```
+
+`batch`结构体的`calls`字段记录了每批读写事务的方法闭包与错误返回信道。记录错误返回信道的作用是为了将每个事务的错误返回给相应地调用者。
+
+数据库结构体`db`的实例的`batch`字段是指向当前正在等待积累的`batch`指针，当一批`batch`执行时，其会将该字段置为nil，下一次调用`Batch`时会创建新实例。
+
+`Batch`方法的实现如下：
+
+```go
+
+// Batch calls fn as part of a batch. It behaves similar to Update,
+// except:
+//
+// 1. concurrent Batch calls can be combined into a single Bolt
+// transaction.
+//
+// 2. the function passed to Batch may be called multiple times,
+// regardless of whether it returns error or not.
+//
+// This means that Batch function side effects must be idempotent and
+// take permanent effect only after a successful return is seen in
+// caller.
+//
+// The maximum batch size and delay can be adjusted with DB.MaxBatchSize
+// and DB.MaxBatchDelay, respectively.
+//
+// Batch is only useful when there are multiple goroutines calling it.
+func (db *DB) Batch(fn func(*Tx) error) error {
+	errCh := make(chan error, 1)
+
+	db.batchMu.Lock()
+	if (db.batch == nil) || (db.batch != nil && len(db.batch.calls) >= db.MaxBatchSize) {
+		// There is no existing batch, or the existing batch is full; start a new one.
+		db.batch = &batch{
+			db: db,
+		}
+		db.batch.timer = time.AfterFunc(db.MaxBatchDelay, db.batch.trigger)
+	}
+	db.batch.calls = append(db.batch.calls, call{fn: fn, err: errCh})
+	if len(db.batch.calls) >= db.MaxBatchSize {
+		// wake up batch, it's ready to run
+		go db.batch.trigger()
+	}
+	db.batchMu.Unlock()
+
+	err := <-errCh
+	if err == trySolo {
+		err = db.Update(fn)
+	}
+	return err
+}
+
+```
+
+在`Batch`方法中，其通过互斥锁`batchMu`保护了对`db`实例的`batch`字段的访问。如果`batch`为空或者已满时，创建新的`batch`实例，并为其注册定时器；如果该存在`batch`，则将当前方法与为其创建的错误信道加入到`batch`对象的`calls`字段中；如果此时`batch`已满，则立即触发其运行。在将当前事务加入到`batch`的列表中后，`Batch`方法会等待当前事务的错误信道的信号；如果从该信道收到的是`trySolo`错误，则通过`Update`方法重试该事务，返回结果。
+
+没有满的`batch`会在定时器超时时触发，其`start sync.Once`字段确保每个`batch`只会被触发一次。`batch`触发时运行的相关代码如下：
+
+```go
+
+// trigger runs the batch if it hasn't already been run.
+func (b *batch) trigger() {
+	b.start.Do(b.run)
+}
+
+// run performs the transactions in the batch and communicates results
+// back to DB.Batch.
+func (b *batch) run() {
+	b.db.batchMu.Lock()
+	b.timer.Stop()
+	// Make sure no new work is added to this batch, but don't break
+	// other batches.
+	if b.db.batch == b {
+		b.db.batch = nil
+	}
+	b.db.batchMu.Unlock()
+
+retry:
+	for len(b.calls) > 0 {
+		var failIdx = -1
+		err := b.db.Update(func(tx *Tx) error {
+			for i, c := range b.calls {
+				if err := safelyCall(c.fn, tx); err != nil {
+					failIdx = i
+					return err
+				}
+			}
+			return nil
+		})
+
+		if failIdx >= 0 {
+			// take the failing transaction out of the batch. it's
+			// safe to shorten b.calls here because db.batch no longer
+			// points to us, and we hold the mutex anyway.
+			c := b.calls[failIdx]
+			b.calls[failIdx], b.calls = b.calls[len(b.calls)-1], b.calls[:len(b.calls)-1]
+			// tell the submitter re-run it solo, continue with the rest of the batch
+			c.err <- trySolo
+			continue retry
+		}
+
+		// pass success, or bolt internal errors, to all callers
+		for _, c := range b.calls {
+			c.err <- err
+		}
+		break retry
+	}
+}
+
+func safelyCall(fn func(*Tx) error, tx *Tx) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = panicked{p}
+		}
+	}()
+	return fn(tx)
+}
+
+// trySolo is a special sentinel error value used for signaling that a
+// transaction function should be re-run. It should never be seen by
+// callers.
+var trySolo = errors.New("batch function returned an error and should be re-run solo")
+
+```
+
+`run`方法的逻辑如下：
+
+1. 首先将当前`db`实例的`batch`字段置为nil，以避免之后调用的`Batch`将事务加入到当前队列，同时不影响其它`batch`的操作。
+2. 随后，循环重试。每次循环进行如下操作：
+	1. 在一次`Update`方法中，循环执行`calls`列表中的每个事务的方法闭包，直到有一个事务返回错误时停止
+	2. 如果发生了错误，则将发生错误的事务从`batch`中剔除，并向其错误信道中发送`trySolo`错误，告知调用者自行重试一次该事务，然后从头开始重试列表中的事务（这也是`Batch`要求其操作幂等的原因）。
+	3. 循环通过或`Update`方法执行时boltdb内部产生错误（如果事务返回错误其会被从`calls`列表中剔除并重试，这里的`err`如果非空则为boltdb本身的错误），将错误（或nil）返回给`calls`中所有调用者的错误信道，通知调用者其事务执行完成或错误，退出循环。
+
+## 3. 总结
+
+本文介绍了事务的基本概念与boltdb中事务的相关实现。在boltdb的实现中，事务在各方各面都有体现，其ACID的实现也相辅相成。
+
+关于boltdb的源码分析在这里也告一段落了，`db.go`中的重要代码已经在本系列各篇文章中分散地介绍过，这里也不再赘述。
