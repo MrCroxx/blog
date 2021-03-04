@@ -30,7 +30,7 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 2. 学习go的基本语法，学习go语言并发编程与channel的使用方式。
 3. 准备Diego Ongaro的博士论文作为参考资料，在Etcd的实现中，引用了很多其中的优化方式。
 
-本系列文章还在龟速更新中。笔者也是第一次试图将对这种工业级产品的分析写出来分享给读者，因此难免把握不好分析的粒度。在更新后面的文章的同时，我也会对之前的文章进行更正与优化，使其更容易理解。
+本系列文章龟速更新。笔者也是第一次试图将对这种工业级产品的分析写出来分享给读者，因此难免把握不好分析的粒度。在更新后面的文章的同时，我也会对之前的文章进行更正与优化，使其更容易理解。
 
 另外，本系列不会对引用的代码中的注释进行翻译，其原因有二：一来，etcd/raft模块中的注释描述的十分详细，建议读者要详细地阅读一遍etcd/raft模块中所有的注释；二来，笔者的水平有限，翻译的过程中难免会有词不达意的情况，而etcd/raft模块中的注释往往会提及很多细节，为了避免误导读者，就不做翻译了。不过相信能看到这里的读者都有丰富的英文论文阅读经验了，不需要笔者多此一举的翻译。
 
@@ -60,4 +60,4 @@ Raft算法，Diego Ongaro在《In search of an understandable consensus algorith
 - [x] 集群变更 —— joint
 - [x] Linearizable Read —— Log Read、ReadIndex、Lease Read
 - [ ] 集群变更 —— joint（apply-time confchange修复[issue#12359](https://github.com/etcd-io/etcd/issues/12359)）
-- [ ] 附录 —— etcd/raft中所有消息使用的字段描述
+- [ ] 附录 —— etcd/raft中所有消息使用的字段描述（80%鸽了）
