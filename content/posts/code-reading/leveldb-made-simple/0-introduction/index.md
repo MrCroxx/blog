@@ -1,12 +1,12 @@
 ---
-title: "深入浅出leveldb —— 0x00 引言"
+title: "深入浅出LevelDB —— 0x00 引言 [施工中]"
 date: 2021-03-04T19:37:12+08:00
 lastmod: 2021-03-04T19:37:15+08:00
 draft: false
 keywords: []
 description: ""
-tags: ["leveldb", "LSMTree"]
-categories: ["深入浅出leveldb"]
+tags: ["LevelDB", "LSMTree"]
+categories: ["深入浅出LevelDB"]
 author: ""
 resources:
 - name: featured-image
