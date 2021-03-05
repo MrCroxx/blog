@@ -14,9 +14,6 @@ git push origin master
 # UPDATE GENERATED BLOG
 # coding page
 cd ${BASEDIR}
-cd build/coding
-git pull
-cd ${BASEDIR}
 rm -r build/coding/*
 hugo --baseURL=https://blog.mrcroxx.com --destination=build/coding
 cd build/coding
@@ -25,9 +22,6 @@ git commit -m "update"
 git push origin master
 
 # github page
-cd ${BASEDIR}
-cd build/github
-git pull
 cd ${BASEDIR}
 rm -r build/github/*
 hugo --baseURL=https://mrcroxx.github.io --destination=build/github
