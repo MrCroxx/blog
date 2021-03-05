@@ -66,11 +66,11 @@ LevelDB在读取log文件时，为了减少I/O次数，每次读取都会读入�
 
 相关文件：`include/leveldb/env.h`、`util/env_*.*`。
 
-在介绍LevelDB中log的Writer前，首先先看一下Writer的写入目标的抽象——`WritableFile`。
+在介绍LevelDB中log的Writer与Reader前，我们首先看一下LevelDB中对log文件的抽象。LevelDB对log文件的抽象有`WritableFile`和`SequentialFile`，分别对应顺序写入与顺序读取的文件。
 
-`WritableFile`是一个抽象类，其定义在`include/leveldb/env/h`中。`env.h`中声明了很多与环境无关的抽象，让使用者不需要关心这些类在不同操作系统环境下的具体实现，而这些抽象的实现在`util/env_*.*`中，对应不同环境下的实现。
+`WritableFile`与`SequentialFile`是抽象类，定义在`include/leveldb/env/h`中。`env.h`中声明了很多与环境无关的抽象，让使用者不需要关心这些类在不同操作系统环境下的具体实现，而这些抽象的实现在`util/env_*.*`中，对应不同环境下的实现。
 
-`WritableFile`定义了一个顺序写入文件抽象：
+`WritableFile`与`SequentialFile`的声明如下：
 
 ```cpp
 
@@ -91,10 +91,6 @@ class LEVELDB_EXPORT WritableFile {
   virtual Status Flush() = 0;
   virtual Status Sync() = 0;
 };
-
-```
-
-```cpp
 
 // A file abstraction for reading sequentially through a file
 class LEVELDB_EXPORT SequentialFile {
@@ -128,9 +124,9 @@ class LEVELDB_EXPORT SequentialFile {
 
 ```
 
-### 2.2 Writer
+### 2.2 Writer与Reader
 
-相关文件：`db/log_writer.h`、`db/log_writer.cc`。
+相关文件：`db/log_writer.h`、`db/log_writer.cc`、`db/log_reader.h`、`db/log_reader.cc`。
 
 `leveldb::log::Writer`是用来写入log文件的类，其除了构造方法外只对外提供了一个追加记录的方法`AddRecord`，内部也仅有一个用来将Record同步到稳定存储的方法`EmitPhysicalRecord`：
 
