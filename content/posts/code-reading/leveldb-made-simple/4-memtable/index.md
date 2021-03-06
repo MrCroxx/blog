@@ -1,7 +1,7 @@
 ---
-title: "深入浅出LevelDB —— 0x04 memtable [施工中]"
+title: "深入浅出LevelDB —— 0x04 memtable"
 date: 2021-03-05T20:03:13+08:00
-lastmod: 2021-03-05T20:03:17+08:00
+lastmod: 2021-03-06T16:23:30+08:00
 draft: false
 keywords: []
 description: ""
@@ -28,7 +28,7 @@ LSMTree中的memtable既作为整合随机写入的buffer，又最为加速热�
 
 本文主要介绍并分析LevelDB中memtable的设计与实现。
 
-相关文件：`db/skiplist.h`、`db/memtable.h`、`db/memtable.cc`、`db/dbformat.h`。
+相关文件：`db/skiplist.h`、`db/memtable.h`、`db/memtable.cc`、`db/dbformat.h`、`db/dbformat.cc`。
 
 ## 1. SkipList的实现
 
@@ -296,10 +296,127 @@ class MemTable {
 
 ```
 
-MemTable的实例采用了引用计数，其初始计数为0，因此其构造方法的调用者需要手动调用其`Ref`函数；当调动`Unref`方法使其引用计数器减至0时，MemTable会自己销毁。
+MemTable的实例采用了引用计数，其初始计数为0，因此其构造方法的调用者需要手动调用其`Ref`方法将其初始引用计数置为1；在读取MemTable时或MemTable在Compact时，LevelDB会通过`Ref`方法增大MemTable的引用计数，避免其在读取过程中被回收而导致的无效内存访问，在操作完成后再通过`Unref`减小其引用计数；当调用`Unref`方法使其引用计数器减至0时，MemTable会自己销毁。
 
 本节，我们主要关注MemTable是如何封装SkipList以实现key/value的增删改查的。
 
-# 施工中 ... ...
+### 2.2 MemTable的实现
 
-### 2.2 
+#### 2.2.1 key的封装
+
+如前文所述，SkipList数据结构是一个只有key的查找结构，为了能够通过 SkipList同时保存key/value等数据，就要将key/value及其它数据封装成一个key。LevelDB中key的封装规则如下图所示。
+
+![key封装规则](assets/key-info.svg "key封装规则")
+
+SkipList的key从大体上可以分为三部分（颜色不同的部分）：InternalKey Size、InternalKey、Value。其中，InternalKey是LevelDB为了在Insert-Only的SkipList上实现增删改查而封装的结构，也是SkipList中Node的默认排序依据；InternalKey Size即InternalKey的大小，通过varint32编码；Value由用户插入的value与其大小组成，其value size同样通过varint32编码实现。接下来，我们重点介绍InternalKey的设计。
+
+InternalKey内部由3部分组成：
+- key：用户插入的key，也叫做UserKey。
+- SequenceNumber：全局单调递增序号，当LevelDB更新数据时（增/删/改）递增，保证后发生操作的SequenceNumber值大于先发生的操作，MemTable通过该字段在Insert-Only的SkipList上实现增/改操作。
+- ValueType：用来表示操作类型枚举值，其值只有两种：`kTypeDeletion`与`kTypeValue`。其中`kTypeDeletion`表示该Key是删除操作，`kTypeValue`表示该Key是增/改操作。
+
+#### 2.2.2 增删改查的实现
+
+在介绍了MemTable对SkipList的Key封装后，我们来分析MemTable如何通过这种封装来在Insert-Only的SkipList上实现key/value的增删改查操作。
+
+在上一节中，笔者提到过InternalKey是SkipList中Node的默认排序依据。LevelDB中SkipList的默认排序是通过`leveldb::InternalKeyComparator`实现的，其声明与实现在`db/dbformat.h`与`db/dbformat.cc`中。
+
+`InternalKeyComparator`的`Compare`方法按照如下优先级，依次对`InternalKey`进行排序：
+1. 按照UserKey**升序**排序；
+2. 按照SequenceNumber**降序**排序；
+3. 按照ValueType**降序**排序（由于SequenceNumber已经足以对Key排序，因此这条规则永远不会用到）。
+
+通过`InternalKeyComparator`，SkipList可以保证对于同一key（UserKey），新的操作永远在旧的操作的前面。因此，只要找到key（UserKey）在SkipList中第一次出现的位置，即可保证得到的是该key最新的版本。
+
+在分析MemTable如何实现查找key（UserKey）前，我们先来看一下MemTable实现增/删/查操作的实现：
+
+```cpp
+
+void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
+                   const Slice& value) {
+  // Format of an entry is concatenation of:
+  //  key_size     : varint32 of internal_key.size()
+  //  key bytes    : char[internal_key.size()]
+  //  value_size   : varint32 of value.size()
+  //  value bytes  : char[value.size()]
+  size_t key_size = key.size();
+  size_t val_size = value.size();
+  size_t internal_key_size = key_size + 8;
+  const size_t encoded_len = VarintLength(internal_key_size) +
+                             internal_key_size + VarintLength(val_size) +
+                             val_size;
+  char* buf = arena_.Allocate(encoded_len);
+  char* p = EncodeVarint32(buf, internal_key_size);
+  std::memcpy(p, key.data(), key_size);
+  p += key_size;
+  EncodeFixed64(p, (s << 8) | type);
+  p += 8;
+  p = EncodeVarint32(p, val_size);
+  std::memcpy(p, value.data(), val_size);
+  assert(p + val_size == buf + encoded_len);
+  table_.Insert(buf);
+}
+
+```
+
+从`Add`方法中可以看出，MemTable不需要进行额外的操作，只需要将需要插入SkipList的Key按照上节中介绍的格式编码，然后直接插入到SkipList中即可。
+
+而对于查找操作，由于在查找时MemTable无法得知需要查找的key（UserKey）最新的SequenceNumber或ValueType，因此在查找时，无法构造出恰好与SkipList中的InternalKey相等的查找键。但这并不影响MemTable查找UserKey的最新版本，根据InternalKey的排序顺序，只要构造出的查找键的UserKey与需要查找的UserKey相同，且SequenceNumber大于等于该UserKey已存在的最大SequenceNumber，MemTable即可根据查找键找到待查找的UserKey的最新版本可能出现的位置。然后判断该位置上的UserKey是否与我们要查找的UserKey相同，如果相同则说明我们找到了该UserKey的最新版本，如果不同则说明MemTable没有该UserKey的记录。
+
+为了便于生成查找键，LevelDB定义了`levelDB::LookupKey`，其结构相当于InternalKey Size与InternalKey部分连接在一起，其中SequenceNumber部分为构造时的SequenceNumber，ValueType为1。在查找时，只需要传入UserKey及当前的SequenceNumber，即可构造出在SkipList中位于我们要查找的UserKey的最新版本可能出现的位置处的LookupKey。
+
+MemTable中查找操作的实现如下：
+
+```cpp
+
+bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
+  Slice memkey = key.memtable_key();
+  Table::Iterator iter(&table_);
+  iter.Seek(memkey.data());
+  if (iter.Valid()) {
+    // entry format is:
+    //    klength  varint32
+    //    userkey  char[klength]
+    //    tag      uint64
+    //    vlength  varint32
+    //    value    char[vlength]
+    // Check that it belongs to same user key.  We do not check the
+    // sequence number since the Seek() call above should have skipped
+    // all entries with overly large sequence numbers.
+    const char* entry = iter.key();
+    uint32_t key_length;
+    const char* key_ptr = GetVarint32Ptr(entry, entry + 5, &key_length);
+    if (comparator_.comparator.user_comparator()->Compare(
+            Slice(key_ptr, key_length - 8), key.user_key()) == 0) {
+      // Correct user key
+      const uint64_t tag = DecodeFixed64(key_ptr + key_length - 8);
+      switch (static_cast<ValueType>(tag & 0xff)) {
+        case kTypeValue: {
+          Slice v = GetLengthPrefixedSlice(key_ptr + key_length);
+          value->assign(v.data(), v.size());
+          return true;
+        }
+        case kTypeDeletion:
+          *s = Status::NotFound(Slice());
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
+```
+
+正如上文中分析的那样，在根据LookupKey找到待查找的UserKey最新版本可能出现的位置后，还需要通过如下操作判断当前UserKey是否存在：
+1. 判断当前位置非空，以避免待查找的UserKey在所有已有的UserKey记录之后导致的找到空指针；
+2. 判断当前位置的UserKey是否是待查找的Userkey，如果不是则说明MemTable中没有待查找的UserKey的记录；
+3. 检查该Key的ValueType，如果是`kTypeDeletion`说明该UserKey被用户删除；如果是`kTypeValue`说明待查找的UserKey存在，返回当前最新版本即可。
+
+#### 2.2.3 Key类型小结
+
+LevelDB为了在Insert-Only的SkipList上实现key/value的增删改查封装了多种不同的key，这里总结一下出现的key以避免混淆：
+
+- UserKey：用户插入的key。
+- InternalKey：封装了用户插入的key、序号（时间戳）及操作类型，该key是在Insert-Only实现增删改查的关键，也是SkipList中key的排序依据。
+- LookupKey：根据UserKey与查找操作发生时的SequenceNumber生成的用来查找SkipList的key，其相当于InternalKey size与InternalKey的连接。该key在SkipList中的位置对应待查找的UserKey的最新版本可能出现的位置。
+- SkipList的Key：SkipList中的Key，保存了用户插入的key/value及相关元数据的所有信息。
