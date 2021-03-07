@@ -58,3 +58,15 @@ Footer大小48B原因：Footer中有2个Handle和1个64bit的MagicNumber，每�
 
 ### 1.2 Block通用格式
 
+sstable中所有的Block（content）都以下图格式组织：
+
+![Block格式](assets/block.svg "Block格式")
+
+从功能上，Block
+
+# 施工中 ... ...
+
+Memtable::Table::Iterator -> SkipList<Key, Comparator>::Iterator
+
+key -> InternalKey
+value -> Value .
