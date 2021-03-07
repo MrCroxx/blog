@@ -412,7 +412,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
 2. 判断当前位置的UserKey是否是待查找的Userkey，如果不是则说明MemTable中没有待查找的UserKey的记录；
 3. 检查该Key的ValueType，如果是`kTypeDeletion`说明该UserKey被用户删除；如果是`kTypeValue`说明待查找的UserKey存在，返回当前最新版本即可。
 
-#### 2.2.3 Key类型小结
+#### 2.2.3 key类型小结
 
 LevelDB为了在Insert-Only的SkipList上实现key/value的增删改查封装了多种不同的key，这里总结一下出现的key以避免混淆：
 
