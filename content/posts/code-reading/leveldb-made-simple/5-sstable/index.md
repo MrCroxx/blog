@@ -34,7 +34,7 @@ SSTable的文件格式可表示为下图：
 
 SSTable中的数据按照功能可以分为如下几块区：
 1. Data Block区：存放key/value数据。
-2. Meta Block区：存放与当前SSTable相关的统计数据。
+2. Meta Block区：存放过滤器或当前SSTable相关的统计数据。
 3. MetaIndex Block：仅有1个Block，该Block中存放了所有Meta Block的索引。
 4. Index Block区：所有Data Block的索引。
 5. Footer：大小固定的一个区域（48B），该区域中有两个Handle，分别标识了MetaIndex Block区和Index Block区的偏移量与大小；文件末尾的MagicNum用来标识该文件是LevelDB的SSTable文件；剩余空间被填充为Padding。
@@ -58,8 +58,6 @@ Footer大小48B原因：Footer中有2个Handle和1个64bit的MagicNumber，每�
 
 ### 1.2 Block格式
 
-#### 1.2.1 Block通用格式
-
 SSTable中所有的Block（content）都以下图格式组织：
 
 ![Block格式](assets/block.svg "Block格式")
@@ -79,12 +77,37 @@ SSTable中所有的Block（content）都以下图格式组织：
 
 通过这种方式，可以对频繁出现的公共前缀进行压缩。Restart Entry的间隔`leveldb::Options.block_restart_interval`默认为16，以平衡缓存局部性。
 
-接下来关注SSTable中各类Block保存的数据（后续内容屏蔽Restart细节，仅关注Entry中的key/value）。
+接下来关注SSTable中各类Block保存的数据（以下屏蔽Restart细节，仅关注Entry中的key/value）。
 
-#### 1.2.2 Data Block
+| Block Type <div style="width:8em"></div> | key<div style="width:12em"></div> | value<div style="width:12em"></div> | 描述<div style="width:40em"></div> |
+| :-: | :-: | :-: | :- |
+| Data Block | InternalKey Size + InternalKey | Value Size + Value | 完整数据与SkipList中Key的格式相同。 |
+| Meta Block | - | - | Meta Block有多种类型，目前可分 Filter Meta Block与Stats Meta Block，分别保存当前SSTable的过滤器与统计数据。 |
+| Filter Meta Block | filter.{{ Filter Name}} | BlockHandle | 该SSTable使用的过滤器名称及其索引。过滤器的实现详见下文。 |
+| Stats Meta Block | 统计量名 | 统计量值 | 保存该SSTable的统计量。 |
+| MetaIndex Block | Meta Block Name | BlockHandle | 用来索引所有的MetaBlock。 |
+| Index Block | 相应Data Block的“最大”Key值（详见下文） | BlockHandle | 用来快速索引key在SSTable的哪个Data Block中。 |
 
 
 
+# 施工中 ... ...
 
+如果启用过滤器，其中一个Meta Block作为Filter Block。其它Meta Block以key/value的形式保存统计数据（详见`doc/table_format.md`）。
+
+```cpp
+
+  // If *start < limit, changes *start to a short string in [start,limit).
+  // Simple comparator implementations may return with *start unchanged,
+  // i.e., an implementation of this method that does nothing is correct.
+  virtual void FindShortestSeparator(std::string* start,
+                                     const Slice& limit) const = 0;
+
+  // Changes *key to a short string >= *key.
+  // Simple comparator implementations may return with *key unchanged,
+  // i.e., an implementation of this method that does nothing is correct.
+  virtual void FindShortSuccessor(std::string* key) const = 0;
+
+
+```
 
 
