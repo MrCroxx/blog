@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x03 log"
+title: "深入浅出LevelDB —— 0x03 Log"
 date: 2021-03-05T12:43:16+08:00
 lastmod: 2021-03-05T12:43:19+08:00
 draft: false
@@ -20,19 +20,19 @@ resources:
 
 ## 0. 引言
 
-LevelDB在修改时，首先会将修改写入到保存在文件系统上的log，以避免掉电时保存在内存中的数据丢失。由于log是顺序写入的，其写入速度较快。因为log的写入是在真正执行操作之前的，因此这一技术也叫做**Write-Ahead Log**。
+LevelDB在修改时，首先会将修改写入到保存在文件系统上的Log，以避免掉电时保存在内存中的数据丢失。由于Log是顺序写入的，其写入速度较快。因为Log的写入是在真正执行操作之前的，因此这一技术也叫做**Write-Ahead Log**。
 
-本文主要分析LevelDB中log的设计与实现。此外，本文的后半部分主要着眼于LevelDB如何保证WAL被安全地写入到稳定存储。
+本文主要分析LevelDB中Log的设计与实现。此外，本文的后半部分主要着眼于LevelDB如何保证WAL被安全地写入到稳定存储。
 
 相关命名空间：`leveldb::log`。
 
 相关文件：`include/leveldb/env.h`、`db/log_format.h`、`db/log_writer.h`、`db/log_writer.cc`、`db/log_reader.h`、`db/log_reader.cc`。
 
-## 1. log的格式与设计
+## 1. Log的格式与设计
 
-LevelDB的log是由Record和一些为了对齐而填充的gap组成的文件。
+LevelDB的Log是由Record和一些为了对齐而填充的gap组成的文件。
 
-LevelDB在读取log文件时，为了减少I/O次数，每次读取都会读入一个32KB大小的块。因此，在写入log文件时，LevelDB也将数据按照32KB对齐。
+LevelDB在读取Log文件时，为了减少I/O次数，每次读取都会读入一个32KB大小的块。因此，在写入Log文件时，LevelDB也将数据按照32KB对齐。
 
 ![文件与块](assets/file-and-block.svg "文件与块")
 
@@ -52,13 +52,13 @@ LevelDB在读取log文件时，为了减少I/O次数，每次读取都会读入�
 
 ![空白填充](assets/gap.svg "空白填充")
 
-## 2. log的实现
+## 2. Log的实现
 
 ### 2.1 WritableFile与SequentialFile
 
 相关文件：`include/leveldb/env.h`、`util/env_*.*`。
 
-在介绍LevelDB中log的Writer与Reader前，我们首先看一下LevelDB中对log文件的抽象。LevelDB对log文件的抽象有`WritableFile`和`SequentialFile`，分别对应顺序写入与顺序读取的文件。
+在介绍LevelDB中Log的Writer与Reader前，我们首先看一下LevelDB中对Log文件的抽象。LevelDB对Log文件的抽象有`WritableFile`和`SequentialFile`，分别对应顺序写入与顺序读取的文件。
 
 `WritableFile`与`SequentialFile`是抽象类，定义在`include/leveldb/env/h`中。`env.h`中声明了很多与环境无关的抽象，让使用者不需要关心这些类在不同操作系统环境下的具体实现，而这些抽象的实现在`util/env_*.*`中，对应不同环境下的实现。
 
@@ -120,7 +120,7 @@ class LEVELDB_EXPORT SequentialFile {
 
 相关文件：`db/log_writer.h`、`db/log_writer.cc`、`db/log_reader.h`、`db/log_reader.cc`。
 
-`leveldb::log::Writer`是用来写入log文件的类，其除了构造方法外只对外提供了一个追加记录的方法`AddRecord`，内部通过`EmitPhysicalRecord`方法用来将记录写入存储；`leveldb::log::Reader`是用来读取log文件的类，其对外提供了`ReadRecord`方法，该方法会读取下一条记录，并将参数`result`与`scratch`指向下一条记录，内部方法`ReadPhysicalRecord`会通过`unistd.h`的`read`方法，读取文件的下一个块（32KB）到内部buffer（`backing_store_`），以减少I/O次数。
+`leveldb::log::Writer`是用来写入Log文件的类，其除了构造方法外只对外提供了一个追加记录的方法`AddRecord`，内部通过`EmitPhysicalRecord`方法用来将记录写入存储；`leveldb::log::Reader`是用来读取Log文件的类，其对外提供了`ReadRecord`方法，该方法会读取下一条记录，并将参数`result`与`scratch`指向下一条记录，内部方法`ReadPhysicalRecord`会通过`unistd.h`的`read`方法，读取文件的下一个块（32KB）到内部buffer（`backing_store_`），以减少I/O次数。
 
 ```cpp
 
@@ -224,11 +224,11 @@ class Reader {
 
 ```
 
-`leveldb::log::Writer`与`leveldb::log::Reader`中大部分是处理记录分段分块的代码，本文不再赘述。这里需要关注的是写入log文件时数据的同步语义。
+`leveldb::log::Writer`与`leveldb::log::Reader`中大部分是处理记录分段分块的代码，本文不再赘述。这里需要关注的是写入Log文件时数据的同步语义。
 
 ### 2.3 wal数据同步
 
-log（或Write-Ahead Log，WAL）的意义在于保证机器故障时数据不会因为内存掉电而丢失，只有record被执行前，被完全同步到稳定存储后，才能保证掉电后数据的完整性。然而，如果每条记录都要等待同步写入，其开销很高。
+Log（或Write-Ahead Log，WAL）的意义在于保证机器故障时数据不会因为内存掉电而丢失，只有record被执行前，被完全同步到稳定存储后，才能保证掉电后数据的完整性。然而，如果每条记录都要等待同步写入，其开销很高。
 
 LevelDB提供了是否开启同步的选项`WriteOptions`，其定义在`include/leveldb/options.h`中：
 

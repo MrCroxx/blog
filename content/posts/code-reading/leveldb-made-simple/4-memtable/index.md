@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x04 memtable"
+title: "深入浅出LevelDB —— 0x04 MemTable"
 date: 2021-03-05T20:03:13+08:00
 lastmod: 2021-03-06T16:23:30+08:00
 draft: false
@@ -20,13 +20,13 @@ resources:
 
 ## 0. 引言
 
-LSMTree中的memtable既作为整合随机写入的buffer，又最为加速热数据读取的cache，是LSMTree的重要组件之一。
+LSMTree中的MemTable既作为整合随机写入的buffer，又最为加速热数据读取的cache，是LSMTree的重要组件之一。
 
-由于memtable是保存在内存中的，其I/O开销比保存在稳定存储上的SSTable要小得多，因此LevelDB在实现memtable时，查找结构采用的是跳表SkipList。
+由于MemTable是保存在内存中的，其I/O开销比保存在稳定存储上的SSTable要小得多，因此LevelDB在实现MemTable时，查找结构采用的是跳表SkipList。
 
-无论是memtable还是immutable memtable，其实现均为`leveldb::Memtable`，当memtable写满后，LevelDB会将其从`DBImpl`的`mem_`字段转移到`imm_`字段，不再对其进行写入。
+无论是MemTable还是Immutable MemTable，其实现均为`leveldb::Memtable`，当MemTable写满后，LevelDB会将其从`DBImpl`的`mem_`字段转移到`imm_`字段，不再对其进行写入。
 
-本文主要介绍并分析LevelDB中memtable的设计与实现。
+本文主要介绍并分析LevelDB中MemTable的设计与实现。
 
 相关文件：`db/skiplist.h`、`db/memtable.h`、`db/memtable.cc`、`db/dbformat.h`、`db/dbformat.cc`。
 
@@ -36,7 +36,7 @@ SkipList是一种多层链表查找结构，其实现较其它查找结构比简
 
 LevelDB的跳表实现位于`db/skiplist.h`文件中，其对外提供了插入、判断键是否存在的功能，此外还提供了一个用来更细粒度访问跳表的迭代器，通过迭代器可以顺序地正反遍历跳表，或按照索引随机查找。
 
-LevelDB中的SkipList只插入，不修改或删除，memtable的修改或删除是通过插入有响应标识或序号的key实现的。
+LevelDB中的SkipList只插入，不修改或删除，MemTable的修改或删除是通过插入有响应标识或序号的key实现的。
 
 SkipList通过template可以实现自定义Key类型与Key的比较方式。自定义`Comparator`只需要实现`include/comparator.h`中的虚类`Comparator`即可。
 
