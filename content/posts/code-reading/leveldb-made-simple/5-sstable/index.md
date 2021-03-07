@@ -1,7 +1,7 @@
 ---
-title: "深入浅出LevelDB —— 0x05 SSTable [施工中]"
+title: "深入浅出LevelDB —— 0x05 SSTable"
 date: 2021-03-06T16:54:17+08:00
-lastmod: 2021-03-06T16:54:20+08:00
+lastmod: 2021-03-07T19:57:30+08:00
 draft: false
 keywords: []
 description: ""
@@ -88,26 +88,29 @@ SSTable中所有的Block（content）都以下图格式组织：
 | MetaIndex Block | Meta Block Name | BlockHandle | 用来索引所有的MetaBlock。 |
 | Index Block | 相应Data Block的“最大”Key值（详见下文） | BlockHandle | 用来快速索引key在SSTable的哪个Data Block中。 |
 
+在较早版本的LevelDB中，Index Block中的key为其相应的Data Block中最大的key。随后，LevelDB对Index Block中key的空间进行了优化。目前，该key为大于等于其相应Block的最大key，且小于下一个Data Block最小key的最短key值。对于SSTable中的最后一个Data Block的key，取大于其最后一个key的最短key值。
 
+例如，下表给出了在一个SSTable中连续的若干Data Block的key范围（这里简化了key的格式，假设其只保存一个简单字符串）及其在Index Block中的key，其中Data Block `n`为该SStable的最后一个Data Block：
 
-# 施工中 ... ...
+| Data Block | min(key) | max(key) | index key |
+| :-: | :-: | :-: | :-: |
+| Data Block `k` | apple | catspaw | `catq` |
+| Data Block `k+1` | catsup | dog | `dog` |
+| Data Block `k+2` | dogecoin | ... | ... |
+| ... | ... | ... |
+| Data Block `n-1` | CalvinWeirFields | PaulDano | `R` |
+| Data Block `n` | RubyTiffanySparks | YoeKazan | `Z` |
 
-如果启用过滤器，其中一个Meta Block作为Filter Block。其它Meta Block以key/value的形式保存统计数据（详见`doc/table_format.md`）。
+从上表中可以看出，通过这种方式可以进一步压缩Index Block中key的空间。
 
-```cpp
+{{< admonition info 提示 >}}
 
-  // If *start < limit, changes *start to a short string in [start,limit).
-  // Simple comparator implementations may return with *start unchanged,
-  // i.e., an implementation of this method that does nothing is correct.
-  virtual void FindShortestSeparator(std::string* start,
-                                     const Slice& limit) const = 0;
+取Index Block的key的两个方法分别通过FindShortestSeparator与FindShortSuccessor实现。
 
-  // Changes *key to a short string >= *key.
-  // Simple comparator implementations may return with *key unchanged,
-  // i.e., an implementation of this method that does nothing is correct.
-  virtual void FindShortSuccessor(std::string* key) const = 0;
+{{</ admonition >}}
 
+Filter Block中存放了当前SSTable的过滤器。Filter Block中的过滤器被分为n个段，第i个过滤器是为位于文件偏移量$[i*base,(i+1)*base)$的key生成的过滤器，$base$值位于Filter Block的最后一字节处，其单位为KB，默认为2KB。
 
-```
+![Filter Block格式](assets/filter.svg "Filter Block格式")
 
-
+LevelDB使用的默认过滤器是布隆过滤器，其在`MetaIndex Block`中的名为*filter.leveldb.BuiltinBloomFilter2*，通过`util/bloom.cc`实现（哈希函数实现在`util/hash.h`与`util/hash.cc`中）。该实现生成的过滤器按最短为8字节。该布隆过滤器实现非常简单，这里不再赘述，感兴趣的读者可以自行阅读其源码。
