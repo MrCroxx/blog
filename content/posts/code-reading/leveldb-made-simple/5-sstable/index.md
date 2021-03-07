@@ -56,17 +56,29 @@ Footer大小48B原因：Footer中有2个Handle和1个64bit的MagicNumber，每�
 | kNoCompression | 0x0 | 不压缩。 |
 | kSnappyCompression | 0x1 | 采用Snappy算法压缩。 |
 
-### 1.2 Block通用格式
+### 1.2 Block格式
+
+#### 1.2.1 Block通用格式
 
 sstable中所有的Block（content）都以下图格式组织：
 
 ![Block格式](assets/block.svg "Block格式")
 
-从功能上，Block
+从功能上，Block中可分为三个区域：
+1. Entry区：保存每条数据条目（通过Restart方式压缩）。
+2. Restart区：保存每条Restart索引（详见下文）。
+3. Restart Num：Restart区索引数（Fixed32编码），读取时通过该值来找到Restart区的起点。
+
+由于sstable中Entry常有公共前缀（特别是在不清理无效版本的level-0中），因此LevelDB对Block中的Entry进行了简单的压缩：每隔一定数量的Entry设定一个Restart Point，Restart Point后的第一条Entry完整保存（下文称其为Restart Entry）。而对于该Restart Entry到下一个Restart Point中间的Entry，只保存其与Restart Entry公共前缀后的部分，与一些用来计算长度的元数据。
+
+这里以Data Block为例，如下图所示：
+
+![Restart压缩](assets/sharing.svg "Restart压缩")
+
+如图所示，每个Entry可分为5段，分别为：该Entry的Key与其相应的Restart Entry的公共前缀长度（Varint32编码）、该Entry的Key剩余的长度（Varint32编码）、该Entry的Value长度（Varint32）编码、该Entry的Key的非公共前缀数据（bytes）、该Entry的Value数据（bytes）。Restart区的Restart索引（Fixed32编码）分别指向每个Restart Entry的偏移量。当然，这种压缩方式适用于所有的Block，无论数据只有key还是拥有key/value，并非只有Data Block使用了这种方式。
+
+通过这种方式，可以对频繁出现的公共前缀进行压缩。Restart Entry的间隔`leveldb::Options.block_restart_interval`默认为16，以平衡缓存局部性。
+
+#### 1.2.2 Data Block格式
 
 # 施工中 ... ...
-
-Memtable::Table::Iterator -> SkipList<Key, Comparator>::Iterator
-
-key -> InternalKey
-value -> Value .
