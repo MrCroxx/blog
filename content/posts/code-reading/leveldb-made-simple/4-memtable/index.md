@@ -312,7 +312,7 @@ SkipList的key从大体上可以分为三部分（颜色不同的部分）：Int
 
 InternalKey内部由3部分组成：
 - key：用户插入的key，也叫做UserKey。
-- SequenceNumber：全局单调递增序号，当LevelDB更新数据时（增/删/改）递增，保证后发生操作的SequenceNumber值大于先发生的操作，MemTable通过该字段在Insert-Only的SkipList上实现增/改操作。
+- SequenceNumber：全局单调递增序号，当LevelDB更新数据时（增/删/改）递增，保证后发生操作的SequenceNumber值大于先发生的操作，MemTable通过该字段在Insert-Only的SkipList上实现MVCC的增删改查。
 - ValueType：用来表示操作类型枚举值，其值只有两种：`kTypeDeletion`与`kTypeValue`。其中`kTypeDeletion`表示该Key是删除操作，`kTypeValue`表示该Key是增/改操作。
 
 #### 2.2.2 增删改查的实现
@@ -361,9 +361,9 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
 
 从`Add`方法中可以看出，MemTable不需要进行额外的操作，只需要将需要插入SkipList的Key按照上节中介绍的格式编码，然后直接插入到SkipList中即可。
 
-而对于查找操作，由于在查找时MemTable无法得知需要查找的key（UserKey）最新的SequenceNumber或ValueType，因此在查找时，无法构造出恰好与SkipList中的InternalKey相等的查找键。但这并不影响MemTable查找UserKey的最新版本，根据InternalKey的排序顺序，只要构造出的查找键的UserKey与需要查找的UserKey相同，且SequenceNumber大于等于该UserKey已存在的最大SequenceNumber，MemTable即可根据查找键找到待查找的UserKey的最新版本可能出现的位置。然后判断该位置上的UserKey是否与我们要查找的UserKey相同，如果相同则说明我们找到了该UserKey的最新版本，如果不同则说明MemTable没有该UserKey的记录。
+而对于查找操作，由于在查找时MemTable无法得知需要查找的key（UserKey）最新的SequenceNumber或ValueType，因此在查找时，无法构造出恰好与SkipList中的InternalKey相等的查找键。但这并不影响MemTable查找UserKey的“当前”版本（*注：由于LevelDB实现了MVCC，这里的“当前”版本只对该操作可见的最新版本，下文同理*），根据InternalKey的排序顺序，只要构造出的查找键的UserKey与需要查找的UserKey相同，且SequenceNumber大于等于该UserKey当前SequenceNumber，MemTable即可根据查找键找到待查找的UserKey的最新版本可能出现的位置。然后判断该位置上的UserKey是否与我们要查找的UserKey相同，如果相同则说明我们找到了该UserKey的最新版本，如果不同则说明MemTable没有该UserKey的记录。
 
-为了便于生成查找键，LevelDB定义了`levelDB::LookupKey`，其结构相当于InternalKey Size与InternalKey部分连接在一起，其中SequenceNumber部分为构造时的SequenceNumber，ValueType为1。在查找时，只需要传入UserKey及当前的SequenceNumber，即可构造出在SkipList中位于我们要查找的UserKey的最新版本可能出现的位置处的LookupKey。
+为了便于生成查找键，LevelDB定义了`levelDB::LookupKey`，其结构相当于InternalKey Size与InternalKey部分连接在一起，其中SequenceNumber部分为构造时的SequenceNumber，ValueType为1。在查找时，只需要传入UserKey及“当前”的SequenceNumber，即可构造出在SkipList中位于我们要查找的UserKey的最新版本可能出现的位置处的LookupKey。
 
 MemTable中查找操作的实现如下：
 
