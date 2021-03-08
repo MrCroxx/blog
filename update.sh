@@ -33,13 +33,23 @@ UPDATE(){
 }
 
 REFRESH(){
+    cd ${BASEDIR}
+    git checkout master
+    if git fetch -v --dry-run 2>&1 | grep 'master' | grep -q 'up to date'; then
+        echo 'Stale master branch detected, pull from remote...'
+        git pull origin master
+    fi
+
+    echo 'remove local build dir...'
     rm -rf ${BASEDIR}/build
     mkdir ${BASEDIR}/build
+    
+    echo 'clone build dir from remote...'
     cd ${BASEDIR}/build
     git clone git@github.com:MrCroxx/mrcroxx.github.io.git github
     git clone git@e.coding.net:croxx-dev/blog.git coding
-    cd ${BASEDIR}
-    git pull
+    
+    echo 'done.'
 }
 
 # ENTRY POINT
