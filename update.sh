@@ -5,6 +5,14 @@ BASEDIR=$(cd $(dirname "${BASH_SOURCE[0]}") >/dev/null && pwd)
 
 # FUN
 UPDATE(){
+    # # CHECK STALE
+    # cd ${BASEDIR}
+    # git checkout master
+    # if git fetch -v --dry-run 2>&1 | grep 'master' | grep -q 'up to date'; then
+    #     echo 'Stale master branch detected, git pull needed. ' 
+    #     exit
+    # fi
+
     cd ${BASEDIR}
 
     # UPDATE RAW BLOG
@@ -36,7 +44,7 @@ REFRESH(){
     cd ${BASEDIR}
     git checkout master
     if git fetch -v --dry-run 2>&1 | grep 'master' | grep -q 'up to date'; then
-        echo 'Stale master branch detected, pull from remote...'
+        echo 'stale master branch detected, pull from remote...'
         git pull origin master
     fi
 
