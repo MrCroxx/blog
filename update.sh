@@ -36,7 +36,7 @@ REFRESH(){
     rm -rf ${BASEDIR}/build
     mkdir ${BASEDIR}/build
     cd ${BASEDIR}/build
-    git clone git@github.com:MrCroxx/Blog.git github
+    git clone git@github.com:MrCroxx/mrcroxx.github.io.git github
     git clone git@e.coding.net:croxx-dev/blog.git coding
 }
 
