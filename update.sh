@@ -8,11 +8,9 @@ UPDATE(){
     cd ${BASEDIR}
 
     # UPDATE RAW BLOG
-
     git add .
     git commit -m "update"
     git push origin master
-
 
     # UPDATE GENERATED BLOG
     # coding page
@@ -34,11 +32,18 @@ UPDATE(){
     git push origin master
 }
 
+REFRESH(){
+    rm -rf ${BASEDIR}/build
+    mkdir ${BASEDIR}/build
+    cd ${BASEDIR}/build
+    git clone git@github.com:MrCroxx/Blog.git github
+    git clone git@e.coding.net:croxx-dev/blog.git coding
+}
+
 # ENTRY POINT
 while getopts "r" OPT; do
     case $OPT in
-        r)
-        exit 0;;
+        r) REFRESH; exit 0;;
     esac
 done
 UPDATE
