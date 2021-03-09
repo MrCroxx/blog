@@ -42,6 +42,13 @@ key/value的版本实际上也是依赖于内存与稳定存储，其分别在Co
 
 在LevelDB中，与Version相关的类有三个，分别是：`VersionEdit`、`Version`与`VersionSet`。
 
+正如引言中所述，LevelDB中Version相关信息记录的是LevelDB生成的文件的版本信息与相关元数据。LevelDB的版本信息是增量存储的，其存储方式与WAL相同，将版本的增量变化信息作为Record顺序写入Manifest文件中。
+
+LevelDB的版本增量数据在内存中的类型是`VersionEdit`，其`EncodeTo`与`DecodeFrom`方法分别用来序列化或反序列化`VersionEdit`，以便将其保存在文件中或从文件中读取。
+
+`VersionEdit`中
+
+
 
 
 
@@ -55,6 +62,26 @@ key/value的版本实际上也是依赖于内存与稳定存储，其分别在Co
 
 # 施工中 ... ...
 
+![经典盗图]()
+
 .log .ldb .sst LOG CURRENT manifest
 
 Comparator Name、Log Number、Prev Log Number、Next File Number、Last Sequence、Compact Pointers(level A -> level B)、Deleted File Meta(level, file number)、New File Meta(level, number, file size, smallest key, largest key)
+
+```cpp
+
+// Tag numbers for serialized VersionEdit.  These numbers are written to
+// disk and should not be changed.
+enum Tag {
+  kComparator = 1,
+  kLogNumber = 2,
+  kNextFileNumber = 3,
+  kLastSequence = 4,
+  kCompactPointer = 5,
+  kDeletedFile = 6,
+  kNewFile = 7,
+  // 8 was used for large value refs
+  kPrevLogNumber = 9
+};
+
+```
