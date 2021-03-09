@@ -85,17 +85,17 @@ enum Tag {
 
 ### 1.2 VersionEdit、Version、VersionSet
 
+Manifest与Current文件是LevelDB保存在稳定存储中的文件版本信息，在LevelDB被打开后，其会先通过Current文件找到当前的Manifest文件，读取并反序列化其中数据，并在内存中维护文件版本信息，以便后续操作。
 
+LevelDB在打开时，会读取当前Manifest文件中的所有数据。这里再次回顾一下上一节中介绍的Manifest中的内容。每个Manifest文件起始的Record（准确的说应该是起始的两个Record）是该Manifest文件创建时全量的VersionEdit，后续的Record是增量的 VersionEdit。在LevelDB读取了当前Manifest
 
-
+![VersionEdit、Version、VersionSet关系图](assets/version-set.png "VersionEdit、Version、VersionSet关系图")
 
 
 
 
 
 # 施工中 ... ...
-
-![经典盗图]()
 
 .log .ldb .sst LOG CURRENT manifest
 
