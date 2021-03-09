@@ -38,35 +38,17 @@ key/value的版本实际上也是依赖于内存与稳定存储，其分别在Co
 
 本文主要围绕LevelDB中Version、VersionEdit、VersionSet的设计与实现介绍与分析。
 
-## 1. VersionEdit、Version、VersionSet
+## 1. 相关类型与文件
 
-在LevelDB中，与Version相关的类有三个，分别是：`VersionEdit`、`Version`与`VersionSet`。
+在LevelDB中，与Version相关的类有三个，分别是：`VersionEdit`、`Version`与`VersionSet`，而相关文件主要有`Manifest`和`Current`
 
-正如引言中所述，LevelDB中Version相关信息记录的是LevelDB生成的文件的版本信息与相关元数据。LevelDB的版本信息是增量存储的，其存储方式与WAL相同，将版本的增量变化信息作为Record顺序写入Manifest文件中。
+正如引言中所述，LevelDB中Version相关信息记录的是LevelDB生成的文件的版本信息与相关元数据。LevelDB的版本信息是增量存储的，其存储方式与WAL相同，将版本的增量变化信息作为Record顺序写入Manifest文件中（详见本系列文章[深入浅出LevelDB —— 0x03 Log](/posts/code-reading/leveldb-made-simple/3-log/)）。
+
+### 1.1 VersionEdit、Manifest、Current
 
 LevelDB的版本增量数据在内存中的类型是`VersionEdit`，其`EncodeTo`与`DecodeFrom`方法分别用来序列化或反序列化`VersionEdit`，以便将其保存在文件中或从文件中读取。
 
-`VersionEdit`中
-
-
-
-
-
-
-
-
-
-
-
-
-
-# 施工中 ... ...
-
-![经典盗图]()
-
-.log .ldb .sst LOG CURRENT manifest
-
-Comparator Name、Log Number、Prev Log Number、Next File Number、Last Sequence、Compact Pointers(level A -> level B)、Deleted File Meta(level, file number)、New File Meta(level, number, file size, smallest key, largest key)
+目前`VersionEdit`类中需要持久化到Manifest文件中的数据共有8种：
 
 ```cpp
 
@@ -85,3 +67,36 @@ enum Tag {
 };
 
 ```
+
+这些Tag分别对应以下数据：
+1. Comparator Name：InternalKey比较器的名称字符串。
+2. Log Number：当前Log文件编号。
+3. Prev Log Number：前一个Log文件编号。
+4. Last SequenceNumber：当前版本最后一个SequenceNumber的值（仅对于SSTable文件而言，在LevelDB掉电后恢复时，还需要从WAL中恢复MemTable的状态，WAL中的SequenceNumber比文件中的更高）。
+5. Compact Pointers：(level, compaction key)记录上次Compaction的位置，以便出错后数据库恢复时，可以选择其它Compaction位置重试。
+6. Deleted File：(level, file number)该版本中删除的元数据。
+7. New File：(level, file number, file size, smallest key, largest key)该版本中新增文件的元数据。
+8.  ~~已弃用~~
+9. Prev Log Number：前一个Log文件编号。
+
+因为VersionEdit是增量数据，因此并非每个VersionEdit中都有所有类型的数据，因此序列化VersionEdit的每种类型的数据前会将该类型对应的Tag以Varint32的编码方式写入到其数据之前。
+
+每次LevelDB启动时，会创建一个新的Manifest文件，并创建一个当前状态的全量快照（首次调用`LogAndApply`方法时除了写入增量的Record，还会调用`WriteSnapshot`方法写入其余的全量数据，这两个方法位于`version_set.h`与`version_set.cc`中），以裁剪增量记录的长度。在创建新的Manifest文件同时，LevelDB还会修改Current文件，将其指向最新的Manifest文件。Current文件中只有一个内容，即当前Manifest文件名。
+
+### 1.2 VersionEdit、Version、VersionSet
+
+
+
+
+
+
+
+
+
+# 施工中 ... ...
+
+![经典盗图]()
+
+.log .ldb .sst LOG CURRENT manifest
+
+Comparator Name、Log Number、Prev Log Number、Next File Number、Last Sequence、Compact Pointers(level A -> level B)、Deleted File Meta(level, file number)、New File Meta(level, number, file size, smallest key, largest key)
