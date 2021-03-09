@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x02 Bisic Utils [施工中]"
+title: "深入浅出LevelDB —— 0x02 Bisic Data Format [施工中]"
 date: 2021-03-04T20:20:15+08:00
 lastmod: 2021-03-04T20:20:19+08:00
 draft: false
@@ -20,140 +20,9 @@ resources:
 
 ## 0. 引言
 
-为了便于后续的分析，本节将介绍LevelDB中较为通用的基本数据结构与工具及其实现。
+为了便于后续的分析，本节将介绍LevelDB中常用的基本数据格式。
 
-## 1. 内存分配器Arena
-
-相关文件：`util/arena.h`、`util/arena.cc`。
-
-`Arena`是LevelDB的内存分配器。LevelDB统一由Arena向操作系统申请内存，需要分配在堆上的数据结构再通过Arena申请一段连续的空间。
-
-与大多数存储系统一样，Arena在其生命周期中也不会主动将已经获得的内存归还给操作系统。此外，像Arena申请内存的数据结构也不会在Arena的生命周期中归还其占用的内存，这与数据结构的使用场景及使用相关。
-
-Arena对外提供了以下方法：
-
-```cpp
-
-class Arena {
- public:
-  Arena();
-
-  Arena(const Arena&) = delete;
-  Arena& operator=(const Arena&) = delete;
-
-  ~Arena();
-
-  // Return a pointer to a newly allocated memory block of "bytes" bytes.
-  char* Allocate(size_t bytes);
-
-  // Allocate memory with the normal alignment guarantees provided by malloc.
-  char* AllocateAligned(size_t bytes);
-
-  // Returns an estimate of the total memory usage of data allocated
-  // by the arena.
-  size_t MemoryUsage() const {
-    return memory_usage_.load(std::memory_order_relaxed);
-  }
-
-  // ... ...
-
-}
-
-```
-
-Arena对外的分配方法有两种，区别在于是否按照机器位数对齐。Arena内部主要通过4个字段实现：
-
-```cpp
-
-class Arena {
-
-  // ... ...
-
- private:
-  char* AllocateFallback(size_t bytes);
-  char* AllocateNewBlock(size_t block_bytes);
-
-  // Allocation state
-  char* alloc_ptr_;
-  size_t alloc_bytes_remaining_;
-
-  // Array of new[] allocated memory blocks
-  std::vector<char*> blocks_;
-
-  // Total memory usage of the arena.
-  //
-  // TODO(costan): This member is accessed via atomics, but the others are
-  //               accessed without any locking. Is this OK?
-  std::atomic<size_t> memory_usage_;
-};
-
-```
-
-`std::vector<char*> blocks_`字段按block来保存已申请的内存空间，`char* alloc_ptr_`指向当前块中还未分配的内存地址，`size_t alloc_bytes_remaining_`记录了当前块中剩余的未分配空间大小，`std::atomic<size_t> memory_usage_`记录了Arena获取的总内存大小（包括了每个block的header大小）。注意，这里“当前块”并非向操作系统申请获得的最后一个块，因为Arena为了避免浪费，会为较大的请求分配单独的块（详见下文），这里的“当前块”是指除了这些单独分配的块外获得的最后一个块。
-
-当LevelDB通过`Allocate`方法向Arena请求内存时，Arena首先会检查当前块的剩余空间，如果当前块剩余空间能够满足分配需求，则直接将剩余空间分配给调用者，并调整`alloc_ptr`与`alloc_bytes_remaining`：
-
-```cpp
-
-inline char* Arena::Allocate(size_t bytes) {
-  // The semantics of what to return are a bit messy if we allow
-  // 0-byte allocations, so we disallow them here (we don't need
-  // them for our internal use).
-  assert(bytes > 0);
-  if (bytes <= alloc_bytes_remaining_) {
-    char* result = alloc_ptr_;
-    alloc_ptr_ += bytes;
-    alloc_bytes_remaining_ -= bytes;
-    return result;
-  }
-  return AllocateFallback(bytes);
-}
-
-```
-
-如果当前块剩余空间不足，Arena会调用内部的`AllocateFallback方法`：
-
-```cpp
-
-char* Arena::AllocateFallback(size_t bytes) {
-  if (bytes > kBlockSize / 4) {
-    // Object is more than a quarter of our block size.  Allocate it separately
-    // to avoid wasting too much space in leftover bytes.
-    char* result = AllocateNewBlock(bytes);
-    return result;
-  }
-
-  // We waste the remaining space in the current block.
-  alloc_ptr_ = AllocateNewBlock(kBlockSize);
-  alloc_bytes_remaining_ = kBlockSize;
-
-  char* result = alloc_ptr_;
-  alloc_ptr_ += bytes;
-  alloc_bytes_remaining_ -= bytes;
-  return result;
-}
-
-```
-
-`AllocateFallback`会判断需要分配的大小，如果需要分配的大小超过了默认块大小的$\frac{1}{4}$，为了避免浪费当前块的剩余空间，Arena会为其单独分配一个大小等于需求的块，此时不需要调整`alloc_ptr`与`alloc_bytes_remaining`字段，这样做的另一个好处是这一逻辑也可以用于分配需求大于默认块大小的空间；如果需要分配的大小没有超过默认块大小的$\frac{1}{4}$，此时不再使用当前块的剩余空间浪费也很小，因此直接申请一个默认大小的块，并从新块分配空间，同时调整`alloc_ptr`与`alloc_bytes_remaining`字段。
-
-`AllocateNewBlock`会通过`new`关键字向操作系统申请内存空间，并将获得的内存块保存到`blocks_`中，同时更新`memory_usage_`字段：
-
-```cpp
-
-char* Arena::AllocateNewBlock(size_t block_bytes) {
-  char* result = new char[block_bytes];
-  blocks_.push_back(result);
-  memory_usage_.fetch_add(block_bytes + sizeof(char*),
-                          std::memory_order_relaxed);
-  return result;
-}
-
-```
-
-在计算`memory_usage_`时，使用的空间除了需求的空间大小`block_bytes`外，还要加上`new`关键字为数组分配空间时为数组加上的header大小（这样`delete[]`关键字才能知道需要释放的数组大小）。
-
-## 2.切片Slice
+## 1.切片Slice
 
 相关文件：`include/leveldb/slice.h`。
 
@@ -221,7 +90,7 @@ inline int Slice::compare(const Slice& b) const {
 
 ```
 
-## 3. 整型与Slice编码方式
+## 2. 整型与Slice编码方式
 
 相关文件：`coding.h`、`coding.cc`。
 
@@ -231,7 +100,7 @@ LevelDB中为整型提供了两类编码方式，一类是定长编码，一类�
 
 另外，LevelDB为了便于从字节数组中划分Slice，其还提供了一种`LengthPrefixedSlice`的编码方式，在编码中将长度确定的Slice的长度作为Slice的前缀。
 
-### 3.1 整型定长编码
+### 2.1 整型定长编码
 
 LevelDB中整型的定长编码（*32bits*或*64bits*）方式非常简单，只需要将整型按照小端的顺序编码即可：
 
@@ -265,7 +134,7 @@ inline void EncodeFixed64(char* dst, uint64_t value) {
 
 定长整型的解码方式同理，这里不再赘述。
 
-### 3.2 整型变长编码
+### 2.2 整型变长编码
 
 当整型值较小时，LevelDB支持将其编码为变长整型，以减少其空间占用（对于值与类型最大值接近时，变长整型占用空间反而增加）。
 
@@ -320,7 +189,7 @@ char* EncodeVarint64(char* dst, uint64_t v) {
 
 在解码时，LevelDB只需要根据字节的最高位判断变长编码是否结束即可，这里不再赘述。另外，LevelDB提供了解码同时返回一些信息的方法，以方便在不通场景下的使用。
 
-### 3.3 长度确定的Slice编码
+### 2.3 长度确定的Slice编码
 
 长度确定的Slice的编码方式非常简单，只需要在原Slice之前加上用变长整型表示的Slice长度即可：
 
