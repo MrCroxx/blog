@@ -105,6 +105,19 @@ LevelDB重启时，无论是正常关闭还是异常退出，都需要恢复其�
 
 ### 2.1 LevelDB的恢复
 
+LevelDB被通过`DB::Open`方法打开时，在非常简单的初始化后，会调用`DB::Recover`方法来恢复自身状态。该方法会检查Lock文件是否被占用（LevelDB通过名为`LOCK`的文件避免多个LevelDB进程同时访问一个数据库）、目录是否存在、Current文件是否存在等。然后主要通过`VersionSet::Recover`与`DBImpl::RecoverLogFile`两个方法，分别恢复其VersionSet的状态与MemTable的状态。
+
+`VersionSet::Recover`方法在恢复VersionSet时，会读取Current文件来找到当前的Manifest文件。随后，LevelDB会读取Manifest中的全量数据，并通过这些数据构造单个Version，而不是为每条VersionEdit都创建一个Version。接下来，LevelDB需要写入新的Manifest文件，如果当前的Manifest文件较小，LevelDB会复用旧的Manifest文件，否则创建新的Manifest文件。
+
+`DBImpl::RecoverLogFile`方法在恢复MemTable的状态时，只需要顺序读取WAL，并根据其中Record构建MemTable中即可。需要注意的是，由于每次打开LevelDB时的Options可能不能，因此在RecoverLogFile期间，也可能出现MemTable超过`write_buffer_size`的情况。此时，LevelDB不会将MemTable转为Immutable MemTable，而是直接将其写入level-0。
+
+如果LevelDB恢复不成功，其会报告错误。此时，用户必须通过`Repairer`来尝试手动修复LevelDB。
+
+### 2.2 LevelDB的修复
+
+
+
+
 
 
 
