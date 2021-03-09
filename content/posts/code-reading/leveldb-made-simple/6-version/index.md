@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x06 Version [施工中]"
+title: "深入浅出LevelDB —— 0x06 Version"
 date: 2021-03-07T20:45:05+08:00
 lastmod: 2021-03-07T20:45:09+08:00
 draft: false
@@ -87,7 +87,25 @@ enum Tag {
 
 Manifest与Current文件是LevelDB保存在稳定存储中的文件版本信息，在LevelDB被打开后，其会先通过Current文件找到当前的Manifest文件，读取并反序列化其中数据，并在内存中维护文件版本信息，以便后续操作。
 
-LevelDB在内存中将每个版本的文件信息封装为`Version`保存，Version主要保存了该版本每个level中都有哪些文件（Version中还包括下一个Compact Pointer）。LevelDB将Version以双向链表的形式组织，每个Version的`next_`指针指向下一个Version，`prev_`指针指向上一个Version。
+LevelDB在内存中将每个版本的文件信息封装为`Version`保存，Version主要保存了该版本每个level中都有哪些文件（Version中还包括下一个Compact Pointer），Version中文件元数据被按层组织为`FileMetaData`结构体数组的vector容器。`FileMetaData`中的字段如下：
+
+```cpp
+
+struct FileMetaData {
+  FileMetaData() : refs(0), allowed_seeks(1 << 30), file_size(0) {}
+
+  int refs;
+  int allowed_seeks;  // Seeks allowed until compaction
+  uint64_t number;
+  uint64_t file_size;    // File size in bytes
+  InternalKey smallest;  // Smallest internal key served by table
+  InternalKey largest;   // Largest internal key served by table
+};
+
+```
+
+
+LevelDB将Version以双向链表的形式组织，每个Version的`next_`指针指向下一个Version，`prev_`指针指向上一个Version。
 
 LevelDB通过`VersionSet`结构来保存Version的双向链表，及其它不需要多版本记录的文件信息等（如`db_name`、`last_sequence_`、`log_number_`、`table_cache_`等）。`VersionSet`的`dummy_versions_`是Version双向链表的链头，其是一个无实际意义的Version对象，因此`dummy_versions_`的下一个Version是内存中保存的最旧的Version、`dummy_versions_`的上一个Version是最新的Version，`VersionSet`中还有一个`current_`指针指向链表中最新的Version。
 
@@ -115,13 +133,10 @@ LevelDB被通过`DB::Open`方法打开时，在非常简单的初始化后，会
 
 ### 2.2 LevelDB的修复
 
+在Manifest或SSTable文件损坏时，LevelDB为用户提供了`Repairer`（位于`db/repair.cc`）来尝试修复数据库文件。`Repaier`类中只提供了一个可见方法`Run`。
 
-
-
-
-
-
-
-
-
-# 施工中 ... ...
+`Run`方法会依次调用如下4个方法对LevelDB的数据进行修复：
+1. `FindFiles`：该方法会查找数据库目录中所有的Manifest、Log与SSTable文件。
+2. `ConvertLogFilesToTables`：该方法会依次遍历所有的Log文件，并对每个Log文件通过`ConvertLogToTable`方法生成SSTable文件。这一过程不会产生新的VersionEdit，VersionEdit由后续流程生成。
+3. `ExtractMetaData`：该方法会通过`ScanTable`方法扫描所有的SSTable，并生成其`FileMetaData`对象，以便恢复当前的Version。该方法遇到完全无法读取的SSTable时，会将其归档到`lost/`目录下；在遍历SSTable期间，会尽可能跳过无法解析的key；如果遇到无法解析并导致之后的文件都无法读取的key，则会通过`RepairTable`方法，将该key前能解析的key写入到新的SSTable中，并将原SSTable归档到`lost/`目录中。
+4. `WriteDescriptor`：该方法会根据恢复的Version，重新生成编号为1的Manifest文件，并将旧的Manifest文件归档到`lost/`目录下。
