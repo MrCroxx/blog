@@ -87,16 +87,28 @@ enum Tag {
 
 Manifest与Current文件是LevelDB保存在稳定存储中的文件版本信息，在LevelDB被打开后，其会先通过Current文件找到当前的Manifest文件，读取并反序列化其中数据，并在内存中维护文件版本信息，以便后续操作。
 
-LevelDB在打开时，会读取当前Manifest文件中的所有数据。这里再次回顾一下上一节中介绍的Manifest中的内容。每个Manifest文件起始的Record（准确的说应该是起始的两个Record）是该Manifest文件创建时全量的VersionEdit，后续的Record是增量的 VersionEdit。在LevelDB读取了当前Manifest
+LevelDB在内存中将每个版本的文件信息封装为`Version`保存，Version主要保存了该版本每个level中都有哪些文件（Version中还包括下一个Compact Pointer）。LevelDB将Version以双向链表的形式组织，每个Version的`next_`指针指向下一个Version，`prev_`指针指向上一个Version。
 
-![VersionEdit、Version、VersionSet关系图](assets/version-set.png "VersionEdit、Version、VersionSet关系图")
+LevelDB通过`VersionSet`结构来保存Version的双向链表，及其它不需要多版本记录的文件信息等（如`db_name`、`last_sequence_`、`log_number_`、`table_cache_`等）。`VersionSet`的`dummy_versions_`是Version双向链表的链头，其是一个无实际意义的Version对象，因此`dummy_versions_`的下一个Version是内存中保存的最旧的Version、`dummy_versions_`的上一个Version是最新的Version，`VersionSet`中还有一个`current_`指针指向链表中最新的Version。
+
+![VersionEdit、Version、VersionSet关系图](assets/version-set.svg "VersionEdit、Version、VersionSet关系图")
+
+在创建新版本时，LevelDB首先构造VersionEdit，然后通过`VersionSet::LogAndApply`方法，先将VersionEdit应用到Current Version，然后将增量的VersionEdit写入Manifest文件中。
+
+## 2. LevelDB重启后的恢复与修复
+
+LevelDB重启时，无论是正常关闭还是异常退出，都需要恢复其状态。这个状态既包括内存中VersionSet的状态，也包括MemTable的状态。
+
+在正常情况情况下，LevelDB可以通过Current文件找到当前的Manifest文件，并根据该文件恢复期VersionSet的状态；在通过WAL文件恢复其MemTable的状态。但是，如果数据库上一次关闭时异常退出（如掉电宕机等），且当时正在写Manifest文件或SSTable，可能导致Manifest或SSTable文件损坏。此时，需要用户通过`db/Repairer.cc`中提供的`Repairer`类的`Run()`方法来尝试手动修复LevelDB。
+
+本节主要介绍并分析LevelDB恢复与修复的流程与实现。
+
+### 2.1 LevelDB的恢复
+
+
 
 
 
 
 
 # 施工中 ... ...
-
-.log .ldb .sst LOG CURRENT manifest
-
-Comparator Name、Log Number、Prev Log Number、Next File Number、Last Sequence、Compact Pointers(level A -> level B)、Deleted File Meta(level, file number)、New File Meta(level, number, file size, smallest key, largest key)
