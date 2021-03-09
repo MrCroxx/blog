@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x01 总体概览 [施工中]"
+title: "深入浅出LevelDB —— 0x01 Overview [施工中]"
 date: 2021-03-04T19:37:23+08:00
 lastmod: 2021-03-04T19:37:27+08:00
 draft: false
