@@ -28,9 +28,142 @@ LSMTree中的MemTable既作为整合随机写入的buffer，又最为加速热�
 
 本文主要介绍并分析LevelDB中MemTable的设计与实现。
 
-相关文件：`db/skiplist.h`、`db/memtable.h`、`db/memtable.cc`、`db/dbformat.h`、`db/dbformat.cc`。
+相关文件：`db/skiplist.h`、`db/memtable.h`、`db/memtable.cc`、`db/dbformat.h`、`db/dbformat.cc`、`util/arena.h`、`util/arena.cc`。
 
-## 1. SkipList的实现
+## 1. 内存分配器Arena
+
+SkipList几乎是MemTable中唯一需要在堆上分配内存的部分。为了尽可能将SkipList的内存连续分配以充分利用缓存局部性，LevelDB在分配SkipList链表节点的内存时，没有通过默认的new/delete实现，而是自己实现了一个内存分配器Arena。因此，在介绍SkipList与MemTable前，我们先来关注内存分配器Arena的实现。
+
+相关文件：`util/arena.h`、`util/arena.cc`。
+
+`Arena`是LevelDB的内存分配器。LevelDB统一由Arena向操作系统申请内存，需要分配在堆上的数据结构再通过Arena申请一段连续的空间。
+
+与大多数存储系统一样，Arena在其生命周期中也不会主动将已经获得的内存归还给操作系统。此外，像Arena申请内存的数据结构也不会在Arena的生命周期中归还其占用的内存，这与数据结构的使用场景及使用相关。Arena的生命周期是与MemTable绑定的，每个MemTable都有自己的Arena。当MemTable销毁时，会将作为其字段的arena_一并销毁。
+
+Arena对外提供了以下方法：
+
+```cpp
+
+class Arena {
+ public:
+  Arena();
+
+  Arena(const Arena&) = delete;
+  Arena& operator=(const Arena&) = delete;
+
+  ~Arena();
+
+  // Return a pointer to a newly allocated memory block of "bytes" bytes.
+  char* Allocate(size_t bytes);
+
+  // Allocate memory with the normal alignment guarantees provided by malloc.
+  char* AllocateAligned(size_t bytes);
+
+  // Returns an estimate of the total memory usage of data allocated
+  // by the arena.
+  size_t MemoryUsage() const {
+    return memory_usage_.load(std::memory_order_relaxed);
+  }
+
+  // ... ...
+
+}
+
+```
+
+Arena对外的分配方法有两种，区别在于是否按照机器位数对齐。Arena内部主要通过4个字段实现：
+
+```cpp
+
+class Arena {
+
+  // ... ...
+
+ private:
+  char* AllocateFallback(size_t bytes);
+  char* AllocateNewBlock(size_t block_bytes);
+
+  // Allocation state
+  char* alloc_ptr_;
+  size_t alloc_bytes_remaining_;
+
+  // Array of new[] allocated memory blocks
+  std::vector<char*> blocks_;
+
+  // Total memory usage of the arena.
+  //
+  // TODO(costan): This member is accessed via atomics, but the others are
+  //               accessed without any locking. Is this OK?
+  std::atomic<size_t> memory_usage_;
+};
+
+```
+
+`std::vector<char*> blocks_`字段按block来保存已申请的内存空间，`char* alloc_ptr_`指向当前块中还未分配的内存地址，`size_t alloc_bytes_remaining_`记录了当前块中剩余的未分配空间大小，`std::atomic<size_t> memory_usage_`记录了Arena获取的总内存大小（包括了每个block的header大小）。注意，这里“当前块”并非向操作系统申请获得的最后一个块，因为Arena为了避免浪费，会为较大的请求分配单独的块（详见下文），这里的“当前块”是指除了这些单独分配的块外获得的最后一个块。
+
+当LevelDB通过`Allocate`方法向Arena请求内存时，Arena首先会检查当前块的剩余空间，如果当前块剩余空间能够满足分配需求，则直接将剩余空间分配给调用者，并调整`alloc_ptr`与`alloc_bytes_remaining`：
+
+```cpp
+
+inline char* Arena::Allocate(size_t bytes) {
+  // The semantics of what to return are a bit messy if we allow
+  // 0-byte allocations, so we disallow them here (we don't need
+  // them for our internal use).
+  assert(bytes > 0);
+  if (bytes <= alloc_bytes_remaining_) {
+    char* result = alloc_ptr_;
+    alloc_ptr_ += bytes;
+    alloc_bytes_remaining_ -= bytes;
+    return result;
+  }
+  return AllocateFallback(bytes);
+}
+
+```
+
+如果当前块剩余空间不足，Arena会调用内部的`AllocateFallback方法`：
+
+```cpp
+
+char* Arena::AllocateFallback(size_t bytes) {
+  if (bytes > kBlockSize / 4) {
+    // Object is more than a quarter of our block size.  Allocate it separately
+    // to avoid wasting too much space in leftover bytes.
+    char* result = AllocateNewBlock(bytes);
+    return result;
+  }
+
+  // We waste the remaining space in the current block.
+  alloc_ptr_ = AllocateNewBlock(kBlockSize);
+  alloc_bytes_remaining_ = kBlockSize;
+
+  char* result = alloc_ptr_;
+  alloc_ptr_ += bytes;
+  alloc_bytes_remaining_ -= bytes;
+  return result;
+}
+
+```
+
+`AllocateFallback`会判断需要分配的大小，如果需要分配的大小超过了默认块大小的$\frac{1}{4}$，为了避免浪费当前块的剩余空间，Arena会为其单独分配一个大小等于需求的块，此时不需要调整`alloc_ptr`与`alloc_bytes_remaining`字段，这样做的另一个好处是这一逻辑也可以用于分配需求大于默认块大小的空间；如果需要分配的大小没有超过默认块大小的$\frac{1}{4}$，此时不再使用当前块的剩余空间浪费也很小，因此直接申请一个默认大小的块，并从新块分配空间，同时调整`alloc_ptr`与`alloc_bytes_remaining`字段。
+
+`AllocateNewBlock`会通过`new`关键字向操作系统申请内存空间，并将获得的内存块保存到`blocks_`中，同时更新`memory_usage_`字段：
+
+```cpp
+
+char* Arena::AllocateNewBlock(size_t block_bytes) {
+  char* result = new char[block_bytes];
+  blocks_.push_back(result);
+  memory_usage_.fetch_add(block_bytes + sizeof(char*),
+                          std::memory_order_relaxed);
+  return result;
+}
+
+```
+
+在计算`memory_usage_`时，使用的空间除了需求的空间大小`block_bytes`外，还要加上`new`关键字为数组分配空间时为数组加上的header大小（这样`delete[]`关键字才能知道需要释放的数组大小）。
+
+## 2. SkipList的实现
 
 SkipList是一种多层链表查找结构，其实现较其它查找结构比简单很多。有关SkipList的概念本文不再赘述，不了解的读者可以自行查找其它资料。
 
@@ -149,7 +282,7 @@ class SkipList {
 
 ```
 
-SkipList的节点由`leveldb::SkipList::Node`类实现，`Node`的内存是在堆中分配的，其通过Arena分配器分配。有关Arena分配器的介绍详见本系列[深入浅出LevelDB —— 0x02 通用数据结构与工具](/posts/code-reading/leveldb-made-simple/2-basic-data-structure/#1-内存分配器arena)。
+SkipList的节点由`leveldb::SkipList::Node`类实现，`Node`的内存是在堆中分配的，其通过Arena分配器分配。有
 
 `Node`的实现如下：
 
@@ -214,9 +347,9 @@ Writes require external synchronization, most likely a mutex. Reads require a gu
 
 2. Node在被插入到SkipList中后，除了其next/prev指针外，其它数据都不会被修改。
 
-## 2. MemTable的实现
+## 3. MemTable的实现
 
-### 2.1 MemTable概览
+### 3.1 MemTable概览
 
 Memtable对SkipList进行了封装，SkipList只能提供key的插入与查找，而Memtable并对外提供了key/value的增删改查操作。MemTable还提供了正向迭代器与反向迭代器，让使用者能够更细粒度地访问MemTable中的数据。
 
@@ -300,9 +433,9 @@ MemTable的实例采用了引用计数，其初始计数为0，因此其构造�
 
 本节，我们主要关注MemTable是如何封装SkipList以实现key/value的增删改查的。
 
-### 2.2 MemTable的实现
+### 3.2 MemTable的实现
 
-#### 2.2.1 key的封装
+#### 3.2.1 key的封装
 
 如前文所述，SkipList数据结构是一个只有key的查找结构，为了能够通过 SkipList同时保存key/value等数据，就要将key/value及其它数据封装成一个key。LevelDB中key的封装规则如下图所示。
 
@@ -315,7 +448,7 @@ InternalKey内部由3部分组成：
 - SequenceNumber：全局单调递增序号，当LevelDB更新数据时（增/删/改）递增，保证后发生操作的SequenceNumber值大于先发生的操作，MemTable通过该字段在Insert-Only的SkipList上实现MVCC的增删改查。
 - ValueType：用来表示操作类型枚举值，其值只有两种：`kTypeDeletion`与`kTypeValue`。其中`kTypeDeletion`表示该Key是删除操作，`kTypeValue`表示该Key是增/改操作。
 
-#### 2.2.2 增删改查的实现
+#### 3.2.2 增删改查的实现
 
 在介绍了MemTable对SkipList的Key封装后，我们来分析MemTable如何通过这种封装来在Insert-Only的SkipList上实现key/value的增删改查操作。
 
@@ -412,7 +545,7 @@ bool MemTable::Get(const LookupKey& key, std::string* value, Status* s) {
 2. 判断当前位置的UserKey是否是待查找的Userkey，如果不是则说明MemTable中没有待查找的UserKey的记录；
 3. 检查该Key的ValueType，如果是`kTypeDeletion`说明该UserKey被用户删除；如果是`kTypeValue`说明待查找的UserKey存在，返回当前最新版本即可。
 
-#### 2.2.3 key类型小结
+#### 3.2.3 key类型小结
 
 LevelDB为了在Insert-Only的SkipList上实现key/value的增删改查封装了多种不同的key，这里总结一下出现的key以避免混淆：
 
