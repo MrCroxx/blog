@@ -24,12 +24,28 @@ resources:
 
 本节将介绍并分析LevelDB中LSMTree的Compaction操作的实现。
 
-## 1. Compcation分类
+## 1. Compaction的类型
+
+
 
 LevelDB中LSMTree的Compaction操作分为两类，分别是Minor Compaction与Major Compaction。
 
-- Minor Compaction（Immutable MemTable -> SSTable）：将Immutable MemTable直接转为SSTable写入。Minor Compaction不会对Immutable MemTable中
-- Major Compaction（Low-level SSTable -> High-level SSTable）：
+- Minor Compaction（Immutable MemTable -> SSTable）：将Immutable MemTable转储为level-0 SSTable写入。
+- Major Compaction（Low-level SSTable -> High-level SSTable）：合并压缩第i层的SSTable，生成第i+1层的SSTable。
+
+在LevelDB中，Major Compaction还可以按照触发条件分为三类：
+
+- Size Compaction：
+
+- Seek Compaction：
+
+- Manual Compaction：
+
+## 2. Compaction的触发
+
+
+
+
 
 # 施工中 ... ...
 
