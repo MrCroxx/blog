@@ -399,26 +399,108 @@ struct LRUHandle {
 
 ### 1.4 LRUCache
 
+```cpp
 
+class LRUCache {
 
+// ... ...
 
+ private:
 
+  // ... ...
 
+  // Initialized before use.
+  size_t capacity_;
 
+  // mutex_ protects the following state.
+  mutable port::Mutex mutex_;
+  size_t usage_ GUARDED_BY(mutex_);
+
+  // Dummy head of LRU list.
+  // lru.prev is newest entry, lru.next is oldest entry.
+  // Entries have refs==1 and in_cache==true.
+  LRUHandle lru_ GUARDED_BY(mutex_);
+
+  // Dummy head of in-use list.
+  // Entries are in use by clients, and have refs >= 2 and in_cache==true.
+  LRUHandle in_use_ GUARDED_BY(mutex_);
+
+  HandleTable table_ GUARDED_BY(mutex_);
+};
+
+```
+
+`LRUCache`中，除了容量`capacity_`外，其它字段都通过互斥锁`mutex_`来保护并发操作，这些字段包括：LRUCache的当前用量、*LRU*链表`lru_`、*in-use*链表`in_use_`、和哈希表`table_`。
+
+```cpp
+
+void LRUCache::Ref(LRUHandle* e) {
+  if (e->refs == 1 && e->in_cache) {  // If on lru_ list, move to in_use_ list.
+    LRU_Remove(e);
+    LRU_Append(&in_use_, e);
+  }
+  e->refs++;
+}
+
+void LRUCache::Unref(LRUHandle* e) {
+  assert(e->refs > 0);
+  e->refs--;
+  if (e->refs == 0) {  // Deallocate.
+    assert(!e->in_cache);
+    (*e->deleter)(e->key(), e->value);
+    free(e);
+  } else if (e->in_cache && e->refs == 1) {
+    // No longer in use; move to lru_ list.
+    LRU_Remove(e);
+    LRU_Append(&lru_, e);
+  }
+}
+
+void LRUCache::LRU_Remove(LRUHandle* e) {
+  e->next->prev = e->prev;
+  e->prev->next = e->next;
+}
+
+void LRUCache::LRU_Append(LRUHandle* list, LRUHandle* e) {
+  // Make "e" newest entry by inserting just before *list
+  e->next = list;
+  e->prev = list->prev;
+  e->prev->next = e;
+  e->next->prev = e;
+}
+
+```
+
+除了`LRU_Remove`与`LRU_Append`方法用来操作链表外，`LRUCache`还提供了`Ref`与`Unref`方法，在操作链表的同时处理LRUHandle的引用计数。`Ref`方法将LRUHandle的引用计数加一，并将其从`lru_`链表中转移到`in_use_`链表中；`Unref`方法将引用计数减一，当LRUHandle的引用计数减为1时，将其从`in_use_`链表中归还给`lru_`链表（其最后一个引用为链表指针的引用），当LRUHandle的引用计数减为0时，通过其`deleter`销毁该对象。
+
+`LRUCache`中其它的方法实现比较简单，这里不再赘述。
+
+### 1.5 ShardedLRUCache
+
+`SharedLRUCache`是最终实现`Cache`接口的方法。正如前文所介绍的，ShardedLRUCache中保存了若干个`LRUCache`，并根据插入的key的哈希将其分配到相应的LRUCache中。因为每个LRUCache有独立的锁，这种方式可以减少锁的争用，以优化并行程序的性能。
+
+```cpp
+
+class ShardedLRUCache : public Cache {
+ private:
+  LRUCache shard_[kNumShards];
+  port::Mutex id_mutex_;
+  uint64_t last_id_;
+
+  static inline uint32_t HashSlice(const Slice& s) {
+    return Hash(s.data(), s.size(), 0);
+  }
+
+  static uint32_t Shard(uint32_t hash) { return hash >> (32 - kNumShardBits); }
+
+  // ... ...
+
+}
+
+```
+
+`ShardedLRUCache`通过`HashSlice`方法对key进行一次哈希，并通过`Shard`方法为其分配shard。`ShardedLRUCache`中其它方法都是对shard的操作与对`LRUCache`的封装，这里也不再赘述。
 
 
 
 # 施工中 ... ...
-
-### x.1 LRUHandle、HandleTable
-
-
-`include/leveldb/cache.h`
-
-`Cache` 内部保证同步，线程安全，k->v缓存接口 **详细分析**
-
-内部实现：`util/cache.cc`  
-
-
-`ShardedLRUCache`
-
