@@ -26,15 +26,17 @@ resources:
 
 ## 1. Compcation分类
 
-LevelDB中LSMTree的Compaction操作分为两种，分别是Minor Compaction与Major Compaction。二者的对象、功能等如下表所示：
+LevelDB中LSMTree的Compaction操作分为两类，分别是Minor Compaction与Major Compaction。
 
-| Compaction Type <div style="width:8em"></div> | 对象 <div style="width:20em"></div> | 描述 <div style="width:40em"></div> |
-| :-: | :-: | :-: |
-| Minor Compaction | Immutable MemTable -> Level-0 SSTable |  |
-| Major Compaction | Low-level SSTable -> High-level SSTable | |
+- Minor Compaction（Immutable MemTable -> SSTable）：将Immutable MemTable直接转为SSTable写入。Minor Compaction不会对Immutable MemTable中
+- Major Compaction（Low-level SSTable -> High-level SSTable）：
 
 # 施工中 ... ...
 
 DBImpl::BackgroundCompaction
 
 DBImplCompactMemTable
+
+Minor Compaction > Manual Compaction > Size Compaction > Seek Compaction
+
+btw. Tier Compaction ( Tiering vs. Leveling )
