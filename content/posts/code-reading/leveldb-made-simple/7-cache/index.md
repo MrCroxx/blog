@@ -211,13 +211,13 @@ Cache中声明一个结构体`Handle`。从Cache用户的视角来看，该Handl
 
 `Insert`方法是Cache用户将key/value插入为Cache缓存项的方法，其参数`key`是Slice引用类型，`value`是任意类型指针，`size_t`用来告知Cache该缓存项占用容量。显然，Cache不需要知道value具体占用多大空间，也无从得知其类型，这说明Cache的用户需要自己控制value的空间释放。`Insert`方法的最后一个参数`*deleter`即用来释放value空间的方法（LevelDB内部实现的Cache会深拷贝`key`的数据，不需要用户释放）。
 
-为了避免释放仍在使用的缓存项，同时提供线程安全地访问，缓存项的释放需要依赖引用计数。当用户更新了key相同的缓存或删除key相应的缓存时，Cache只会将其移出其管理结构，不会释放其内存空间。只有当其引用计数归零时才会通过之前传入的`deleter`释放。用户对缓存项引用计数的操作即通过`Handle`来实现。用户在通过`Insert`或`LookUp`方法得到缓存项的Handle时，缓存项的引用计数会+1。两个方法声明的注释指出，用户在不需要继续使用该缓存项时，需要调用`Release`方法并传入该缓存项的Handle。`Release`方法会使缓存项的引用计数-1。
+为了避免释放仍在使用的缓存项，同时提供线程安全地访问，缓存项的释放需要依赖引用计数。当用户更新了key相同的缓存或删除key相应的缓存时，Cache只会将其移出其管理结构，不会释放其内存空间。只有当其引用计数归零时才会通过之前传入的`deleter`释放。用户对缓存项引用计数的操作即通过`Handle`来实现。用户在通过`Insert`或`LookUp`方法得到缓存项的Handle时，缓存项的引用计数会+1。两个方法声明的注释部分指出，用户在不需要继续使用该缓存项时，需要调用`Release`方法并传入该缓存项的Handle。`Release`方法会使缓存项的引用计数-1。
 
 `Cache`中还提供了如“删除缓存项”、“自然数生成”、“清空缓存”、“估算使用容量”等方法，这里不做关注的重点。
 
-LevelDB中内建了一个队`Cache`接口的实现，其位于`util/cache.cc`中。接下来，笔者将介绍LevelDB中`Cache`实现的设计与源码实现。
+### 1.2 LevelDB中LRU缓存设计
 
-### 1.2 Cache实现 - 设计
+LevelDB中内建了一个`Cache`接口的实现，其位于`util/cache.cc`中。接下来，笔者将介绍LevelDB中`Cache`实现的设计与源码实现。
 
 通过该文件开头的注释，我们能够对其实现有一个初步的认识：
 
@@ -244,15 +244,160 @@ LevelDB中内建了一个队`Cache`接口的实现，其位于`util/cache.cc`中
 
 ```
 
-LevelDB的Cache实现中有两个链表：*in-use*链表和*LRU*链表。*in-use*链表上保存的是在Cache中且正在被client使用的缓存项，
+LevelDB的Cache实现中有两个用来保存缓存项`LRUHandle`的链表：*in-use*链表和*LRU*链表。*in-use*链表上无序保存着在LRUCache中且正在被client使用的LRUHandle（该链表仅用来保持LRUHandle引用计数）；*LRU*链表上按照最近使用的顺序保存着当前在LRUCache中但目前没有被用户使用的LRUHandle。LRUHandle在两个链表间的切换由`Ref`和`UnRef`实现。
 
-接下来，我们自底向上地介绍并分析LevelDB中内建的对`Cache`接口的实现。
+另外，在LRUCache的实现中，在`Insert`方法插入LRUHandle时，只会从*LRU*链表中逐出LRUHandle，相当于*in-use*链表中的LRUHandle会被LRUCache “Pin”住，永远都不会逐出。也就是说，对于LRUCache中的每个LRUHandle，其只有如下几种状态：
 
-### 1.2 Cache实现 - LRUHandle、HandleTable
+- 对于还没存入LRUCache的LRUHandle，不在任一链表上（显然）。
+- 当前在LRUCache中，且正在被client使用的LRUHandle，在*in-use*链表上无序保存。
+- 当前在LRUCache中，当前未被client使用的LRUHandle，在*LRU*链表上按LRU顺序保存。
+- 之前在LRUCache中，但①被用户通过`Erase`方法从LRUCache中删除，或②用户通过`Insert`方法更新了该key的LRUHandle，或③LRUCache被销毁时，LRUHandle既不在*in-use*链表上也不在*LRU*链表上。此时，该LRUHandle在等待client通过`Release`方法释放引用计数以销毁。
 
+LRUCache为了能够快速根据key来找到相应的LRUHandle，而不需要遍历链表，其还组装了一个哈希表`HandleTable`。LevelDB的哈希表与哈希函数都使用了自己的实现。
 
+LRUCache其实已经实现了完整的LRU缓存的功能。但是LevelDB又将其封装为`ShardedLRUCache`，并让`ShardedLRUCache`实现了`Cache`接口。ShardedLRUCache中保存了若干个`LRUCache`，并根据插入的key的哈希将其分配到相应的LRUCache中。因为每个LRUCache有独立的锁，这种方式可以减少锁的争用，以优化并行程序的性能。
 
+接下来，我们自底向上地介绍并分析LevelDB中LRUHandle、HandleTable、LRUCache、ShardedLRUCache的实现。
 
+### 1.2 LRUHandle
+
+LRUHandle是表示缓存项的结构体，其源码如下：
+
+```cpp
+
+// An entry is a variable length heap-allocated structure.  Entries
+// are kept in a circular doubly linked list ordered by access time.
+struct LRUHandle {
+  void* value;
+  void (*deleter)(const Slice&, void* value);
+  LRUHandle* next_hash;
+  LRUHandle* next;
+  LRUHandle* prev;
+  size_t charge;  // TODO(opt): Only allow uint32_t?
+  size_t key_length;
+  bool in_cache;     // Whether entry is in the cache.
+  uint32_t refs;     // References, including cache reference, if present.
+  uint32_t hash;     // Hash of key(); used for fast sharding and comparisons
+  char key_data[1];  // Beginning of key
+
+  Slice key() const {
+    // next_ is only equal to this if the LRU handle is the list head of an
+    // empty list. List heads never have meaningful keys.
+    assert(next != this);
+
+    return Slice(key_data, key_length);
+  }
+};
+
+```
+
+`LRUHandle`中有记录key（深拷贝）、value（浅拷贝）及相关哈希值、引用计数、占用空间、是否仍在LRUCache中等字段，这里不再赘述。我们主要关注LRUHandle中的三个`LRUHandle*`类型的指针。其中`next`指针与`prev`指针，用来实现`LRUCache`中的两个链表，而`next_hash`是哈希表`HandleTable`为了解决哈希冲突采用拉链法的链指针。
+
+### 1.3 HandleTable
+
+接下来我们来分析`HandleTable`的实现。`HandleTable`实现了一个可扩展哈希表。`HandleTable`中只有3个字段：
+
+```cpp
+
+ private:
+  // The table consists of an array of buckets where each bucket is
+  // a linked list of cache entries that hash into the bucket.
+  uint32_t length_;
+  uint32_t elems_;
+  LRUHandle** list_;
+
+```
+
+`length_`字段记录了`HandleTable`中solt的数量，`elems_`字段记录了当前`HandleTable`中已用solt的数量，`list_`字段是`HandleTable`的bucket数组。
+
+接下来我们简单分析一下`HandleTable`对可扩展哈希表的实现。
+
+```cpp
+
+  // Return a pointer to slot that points to a cache entry that
+  // matches key/hash.  If there is no such cache entry, return a
+  // pointer to the trailing slot in the corresponding linked list.
+  LRUHandle** FindPointer(const Slice& key, uint32_t hash) {
+    LRUHandle** ptr = &list_[hash & (length_ - 1)];
+    while (*ptr != nullptr && ((*ptr)->hash != hash || key != (*ptr)->key())) {
+      ptr = &(*ptr)->next_hash;
+    }
+    return ptr;
+  }
+
+```
+
+`FindPointer`方法是根据key与其hash查找LRUHandle的方法。如果key存在则返回其LRUHandle的指针，如果不存在则返回指向可插入的solt的指针。
+
+```cpp
+
+  void Resize() {
+    uint32_t new_length = 4;
+    while (new_length < elems_) {
+      new_length *= 2;
+    }
+    LRUHandle** new_list = new LRUHandle*[new_length];
+    memset(new_list, 0, sizeof(new_list[0]) * new_length);
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < length_; i++) {
+      LRUHandle* h = list_[i];
+      while (h != nullptr) {
+        LRUHandle* next = h->next_hash;
+        uint32_t hash = h->hash;
+        LRUHandle** ptr = &new_list[hash & (new_length - 1)];
+        h->next_hash = *ptr;
+        *ptr = h;
+        h = next;
+        count++;
+      }
+    }
+    assert(elems_ == count);
+    delete[] list_;
+    list_ = new_list;
+    length_ = new_length;
+  }
+
+```
+
+`Resize`方法是扩展哈希表的方法。该方法会倍增solt大小，并重新分配空间。在重新分配solt的空间后，再对所有原有solt中的LRUHandle重哈希。最后释放旧的solt的空间。
+
+```cpp
+
+  LRUHandle* Lookup(const Slice& key, uint32_t hash) {
+    return *FindPointer(key, hash);
+  }
+
+  LRUHandle* Insert(LRUHandle* h) {
+    LRUHandle** ptr = FindPointer(h->key(), h->hash);
+    LRUHandle* old = *ptr;
+    h->next_hash = (old == nullptr ? nullptr : old->next_hash);
+    *ptr = h;
+    if (old == nullptr) {
+      ++elems_;
+      if (elems_ > length_) {
+        // Since each cache entry is fairly large, we aim for a small
+        // average linked list length (<= 1).
+        Resize();
+      }
+    }
+    return old;
+  }
+
+  LRUHandle* Remove(const Slice& key, uint32_t hash) {
+    LRUHandle** ptr = FindPointer(key, hash);
+    LRUHandle* result = *ptr;
+    if (result != nullptr) {
+      *ptr = result->next_hash;
+      --elems_;
+    }
+    return result;
+  }
+
+```
+
+`HandleTable`公开的`LookUp`、`Insert`、`Remove`是对`FindPointer`与`Resize`的封装，这里不再赘述。
+
+### 1.4 LRUCache
 
 
 
