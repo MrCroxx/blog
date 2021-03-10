@@ -209,13 +209,42 @@ Cache中声明一个结构体`Handle`。从Cache用户的视角来看，该Handl
 
 ```
 
-`Insert`方法是Cache用户将key/value插入为Cache缓存项的方法，其参数`key`是Slice引用类型，`value`是任意类型指针，`size_t`用来告知Cache该缓存项占用容量。显然，Cache不需要知道value具体占用多大空间，也无从得知其类型，这说明Cache的用户需要自己控制value的空间释放。`Insert`方法的最后一个参数`*deleter`即用来释放value空间的方法，当Cache逐出缓存项时，会调用该方法，用户通过该方法实现对value空间的回收（LevelDB内部实现的Cache会深拷贝`key`的数据，不需要用户释放）。
+`Insert`方法是Cache用户将key/value插入为Cache缓存项的方法，其参数`key`是Slice引用类型，`value`是任意类型指针，`size_t`用来告知Cache该缓存项占用容量。显然，Cache不需要知道value具体占用多大空间，也无从得知其类型，这说明Cache的用户需要自己控制value的空间释放。`Insert`方法的最后一个参数`*deleter`即用来释放value空间的方法（LevelDB内部实现的Cache会深拷贝`key`的数据，不需要用户释放）。
 
-这里存在一个问题：用户在向容量已满的Cache插入新的缓存项时，Cache的要求自动逐出旧的缓存项，此时Cache会通过该缓存项的`deleter`释放该缓存项的空间。但如果此时该缓存项让在被使用，这会导致其内存被提前回收，后续对该缓存项的访问可能导致内存无效访问。
-
-为了解决这一问题，Cache需要“Pin”住仍在使用中的缓存项，以避免逐出正在使用中的缓存。而通过`Handle`，用户可以告知Cache什么时候什么时候可以“UnPin”缓存项。在`Insert`和`LookUp`方法声明的注释中可以看到，用户在不需要继续使用该缓存项时，需要调用`Release`方法并传入该缓存项的Handle，这一过程即为通知Cache可以“UnPin”缓存项的过程。被“UnPin”的缓存项即可被Cache在必要时逐出。另外，因为同一个缓存项可能被多个线程同时适应，因此“Pin”与“UnPin”还要依赖引用计数，只有当所有的使用者都不再使用该缓存项时，才能“UnPin”该缓存项。
+为了避免释放仍在使用的缓存项，同时提供线程安全地访问，缓存项的释放需要依赖引用计数。当用户更新了key相同的缓存或删除key相应的缓存时，Cache只会将其移出其管理结构，不会释放其内存空间。只有当其引用计数归零时才会通过之前传入的`deleter`释放。用户对缓存项引用计数的操作即通过`Handle`来实现。用户在通过`Insert`或`LookUp`方法得到缓存项的Handle时，缓存项的引用计数会+1。两个方法声明的注释指出，用户在不需要继续使用该缓存项时，需要调用`Release`方法并传入该缓存项的Handle。`Release`方法会使缓存项的引用计数-1。
 
 `Cache`中还提供了如“删除缓存项”、“自然数生成”、“清空缓存”、“估算使用容量”等方法，这里不做关注的重点。
+
+LevelDB中内建了一个队`Cache`接口的实现，其位于`util/cache.cc`中。接下来，笔者将介绍LevelDB中`Cache`实现的设计与源码实现。
+
+### 1.2 Cache实现 - 设计
+
+通过该文件开头的注释，我们能够对其实现有一个初步的认识：
+
+```cpp
+
+// LRU cache implementation
+//
+// Cache entries have an "in_cache" boolean indicating whether the cache has a
+// reference on the entry.  The only ways that this can become false without the
+// entry being passed to its "deleter" are via Erase(), via Insert() when
+// an element with a duplicate key is inserted, or on destruction of the cache.
+//
+// The cache keeps two linked lists of items in the cache.  All items in the
+// cache are in one list or the other, and never both.  Items still referenced
+// by clients but erased from the cache are in neither list.  The lists are:
+// - in-use:  contains the items currently referenced by clients, in no
+//   particular order.  (This list is used for invariant checking.  If we
+//   removed the check, elements that would otherwise be on this list could be
+//   left as disconnected singleton lists.)
+// - LRU:  contains the items not currently referenced by clients, in LRU order
+// Elements are moved between these lists by the Ref() and Unref() methods,
+// when they detect an element in the cache acquiring or losing its only
+// external reference.
+
+```
+
+LevelDB的Cache实现中有两个链表：*in-use*链表和*LRU*链表。*in-use*链表上保存的是在Cache中且正在被client使用的缓存项，
 
 接下来，我们自底向上地介绍并分析LevelDB中内建的对`Cache`接口的实现。
 
