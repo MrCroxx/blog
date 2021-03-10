@@ -1,7 +1,7 @@
 ---
-title: "深入浅出LevelDB —— 0x07 Cache [施工中]"
+title: "深入浅出LevelDB —— 0x07 Cache"
 date: 2021-03-10T11:17:19+08:00
-lastmod: 2021-03-10T11:17:22+08:00
+lastmod: 2021-03-10T19:28:42+08:00
 draft: false
 keywords: []
 description: ""
@@ -15,23 +15,20 @@ resources:
 
 *本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
 
-
 <!--more-->
 
 ## 0. 引言
 
 为了减少热点数据访问时磁盘I/O频繁导致的效率问题，LevelDB在访问SSTable时加入了缓存。LevelDB中使用的缓存从功能上可分为两种：
 
-- BlockCache（Options.boock_cache）：缓存最近使用的SSTable中DataBlock数据。
-- TableCache（Options.max_open_files）：缓存最近打开的SSTable中的部分元数据（如索引等）。
+- BlockCache：缓存最近使用的SSTable中DataBlock数据。
+- TableCache：缓存最近打开的SSTable中的部分元数据（如索引等）。
 
 无论是BlockCache还是TableCache，其内部的核心实现都是LRU缓存（Least-Recently-Used）。该LRU缓存实现了`include/leveldb/cache.h`定义的缓存接口。
 
-本文主要介绍并分析LevelDB中Cache的设计与实现，并简单介绍BlockCache与TableCache对LRU缓存的封装。
+本文主要介绍并分析LevelDB中Cache的设计与实现。关于BlockCache与TableCache的使用，将在本系列后续文章介绍LevelDB读写时介绍。
 
-## 1. LRU缓存设计与实现
-
-### 1.1 Cache接口
+## 1.1 Cache接口
 
 LevelDB的`include/leveldb/cache.h`定义了其内部使用的缓存接口，在介绍LevelDB中LRU缓存的实现前，我们首先关注该文件中定义的缓存接口：
 
@@ -170,7 +167,7 @@ class LEVELDB_EXPORT Cache {
 
 ```
 
-`Cache`要求析构时通过`deleter`来销毁其缓存的内容。该是插入缓存项时指定的，我们先继续分析。
+`Cache`要求析构时通过回调函数`deleter`来销毁其缓存的内容。该是插入缓存项时指定的，我们先继续分析。
 
 ```cpp
 
@@ -209,13 +206,15 @@ Cache中声明一个结构体`Handle`。从Cache用户的视角来看，该Handl
 
 ```
 
-`Insert`方法是Cache用户将key/value插入为Cache缓存项的方法，其参数`key`是Slice引用类型，`value`是任意类型指针，`size_t`用来告知Cache该缓存项占用容量。显然，Cache不需要知道value具体占用多大空间，也无从得知其类型，这说明Cache的用户需要自己控制value的空间释放。`Insert`方法的最后一个参数`*deleter`即用来释放value空间的方法（LevelDB内部实现的Cache会深拷贝`key`的数据，不需要用户释放）。
+`Insert`方法是Cache用户将key/value插入为Cache缓存项的方法，其参数`key`是Slice引用类型，`value`是任意类型指针，`size_t`用来告知Cache该缓存项占用容量。显然，Cache不需要知道value具体占用多大空间，也无从得知其类型，这说明Cache的用户需要自己控制value的空间释放。`Insert`方法的最后一个参数回调函数`*deleter`即用来释放value空间的方法（LevelDB内部实现的Cache会深拷贝`key`的数据，不需要用户释放）。
 
-为了避免释放仍在使用的缓存项，同时提供线程安全地访问，缓存项的释放需要依赖引用计数。当用户更新了key相同的缓存或删除key相应的缓存时，Cache只会将其移出其管理结构，不会释放其内存空间。只有当其引用计数归零时才会通过之前传入的`deleter`释放。用户对缓存项引用计数的操作即通过`Handle`来实现。用户在通过`Insert`或`LookUp`方法得到缓存项的Handle时，缓存项的引用计数会+1。两个方法声明的注释部分指出，用户在不需要继续使用该缓存项时，需要调用`Release`方法并传入该缓存项的Handle。`Release`方法会使缓存项的引用计数-1。
+为了避免释放仍在使用的缓存项，同时提供线程安全地访问，缓存项的释放需要依赖引用计数。当用户更新了key相同的缓存或删除key相应的缓存时，Cache只会将其移出其管理结构，不会释放其内存空间。只有当其引用计数归零时才会通过之前传入的回调函数`deleter`释放。用户对缓存项引用计数的操作即通过`Handle`来实现。用户在通过`Insert`或`LookUp`方法得到缓存项的Handle时，缓存项的引用计数会+1。两个方法声明的注释部分指出，用户在不需要继续使用该缓存项时，需要调用`Release`方法并传入该缓存项的Handle。`Release`方法会使缓存项的引用计数-1。
 
 `Cache`中还提供了如“删除缓存项”、“自然数生成”、“清空缓存”、“估算使用容量”等方法，这里不做关注的重点。
 
-### 1.2 LevelDB中LRU缓存设计
+## 2. Cache的实现
+
+### 2.1 LevelDB中LRU缓存设计
 
 LevelDB中内建了一个`Cache`接口的实现，其位于`util/cache.cc`中。接下来，笔者将介绍LevelDB中`Cache`实现的设计与源码实现。
 
@@ -259,7 +258,7 @@ LRUCache其实已经实现了完整的LRU缓存的功能。但是LevelDB又将�
 
 接下来，我们自底向上地介绍并分析LevelDB中LRUHandle、HandleTable、LRUCache、ShardedLRUCache的实现。
 
-### 1.2 LRUHandle
+### 2.2 LRUHandle
 
 LRUHandle是表示缓存项的结构体，其源码如下：
 
@@ -293,7 +292,7 @@ struct LRUHandle {
 
 `LRUHandle`中有记录key（深拷贝）、value（浅拷贝）及相关哈希值、引用计数、占用空间、是否仍在LRUCache中等字段，这里不再赘述。我们主要关注LRUHandle中的三个`LRUHandle*`类型的指针。其中`next`指针与`prev`指针，用来实现`LRUCache`中的两个链表，而`next_hash`是哈希表`HandleTable`为了解决哈希冲突采用拉链法的链指针。
 
-### 1.3 HandleTable
+### 2.3 HandleTable
 
 接下来我们来分析`HandleTable`的实现。`HandleTable`实现了一个可扩展哈希表。`HandleTable`中只有3个字段：
 
@@ -397,7 +396,7 @@ struct LRUHandle {
 
 `HandleTable`公开的`LookUp`、`Insert`、`Remove`是对`FindPointer`与`Resize`的封装，这里不再赘述。
 
-### 1.4 LRUCache
+### 2.4 LRUCache
 
 ```cpp
 
@@ -475,7 +474,7 @@ void LRUCache::LRU_Append(LRUHandle* list, LRUHandle* e) {
 
 `LRUCache`中其它的方法实现比较简单，这里不再赘述。
 
-### 1.5 ShardedLRUCache
+### 2.5 ShardedLRUCache
 
 `SharedLRUCache`是最终实现`Cache`接口的方法。正如前文所介绍的，ShardedLRUCache中保存了若干个`LRUCache`，并根据插入的key的哈希将其分配到相应的LRUCache中。因为每个LRUCache有独立的锁，这种方式可以减少锁的争用，以优化并行程序的性能。
 
@@ -500,7 +499,3 @@ class ShardedLRUCache : public Cache {
 ```
 
 `ShardedLRUCache`通过`HashSlice`方法对key进行一次哈希，并通过`Shard`方法为其分配shard。`ShardedLRUCache`中其它方法都是对shard的操作与对`LRUCache`的封装，这里也不再赘述。
-
-
-
-# 施工中 ... ...
