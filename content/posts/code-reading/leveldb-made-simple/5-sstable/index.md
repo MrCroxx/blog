@@ -5,7 +5,7 @@ lastmod: 2021-03-07T19:57:30+08:00
 draft: false
 keywords: []
 description: ""
-tags: ["LevelDB", "LSMTree"]
+tags: ["LevelDB", "LSM-Tree"]
 categories: ["深入浅出LevelDB"]
 author: ""
 resources:

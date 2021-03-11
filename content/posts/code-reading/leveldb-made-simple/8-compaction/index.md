@@ -5,7 +5,7 @@ lastmod: 2021-03-11T14:16:22+08:00
 draft: false
 keywords: []
 description: ""
-tags: ["LevelDB", "LSMTree"]
+tags: ["LevelDB", "LSM-Tree"]
 categories: ["深入浅出LevelDB"]
 author: ""
 resources:
@@ -20,13 +20,13 @@ resources:
 
 ## 0. 引言
 
-正如Rebalance与Spill之于B+Tree，Compaction操作是LSMTree的核心。
+正如Rebalance与Spill之于B+Tree，Compaction操作是LSM-Tree的核心。
 
-本节将介绍并分析LevelDB中LSMTree的Compaction操作的实现。
+本节将介绍并分析LevelDB中LSM-Tree的Compaction操作的实现。
 
 ## 1. Compaction的类型
 
-LevelDB中LSMTree的Compaction操作分为两类，分别是Minor Compaction与Major Compaction。
+LevelDB中LSM-Tree的Compaction操作分为两类，分别是Minor Compaction与Major Compaction。
 
 - Minor Compaction（Immutable MemTable -> SSTable）：将Immutable MemTable转储为level-0 SSTable写入。
 - Major Compaction（Low-level SSTable -> High-level SSTable）：合并压缩第i层的SSTable，生成第i+1层的SSTable。
@@ -350,6 +350,15 @@ void DBImpl::BackgroundCall() {
 
 ### 2.5 Seek Compaction的触发
 
+在介绍Seek Compaction触发条件前，我们先来看为什么需要Seek Compaction。
+
+在LSM-Tree中，除了level-0外，虽然每个level的SSTable间相互没有overlap，但是level与level间的SSTable是可以有overlap的，如下图中的实例所示。
+
+![overlap](assets/overlap.svg "overlap")
+
+在本例中，如果查找键`18`时在level-k前都没有命中，则查询会下推到level-k。在level-k层中，因为SSTable(k, i)的key范围覆盖了`18`，LevelDB会在该SSTable中查找是否存在要查找的key `18`（实际上查找的是该SSTable在TableCache中的），该操作被称为“seek”。
+
+![seek miss](assets/seek-miss.svg "seek miss")
 
 
 ### 2.6 Manual Compaction的触发
@@ -364,7 +373,5 @@ void DBImpl::BackgroundCall() {
 DBImpl::BackgroundCompaction
 
 DBImplCompactMemTable
-
-Minor Compaction > Manual Compaction > Size Compaction > Seek Compaction
 
 btw. Tier Compaction ( Tiering vs. Leveling )
