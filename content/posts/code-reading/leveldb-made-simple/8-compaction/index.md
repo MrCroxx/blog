@@ -356,19 +356,180 @@ void DBImpl::BackgroundCall() {
 
 ![overlap](assets/overlap.svg "overlap")
 
-在本例中，如果查找键`18`时在level-k前都没有命中，则查询会下推到level-k。在level-k层中，因为SSTable(k, i)的key范围覆盖了`18`，LevelDB会在该SSTable中查找是否存在要查找的key `18`（实际上查找的是该SSTable在TableCache中的），该操作被称为“seek”。
+在本例中，如果查找键`18`时在level-k前都没有命中，则查询会下推到level-k。在level-k层中，因为SSTable(k, i)的key范围覆盖了`18`，LevelDB会在该SSTable中查找是否存在要查找的key `18`（实际上查找的是该SSTable在TableCache中的filter），该操作被称为“seek”。当LevelDB在level-k中没有找到要查找的key时，才会继续在level-(k+1)中查找。
 
 ![seek miss](assets/seek-miss.svg "seek miss")
 
+在上图的示例中，每当LevelDB要查找key `18`时，因为SSTable(k, i)的key范围覆盖了`18`，所以其每次都必须在该SSTable中seek，这一不必要的seek操作会导致性能下降。因此，在FileMetaData结构体中引入了`allowed_seeks`字段，该字段初始为文件大小与16KB的比值，不足100则取100；每次无效seek发生时LevelDB都会将该字段值减1。当某SSTable的`allowed_seeks`减为0时，会触发seek compaction，该SSTable会与下层部分SSTable合并。合并后的SSTable如下图所示。
+
+![match](assets/match.svg "match")
+
+{{< admonition quote 引文 >}}
+
+`allow_seeks`字段初始值取值原因：
+
+      // We arrange to automatically compact this file after
+      // a certain number of seeks.  Let's assume:
+      //   (1) One seek costs 10ms
+      //   (2) Writing or reading 1MB costs 10ms (100MB/s)
+      //   (3) A compaction of 1MB does 25MB of IO:
+      //         1MB read from this level
+      //         10-12MB read from next level (boundaries may be misaligned)
+      //         10-12MB written to next level
+      // This implies that 25 seeks cost the same as the compaction
+      // of 1MB of data.  I.e., one seek costs approximately the
+      // same as the compaction of 40KB of data.  We are a little
+      // conservative and allow approximately one seek for every 16KB
+      // of data before triggering a compaction.
+
+{{</ admonition >}}
+
+合并后，当LevelDB需要查找key `18`时，在level-k中便没有了覆盖key `18`的SSTable，因此会直接在level-(k+1)中找到该key所在的SSTable。这样便避免这次无效的seek。
+
+因为Seek Compcation的触发需要在SSTable上seek，因此我们从`DBImpl::Get`方法查找SSTable时开始分析。由于LevelDB的查找操作涉及到多层，笔者将在本系列的后续文章中详细介绍其流程，本文尽可能屏蔽目前不需要的细节。
+
+```cpp
+
+Status DBImpl::Get(const ReadOptions& options, const Slice& key,
+                   std::string* value) {
+  
+  // ... ...
+  
+  Version::GetStats stats;
+
+  // Unlock while reading from files and memtables
+  {
+    mutex_.Unlock();
+    // First look in the memtable, then in the immutable memtable (if any).
+    LookupKey lkey(key, snapshot);
+    if (mem->Get(lkey, value, &s)) {
+      // Done
+    } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
+      // Done
+    } else {
+      s = current->Get(options, lkey, value, &stats);
+      have_stat_update = true;
+    }
+    mutex_.Lock();
+  }
+
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
+
+}
+
+```
+
+当LevelDB查找key时，会记录一些统计信息。当在SSTable上发生查找时，会记录发生seek miss的 SSTable，这样会更新Version中其相应的FileMetaData中的`allowed_seeks`字段，并通过`MaybeScheduleCompaction`检查是否需要触发Seek Compaction。
+
+```cpp
+
+  // Lookup the value for key.  If found, store it in *val and
+  // return OK.  Else return a non-OK status.  Fills *stats.
+  // REQUIRES: lock is not held
+  struct GetStats {
+    FileMetaData* seek_file;
+    int seek_file_level;
+  };
+
+// ... ...
+
+Status Version::Get(const ReadOptions& options, const LookupKey& k,
+                    std::string* value, GetStats* stats) {
+  stats->seek_file = nullptr;
+  stats->seek_file_level = -1;
+
+  struct State {
+    Saver saver;
+    GetStats* stats;
+    const ReadOptions* options;
+    Slice ikey;
+    FileMetaData* last_file_read;
+    int last_file_read_level;
+
+    VersionSet* vset;
+    Status s;
+    bool found;
+
+    static bool Match(void* arg, int level, FileMetaData* f) {
+      State* state = reinterpret_cast<State*>(arg);
+
+      if (state->stats->seek_file == nullptr &&
+          state->last_file_read != nullptr) {
+        // We have had more than one seek for this read.  Charge the 1st file.
+        state->stats->seek_file = state->last_file_read;
+        state->stats->seek_file_level = state->last_file_read_level;
+      }
+
+      state->last_file_read = f;
+      state->last_file_read_level = level;
+
+      state->s = state->vset->table_cache_->Get(*state->options, f->number,
+                                                f->file_size, state->ikey,
+                                                &state->saver, SaveValue);
+      if (!state->s.ok()) {
+        state->found = true;
+        return false;
+      }
+      switch (state->saver.state) {
+        case kNotFound:
+          return true;  // Keep searching in other files
+        case kFound:
+          state->found = true;
+          return false;
+        case kDeleted:
+          return false;
+        case kCorrupt:
+          state->s =
+              Status::Corruption("corrupted key for ", state->saver.user_key);
+          state->found = true;
+          return false;
+      }
+
+      // Not reached. Added to avoid false compilation warnings of
+      // "control reaches end of non-void function".
+      return false;
+    }
+  };
+
+  State state;
+  state.found = false;
+  state.stats = stats;
+  state.last_file_read = nullptr;
+  state.last_file_read_level = -1;
+
+  state.options = &options;
+  state.ikey = k.internal_key();
+  state.vset = vset_;
+
+  state.saver.state = kNotFound;
+  state.saver.ucmp = vset_->icmp_.user_comparator();
+  state.saver.user_key = k.user_key();
+  state.saver.value = value;
+
+  ForEachOverlapping(state.saver.user_key, state.ikey, &state, &State::Match);
+
+  return state.found ? state.s : Status::NotFound(Slice());
+}
+
+```
+
+这里笔者给出`Version::Get`方法的实现，但本文我们只需要关注其中`State`结构体及其`Match`方法的实现，其它部分笔者会在本系列后续文章中介绍。`Version::Get`方法会通过` Version::ForEachOverlapping`方法来逐层遍历覆盖了给定LookUpKey的SSTable，并在该SSTable上调用`State::Match`判断其中是否有我们想要查找的InternalKey，即只要发生了seek就会调用`State::Match`方法。如果在该SSTable中没有找到需要的key，该方法会返回true表示需要继续查找；如果找到了需要查找的key，则返回false表示不再需要继续查找。`State::Match`方法还会记录**第一次**发生seek miss的SSTable。随后`DBImpl::Get`会将该SSTable的`allowed_seeks`减一,并通过`MaybeScheduleCompaction`检查是否需要触发Seek Compaction。
 
 ### 2.6 Manual Compaction的触发
 
+Manual Comapction的触发时机比较简单，当LevelDB的用户调用`DB::CompactRange`接口时，LevelDB会检查用户给定的Compact范围。
 
-## 3. Minor Compaction
-
-## 4. Major Compaction
+## 3. Compaction的范围
 
 # 施工中 ... ...
+
+
+## x. Minor Compaction
+
+## x. Major Compaction
+
 
 DBImpl::BackgroundCompaction
 
