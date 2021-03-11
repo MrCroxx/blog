@@ -5,7 +5,7 @@ lastmod: 2021-03-06T16:23:30+08:00
 draft: false
 keywords: []
 description: ""
-tags: ["LevelDB", "LSMTree"]
+tags: ["LevelDB", "LSM-Tree"]
 categories: ["深入浅出LevelDB"]
 author: ""
 resources:
@@ -20,7 +20,7 @@ resources:
 
 ## 0. 引言
 
-LSMTree中的MemTable既作为整合随机写入的buffer，又最为加速热数据读取的cache，是LSMTree的重要组件之一。
+LSM-Tree中的MemTable既作为整合随机写入的buffer，又最为加速热数据读取的cache，是LSM-Tree的重要组件之一。
 
 由于MemTable是保存在内存中的，其I/O开销比保存在稳定存储上的SSTable要小得多，因此LevelDB在实现MemTable时，查找结构采用的是跳表SkipList。
 
