@@ -140,3 +140,7 @@ LevelDB被通过`DB::Open`方法打开时，在非常简单的初始化后，会
 2. `ConvertLogFilesToTables`：该方法会依次遍历所有的Log文件，并对每个Log文件通过`ConvertLogToTable`方法生成SSTable文件。这一过程不会产生新的VersionEdit，VersionEdit由后续流程生成。
 3. `ExtractMetaData`：该方法会通过`ScanTable`方法扫描所有的SSTable，并生成其`FileMetaData`对象，以便恢复当前的Version。该方法遇到完全无法读取的SSTable时，会将其归档到`lost/`目录下；在遍历SSTable期间，会尽可能跳过无法解析的key；如果遇到无法解析并导致之后的文件都无法读取的key，则会通过`RepairTable`方法，将该key前能解析的key写入到新的SSTable中，并将原SSTable归档到`lost/`目录中。
 4. `WriteDescriptor`：该方法会根据恢复的Version，重新生成编号为1的Manifest文件，并将旧的Manifest文件归档到`lost/`目录下。
+
+## 3. More
+
+本文在介绍VersionEdit、Version、VersionSet和FileMetaData时，只介绍了其与文件版本信息相关的字段。除此之外其中还有一些其它的重要字段。本系列的后续文章会在使用这些字段时对其进行介绍。
