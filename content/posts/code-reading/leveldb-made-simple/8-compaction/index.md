@@ -33,7 +33,7 @@ LevelDB中LSMTree的Compaction操作分为两类，分别是Minor Compaction与M
 
 在LevelDB中，Major Compaction还可以按照触发条件分为三类：
 
-- Size Compaction：根据每层文件大小触发（level-0根据文件数）的Major Compaction。
+- Size Compaction：根据每层总SSTable大小触发（level-0根据SSTable数）的Major Compaction。
 - Seek Compaction：根据SSTable的seek miss触发的Major Compaction。
 - Manual Compaction：LevelDB使用者通过接口`void CompactRange(const Slice* begin, const Slice* end)`手动触发。
 
@@ -145,7 +145,9 @@ void PosixEnv::BackgroundThreadMain() {
 
 后台线程会循环获取任务丢列中的任务，为了避免线程空转，在队列为空时通过信号量等待唤醒。如果队列中有任务，则获取该任务并将任务出队，然后执行任务。后台线程中操作队列的部分需要通过锁来保护，而执行任务时没有上锁，可以并行执行（但是LevelDB只使用了1个后台线程，因此Compaction仍是串行而不是并行的）。
 
-### 2.2 触发判断
+### 2.2 Compaction优先级
+
+LevelDB中Compaction具有优先级，其顺序为：Minor Compaction > Manual Compaction > Size Compaction > Seek Compaction。本节将根据源码来分析这一优先级的体现。
 
 无论是Minor Compaction还是Major Compaction，在设置了相应的参数后，都会通过`DBImpl::MaybeScheduleCompaction`方法来判断是否需要执行Compaction。该方法实现如下：
 
@@ -196,7 +198,161 @@ void DBImpl::MaybeScheduleCompaction() {
 
 ### 2.3 Minor Compaction的触发
 
+Minor Compaction在MemTable大小超过限制时（默认为4MB）触发，LevelDB在写入变更前，首先会通过`DBImpl::MakeRoomForWrite`方法来在MemTable过大时将其转为Immutable MemTable，在该方法中，我们也能够找到尝试触发Compcation调度的调用。这里我们完整地看一下`DBImpl::MakeRoomForWrite`的实现：
 
+```cpp
+
+// REQUIRES: mutex_ is held
+// REQUIRES: this thread is currently at the front of the writer queue
+Status DBImpl::MakeRoomForWrite(bool force) {
+  mutex_.AssertHeld();
+  assert(!writers_.empty());
+  bool allow_delay = !force;
+  Status s;
+  while (true) {
+    if (!bg_error_.ok()) {
+      // Yield previous error
+      s = bg_error_;
+      break;
+    } else if (allow_delay && versions_->NumLevelFiles(0) >=
+                                  config::kL0_SlowdownWritesTrigger) {
+      // We are getting close to hitting a hard limit on the number of
+      // L0 files.  Rather than delaying a single write by several
+      // seconds when we hit the hard limit, start delaying each
+      // individual write by 1ms to reduce latency variance.  Also,
+      // this delay hands over some CPU to the compaction thread in
+      // case it is sharing the same core as the writer.
+      mutex_.Unlock();
+      env_->SleepForMicroseconds(1000);
+      allow_delay = false;  // Do not delay a single write more than once
+      mutex_.Lock();
+    } else if (!force &&
+               (mem_->ApproximateMemoryUsage() <= options_.write_buffer_size)) {
+      // There is room in current memtable
+      break;
+    } else if (imm_ != nullptr) {
+      // We have filled up the current memtable, but the previous
+      // one is still being compacted, so we wait.
+      Log(options_.info_log, "Current memtable full; waiting...\n");
+      background_work_finished_signal_.Wait();
+    } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
+      // There are too many level-0 files.
+      Log(options_.info_log, "Too many L0 files; waiting...\n");
+      background_work_finished_signal_.Wait();
+    } else {
+      // Attempt to switch to a new memtable and trigger compaction of old
+      assert(versions_->PrevLogNumber() == 0);
+      uint64_t new_log_number = versions_->NewFileNumber();
+      WritableFile* lfile = nullptr;
+      s = env_->NewWritableFile(LogFileName(dbname_, new_log_number), &lfile);
+      if (!s.ok()) {
+        // Avoid chewing through file number space in a tight loop.
+        versions_->ReuseFileNumber(new_log_number);
+        break;
+      }
+      delete log_;
+      delete logfile_;
+      logfile_ = lfile;
+      logfile_number_ = new_log_number;
+      log_ = new log::Writer(lfile);
+      imm_ = mem_;
+      has_imm_.store(true, std::memory_order_release);
+      mem_ = new MemTable(internal_comparator_);
+      mem_->Ref();
+      force = false;  // Do not force another compaction if have room
+      MaybeScheduleCompaction();
+    }
+  }
+  return s;
+}
+
+```
+
+`DBImpl::MakeRoomForWrite`方法执行了以下功能：
+1. 通过断言确保当前持有着锁。
+2. 如果后台线程报错，退出执行。
+3. 如果当前level-0中的SSTable数即将超过最大限制（默认为8，而当level-0的SSTable数达到4时即可触发Minor Compaction），这可能是写入过快导致的。此时会开启流控，将每条写入都推迟1ms，以给Minor Compaction留出时间。如果调用该方法时参数`force`为true，则不会触发流控。
+4. 如果`force`为false且MemTable估算的大小没有超过限制（默认为4MB），则直接退出，不需要进行Minor Compaction。
+5. 如果此时有未完成Minor Compaction的Immutable MemTable，此时循环等待Minor Compaction执行完成再执行。
+6. 如果当前level-0层的SSTable数过多（默认为8），此时循环等待level-0层SSTable数低于该上限，以避免level-0层SSTable过多
+7. 否则，将当前的MemTable转为Immutable，并调用`MaybeScheduleCompaction`方法尝试通过后台线程调度Compcation执行（此时`imm_`会引用旧的MemTable，以让`MaybeScheduleCompaction`得知当前需要Minor Compaction）。
+
+`DBImpl::MakeRoomForWrite`方法在判断是否需要进行Minor Compaction时，LevelDB通过流控与等待的方式，避免level-0层SSTable数过多。这是因为level-0层的key之间是有重叠的，因此当查询level-0层SSTable时，需要查找level-0层的所有SSTable。如果level-0层SSTable太多，会严重拖慢查询效率。
+
+### 2.4 Size Compaction的触发
+
+Size Compaction在非level-0层是根据该层的总SSTable大小触发的，而在level-0层是根据该层SSTable数触发的。也就是说，只有发生了Compaction，才有可能触发Size Compaction。因为Compaction的执行会导致Version的更新，因此LevelDB在`VersionSet::LogAndApply`方法更新Version后，让其调用`VersionSet::Finalize`方法来计算每层SSTable是否需要Size Compaction，并选出最需要进行Size Compaction的层作为下次Size Compaction的目标。
+
+`VersionSet::Finalize`方法实现如下：
+
+```cpp
+
+void VersionSet::Finalize(Version* v) {
+  // Precomputed best level for next compaction
+  int best_level = -1;
+  double best_score = -1;
+
+  for (int level = 0; level < config::kNumLevels - 1; level++) {
+    double score;
+    if (level == 0) {
+      // We treat level-0 specially by bounding the number of files
+      // instead of number of bytes for two reasons:
+      //
+      // (1) With larger write-buffer sizes, it is nice not to do too
+      // many level-0 compactions.
+      //
+      // (2) The files in level-0 are merged on every read and
+      // therefore we wish to avoid too many files when the individual
+      // file size is small (perhaps because of a small write-buffer
+      // setting, or very high compression ratios, or lots of
+      // overwrites/deletions).
+      score = v->files_[level].size() /
+              static_cast<double>(config::kL0_CompactionTrigger);
+    } else {
+      // Compute the ratio of current size to size limit.
+      const uint64_t level_bytes = TotalFileSize(v->files_[level]);
+      score =
+          static_cast<double>(level_bytes) / MaxBytesForLevel(options_, level);
+    }
+
+    if (score > best_score) {
+      best_level = level;
+      best_score = score;
+    }
+  }
+
+  v->compaction_level_ = best_level;
+  v->compaction_score_ = best_score;
+}
+
+```
+
+该方法计算了每层需要Size Compaction的`score`，并选出`score`最大的层作为下次Size Compaction的目标（如果`score`小于1，会被`MaybeScheduleCompaction`方法忽略）。其计算依据为：
+
+1. 对于level-0，计算该层SSTable数与应触发level-0 Compaction的SSTable数的比值（默认为4）作为score。
+2. 对于非level-0，计算该层SSTable总大小与该层预设大小的比值作为score。level-1层的预设大小为10MB，之后每层依次*10。
+
+计算完score后，需要等待Size Compaction的触发。Size Compaction的触发发生在后台线程调用的`DBImpl::BackgroundCall`方法中。该方法在完成Compaction操作后，会再次调用`MaybeScheduleCompaction`方法，来触发因上次Compaction而需要的Size Compaction操作。
+
+```cpp
+
+void DBImpl::BackgroundCall() {
+  
+  // ... ...
+
+  // Previous compaction may have produced too many files in a level,
+  // so reschedule another compaction if needed.
+  MaybeScheduleCompaction();
+  background_work_finished_signal_.SignalAll();
+}
+
+```
+
+### 2.5 Seek Compaction的触发
+
+
+
+### 2.6 Manual Compaction的触发
 
 
 ## 3. Minor Compaction
