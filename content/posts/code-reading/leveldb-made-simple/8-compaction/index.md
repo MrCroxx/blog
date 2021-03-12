@@ -523,6 +523,75 @@ Manual Comapction的触发时机比较简单，当LevelDB的用户调用`DB::Com
 
 ## 3. Compaction的范围
 
+Compaction在触发后，首先要确定Compact的范围。本节，笔者将介绍并分析LevelDB中Comapction范围的确定。
+
+LevelDB在确定Minor Compaction范围与Major Compaction范围的方法区别很大，因此这里分别介绍。
+
+### 3.1 Minor Compaction范围的确定
+
+在LST-Tree的基本概念中，Minor Compaction只需要将Immutable MemTable全量转储为SSTable，并将其推至level-0即可。而LevelDB对这一步骤进行了优化，其会将Minor Comapction生成的SSTable推至更高的层级。该优化的依据如下：
+
+- 由于level 0中SSTable间可能存在overlap，发生在level 0=>1的Major Compaction开销相对较大。为了尽可能避免level 0=>1的Major Compaction开销并避免一些开销较大的Manifest文件操作，LevelDB会将Minor Comapction产生的MemTable尽可能推至更高level。
+- LevelDB也不会将Minor Compaction产生的SSTable的level推得过高。SSTable的level越高越难被Compaction，因此如果该SSTable中很多Record是override操作，如果不被Compaction会造成很大的空间浪费。
+- 该优化不能破坏LSM-Tree结构。
+
+因此计算Minor Compaction范围时需要且只需要确定其生成的SSTable所在的level。其通过`Version::PickLevelForMemTableOutput`方法实现：
+
+```cpp
+
+int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key,
+                                        const Slice& largest_user_key) {
+  int level = 0;
+  if (!OverlapInLevel(0, &smallest_user_key, &largest_user_key)) {
+    // Push to next level if there is no overlap in next level,
+    // and the #bytes overlapping in the level after that are limited.
+    InternalKey start(smallest_user_key, kMaxSequenceNumber, kValueTypeForSeek);
+    InternalKey limit(largest_user_key, 0, static_cast<ValueType>(0));
+    std::vector<FileMetaData*> overlaps;
+    while (level < config::kMaxMemCompactLevel) {
+      if (OverlapInLevel(level + 1, &smallest_user_key, &largest_user_key)) {
+        break;
+      }
+      if (level + 2 < config::kNumLevels) {
+        // Check that file does not overlap too many grandparent bytes.
+        GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
+        const int64_t sum = TotalFileSize(overlaps);
+        if (sum > MaxGrandParentOverlapBytes(vset_->options_)) {
+          break;
+        }
+      }
+      level++;
+    }
+  }
+  return level;
+}
+
+```
+
+`PickLevelForMemTableOutput`方法最初将目标level置为0，并循环判断是否可以将该level推高一层至目标level。其判断条件如下：
+1. 目标level不能超过配置`config::kMaxMemCompactLevel`中限制的最大高度（默认为2）。
+2. 目标level不能与该level的其它SSTable有overlap。
+3. 目标level与其下一层level的overlap不能过多，其计算规则为：首先根据Immutable MemTable的key范围找出目标level的下一层level中与其存在overlap的所有文件；所有与之存在overlap的文件总大小不能超过LevelDB配置中`max_file_size`大小的10倍（默认为2MB）。
+
+
+
+
+
+
+LevelDB计算Compaciton范围时，需要确定以下参数：
+1. 确定Compaction起始层级i。
+2. 确定level-i层SSTable input。
+3. 确定level-(i+1)层SSTable input。
+4. 确定Compaction执行后新SSTable所在层级j。
+
+因为每种Compaction的起始条件与目标不同，因此其确定方式稍有不同。如：
+- Minor Compaction将Immutable MemTable直接全量转储至level-0，因此其不需要步骤1~3。
+- Size Compaction与Seek Compaction触发时已知Compaction起始层级i，因此不需要步骤1，但二者在步骤2中的确定方式不同。
+- Manual Compaction触发时用户只提供了起始key与终止key，因此其需要所有步骤1~4。
+
+这里需要进一步说明的是步骤4，按照LSM-Tree原理，Minor Compaction生成的SSTable应在level-0、发生在level-i与level-(i+1)间的Major Compaction生成的SSTable应在level-(i+1)，为什么还要确定新SSTable所在层级？
+
+
 # 施工中 ... ...
 
 
