@@ -73,7 +73,7 @@ enum Tag {
 2. Log Number：当前Log文件编号。
 3. Prev Log Number：前一个Log文件编号。
 4. Last SequenceNumber：当前版本最后一个SequenceNumber的值（仅对于SSTable文件而言，在LevelDB掉电后恢复时，还需要从WAL中恢复MemTable的状态，WAL中的SequenceNumber比文件中的更高）。
-5. Compact Pointers：(level, compaction key)记录上次Compaction的位置，以便出错后数据库恢复时，可以选择其它Compaction位置重试。
+5. Compact Pointers：(level, compaction key)记录上次Compaction的位置，用来实现循环Compaction。
 6. Deleted File：(level, file number)该版本中删除的元数据。
 7. New File：(level, file number, file size, smallest key, largest key)该版本中新增文件的元数据。
 8.  ~~已弃用~~
