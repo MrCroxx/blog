@@ -519,7 +519,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
 
 ### 2.6 Manual Compaction的触发
 
-Manual Comapction的触发时机比较简单，当LevelDB的用户调用`DB::CompactRange`接口时，LevelDB会检查用户给定的Compact范围。
+Manual Comapction的触发时机比较简单，当LevelDB的用户调用`DB::CompactRange`接口时，LevelDB会检查用户给定的Compact范围与当前状态，判断是否需要执行Manual Compaction。如果确定执行Manual Compaction，则设置`manual_compaction_`，再调用` MaybeScheduleCompaction`方法以尝试触发Manual Compaction。
 
 ## 3. Compaction的范围
 
