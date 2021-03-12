@@ -73,7 +73,7 @@ enum Tag {
 2. Log Number：当前Log文件编号。
 3. Prev Log Number：前一个Log文件编号。
 4. Last SequenceNumber：当前版本最后一个SequenceNumber的值（仅对于SSTable文件而言，在LevelDB掉电后恢复时，还需要从WAL中恢复MemTable的状态，WAL中的SequenceNumber比文件中的更高）。
-5. Compact Pointers：(level, compaction key)记录上次Compaction的位置，用来实现循环Compaction。
+5. Compact Pointers：(level, compaction key)记录某个level上次Compaction的位置，在Size Compaction中通过该字段来确定Compact的范围。
 6. Deleted File：(level, file number)该版本中删除的元数据。
 7. New File：(level, file number, file size, smallest key, largest key)该版本中新增文件的元数据。
 8.  ~~已弃用~~
@@ -87,7 +87,7 @@ enum Tag {
 
 Manifest与Current文件是LevelDB保存在稳定存储中的文件版本信息，在LevelDB被打开后，其会先通过Current文件找到当前的Manifest文件，读取并反序列化其中数据，并在内存中维护文件版本信息，以便后续操作。
 
-LevelDB在内存中将每个版本的文件信息封装为`Version`保存，Version主要保存了该版本每个level中都有哪些文件（Version中还包括下一个Compact Pointer），Version中文件元数据被按层组织为`FileMetaData`结构体数组的vector容器。`FileMetaData`中的字段如下：
+LevelDB在内存中将每个版本的文件信息封装为`Version`保存，Version保存了该版本每个level中都有哪些文件（及一些与Compaction有关的字段，笔者将在本系列后续文章中介绍），Version中文件元数据被按层组织为`FileMetaData`结构体数组的vector容器。`FileMetaData`中的字段如下：
 
 ```cpp
 
