@@ -702,7 +702,27 @@ Compaction* VersionSet::PickCompaction() {
 
 如果触发Compact的SSTable在level-0，`PickCompaction`方法会将level-0层中所有与该SSTable有overlap的SSTable加入level-0层的输入中。
 
-在确定了`input[0]`后，`PickCompcation`方法会调用`VersionSet::SetupOtherInputs`方法，确定`input[1]`，即参与Major Compaction的level-(i+1)层的SSTable：
+在确定了`input[0]`后，`PickCompcation`方法会调用`VersionSet::SetupOtherInputs`方法。该方法首先扩展`input[0]`范围，并确定`input[1]`，即参与Major Compaction的level-(i+1)层的SSTable。同样，`VersionSet::SetupOtherInputs`也会扩展`input[1]`的范围。扩展`input`范围的目的是避免Compaction后无法正确查找key版本的问题。这里我们先来看一下这一问题的成因：
+
+在Major Compaction发生前，UserKey `cat`在level-i层的SSTable中有两个版本，分别为`(cat, 101)`与`(cat, 100)`（这里仅关注UserKey与SequenceNumber）。此时，如果LevelDB查找UserKey `cat`的最新版本，其会首先查找到`(cat, 101)`，能够得到正常值。
+
+![Major Compaction发生前](assets/boundary-before.svg "Major Compaction发生前")
+
+此时，如果SSTable (i,x)在Major Compaction中与下一层SSTable合并，会导致`(cat, 101)`位于level-(i+1)，而`(cat, 100)`位于level-0。
+
+![Major Compaction发生后](assets/boundary-after.svg "Major Compaction发生后")
+
+此时，如果LevelDB再次查找UserKey `cat`的最新版本，其首先会在level-i中查找到`(cat, 100)`，因此不会再继续查询level-(i+1)，此时返回了陈旧的值。
+
+为了避免这一问题，LevelDB在进行Major Compaction时，需要扩展每层中
+
+
+
+
+
+
+# 施工中 ... ...
+
 
 ```cpp
 
@@ -769,7 +789,6 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
 
 ```
 
-# 施工中 ... ...
 
 
 ## x. Minor Compaction
