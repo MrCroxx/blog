@@ -572,25 +572,202 @@ int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key,
 1. 目标level不能超过配置`config::kMaxMemCompactLevel`中限制的最大高度（默认为2）。
 2. 目标level不能与该level的其它SSTable有overlap。
 3. 目标level与其下一层level的overlap不能过多，其计算规则为：首先根据Immutable MemTable的key范围找出目标level的下一层level中与其存在overlap的所有文件；所有与之存在overlap的文件总大小不能超过LevelDB配置中`max_file_size`大小的10倍（默认为2MB）。
+4. 如果满足以上所有条件，则将目标level推至下一层并继续循环。
 
+### 3.2 Major Compaction
 
-
-
-
-
-LevelDB计算Compaciton范围时，需要确定以下参数：
+LevelDB在进行Major Compaction时，至少需要确定以下参数：
 1. 确定Compaction起始层级i。
 2. 确定level-i层SSTable input。
-3. 确定level-(i+1)层SSTable input。
-4. 确定Compaction执行后新SSTable所在层级j。
+3. 确定level-(i+1)层中与待Compact的SSTable有overlap的SSTable input。
 
-因为每种Compaction的起始条件与目标不同，因此其确定方式稍有不同。如：
-- Minor Compaction将Immutable MemTable直接全量转储至level-0，因此其不需要步骤1~3。
-- Size Compaction与Seek Compaction触发时已知Compaction起始层级i，因此不需要步骤1，但二者在步骤2中的确定方式不同。
-- Manual Compaction触发时用户只提供了起始key与终止key，因此其需要所有步骤1~4。
+Major Compation生成的SSTable的level即为level-(i+1)。
 
-这里需要进一步说明的是步骤4，按照LSM-Tree原理，Minor Compaction生成的SSTable应在level-0、发生在level-i与level-(i+1)间的Major Compaction生成的SSTable应在level-(i+1)，为什么还要确定新SSTable所在层级？
+由于三种Major Compaction的起始条件与目标都不同，其确定这三个参数的方式稍有不同。本节笔者将介绍并分析各种Major Compaction确定Compaction范围的方法与实现。
 
+#### 3.2.1 Major Compaction元数据
+
+LevelDB通过`Compaction`类（位于`db/version_set.h`）记录Major Compaction所需元数据：
+
+```cpp
+
+// A Compaction encapsulates information about a compaction.
+class Compaction {
+ 
+ // ... ...
+
+ private:
+  friend class Version;
+  friend class VersionSet;
+
+  Compaction(const Options* options, int level);
+
+  int level_;
+  uint64_t max_output_file_size_;
+  Version* input_version_;
+  VersionEdit edit_;
+
+  // Each compaction reads inputs from "level_" and "level_+1"
+  std::vector<FileMetaData*> inputs_[2];  // The two sets of inputs
+
+  // State used to check for number of overlapping grandparent files
+  // (parent == level_ + 1, grandparent == level_ + 2)
+  std::vector<FileMetaData*> grandparents_;
+  size_t grandparent_index_;  // Index in grandparent_starts_
+  bool seen_key_;             // Some output key has been seen
+  int64_t overlapped_bytes_;  // Bytes of overlap between current output
+                              // and grandparent files
+
+  // State for implementing IsBaseLevelForKey
+
+  // level_ptrs_ holds indices into input_version_->levels_: our state
+  // is that we are positioned at one of the file ranges for each
+  // higher level than the ones involved in this compaction (i.e. for
+  // all L >= level_ + 2).
+  size_t level_ptrs_[config::kNumLevels];
+};
+
+```
+
+本节中我们主要关注以下字段：
+- `level`：Major Compaction的起始level（即上述level-i）。
+- `input[0]`：level-i层需要Compact的SSTable编号。
+- `input[1]`：level-(i+1)层需要Compact的SSTable编号。
+
+#### 3.2.2 Size Compaction与Seek Compaction
+
+LevelDB在触发Size Compaction时，已知Compaction的起始层级i；而LevelDB在触发Seek Compaction时，已知Compaction的起始层级i和level-i层的输入SSTable。LevelDB通过`VersionSet::PickCompaction`方法来计算其它参数：
+
+```cpp
+
+Compaction* VersionSet::PickCompaction() {
+  Compaction* c;
+  int level;
+
+  // We prefer compactions triggered by too much data in a level over
+  // the compactions triggered by seeks.
+  const bool size_compaction = (current_->compaction_score_ >= 1);
+  const bool seek_compaction = (current_->file_to_compact_ != nullptr);
+  if (size_compaction) {
+    level = current_->compaction_level_;
+    assert(level >= 0);
+    assert(level + 1 < config::kNumLevels);
+    c = new Compaction(options_, level);
+
+    // Pick the first file that comes after compact_pointer_[level]
+    for (size_t i = 0; i < current_->files_[level].size(); i++) {
+      FileMetaData* f = current_->files_[level][i];
+      if (compact_pointer_[level].empty() ||
+          icmp_.Compare(f->largest.Encode(), compact_pointer_[level]) > 0) {
+        c->inputs_[0].push_back(f);
+        break;
+      }
+    }
+    if (c->inputs_[0].empty()) {
+      // Wrap-around to the beginning of the key space
+      c->inputs_[0].push_back(current_->files_[level][0]);
+    }
+  } else if (seek_compaction) {
+    level = current_->file_to_compact_level_;
+    c = new Compaction(options_, level);
+    c->inputs_[0].push_back(current_->file_to_compact_);
+  } else {
+    return nullptr;
+  }
+
+  c->input_version_ = current_;
+  c->input_version_->Ref();
+
+  // Files in level 0 may overlap each other, so pick up all overlapping ones
+  if (level == 0) {
+    InternalKey smallest, largest;
+    GetRange(c->inputs_[0], &smallest, &largest);
+    // Note that the next call will discard the file we placed in
+    // c->inputs_[0] earlier and replace it with an overlapping set
+    // which will include the picked file.
+    current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
+    assert(!c->inputs_[0].empty());
+  }
+
+  SetupOtherInputs(c);
+
+  return c;
+}
+
+```
+
+对于Size Compaction，level-i层的SSTable输入根据该level的Compaction Pointer（记录在Version中），选取上次Compaction后的第一个SSTable（如果该层还没发生过Compaction）。这是为了尽可能公平地为Size Compaction选取SSTable，避免某些SSTable永远不会被Compact。
+
+对于Seek Compaction，该方法直接将触发Seek Compaction的SSTable加入到level-i层的输入中。
+
+如果触发Compact的SSTable在level-0，`PickCompaction`方法会将level-0层中所有与该SSTable有overlap的SSTable加入level-0层的输入中。
+
+在确定了`input[0]`后，`PickCompcation`方法会调用`VersionSet::SetupOtherInputs`方法，确定`input[1]`，即参与Major Compaction的level-(i+1)层的SSTable：
+
+```cpp
+
+void VersionSet::SetupOtherInputs(Compaction* c) {
+  const int level = c->level();
+  InternalKey smallest, largest;
+
+  AddBoundaryInputs(icmp_, current_->files_[level], &c->inputs_[0]);
+  GetRange(c->inputs_[0], &smallest, &largest);
+
+  current_->GetOverlappingInputs(level + 1, &smallest, &largest,
+                                 &c->inputs_[1]);
+
+  // Get entire range covered by compaction
+  InternalKey all_start, all_limit;
+  GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
+
+  // See if we can grow the number of inputs in "level" without
+  // changing the number of "level+1" files we pick up.
+  if (!c->inputs_[1].empty()) {
+    std::vector<FileMetaData*> expanded0;
+    current_->GetOverlappingInputs(level, &all_start, &all_limit, &expanded0);
+    AddBoundaryInputs(icmp_, current_->files_[level], &expanded0);
+    const int64_t inputs0_size = TotalFileSize(c->inputs_[0]);
+    const int64_t inputs1_size = TotalFileSize(c->inputs_[1]);
+    const int64_t expanded0_size = TotalFileSize(expanded0);
+    if (expanded0.size() > c->inputs_[0].size() &&
+        inputs1_size + expanded0_size <
+            ExpandedCompactionByteSizeLimit(options_)) {
+      InternalKey new_start, new_limit;
+      GetRange(expanded0, &new_start, &new_limit);
+      std::vector<FileMetaData*> expanded1;
+      current_->GetOverlappingInputs(level + 1, &new_start, &new_limit,
+                                     &expanded1);
+      if (expanded1.size() == c->inputs_[1].size()) {
+        Log(options_->info_log,
+            "Expanding@%d %d+%d (%ld+%ld bytes) to %d+%d (%ld+%ld bytes)\n",
+            level, int(c->inputs_[0].size()), int(c->inputs_[1].size()),
+            long(inputs0_size), long(inputs1_size), int(expanded0.size()),
+            int(expanded1.size()), long(expanded0_size), long(inputs1_size));
+        smallest = new_start;
+        largest = new_limit;
+        c->inputs_[0] = expanded0;
+        c->inputs_[1] = expanded1;
+        GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
+      }
+    }
+  }
+
+  // Compute the set of grandparent files that overlap this compaction
+  // (parent == level+1; grandparent == level+2)
+  if (level + 2 < config::kNumLevels) {
+    current_->GetOverlappingInputs(level + 2, &all_start, &all_limit,
+                                   &c->grandparents_);
+  }
+
+  // Update the place where we will do the next compaction for this level.
+  // We update this immediately instead of waiting for the VersionEdit
+  // to be applied so that if the compaction fails, we will try a different
+  // key range next time.
+  compact_pointer_[level] = largest.Encode().ToString();
+  c->edit_.SetCompactPointer(level, largest);
+}
+
+```
 
 # 施工中 ... ...
 
