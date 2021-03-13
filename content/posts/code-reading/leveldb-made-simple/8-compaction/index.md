@@ -1111,8 +1111,168 @@ bool Compaction::IsTrivialMove() const {
 
 ### 4.2 Minor Compaction
 
+Minor Compaction主要通过`DBImpl::CompactionMemTable`方法实现：
 
+```cpp
 
+void DBImpl::CompactMemTable() {
+  mutex_.AssertHeld();
+  assert(imm_ != nullptr);
+
+  // Save the contents of the memtable as a new Table
+  VersionEdit edit;
+  Version* base = versions_->current();
+  base->Ref();
+  Status s = WriteLevel0Table(imm_, &edit, base);
+  base->Unref();
+
+  if (s.ok() && shutting_down_.load(std::memory_order_acquire)) {
+    s = Status::IOError("Deleting DB during memtable compaction");
+  }
+
+  // Replace immutable memtable with the generated Table
+  if (s.ok()) {
+    edit.SetPrevLogNumber(0);
+    edit.SetLogNumber(logfile_number_);  // Earlier logs no longer needed
+    s = versions_->LogAndApply(&edit, &mutex_);
+  }
+
+  if (s.ok()) {
+    // Commit to the new state
+    imm_->Unref();
+    imm_ = nullptr;
+    has_imm_.store(false, std::memory_order_release);
+    RemoveObsoleteFiles();
+  } else {
+    RecordBackgroundError(s);
+  }
+}
+
+```
+
+`CompactionMemTable`方法首先调用`DBImpl::WriteLevel0Table`方法将Immutable MemTable转储为SSTable，由于该方法需要使用当前的Version信息，因此在调用前后增减了当前Version的引用计数以避免其被回收。接着，通过`VersionSet::LogAndApply`方法将增量的版本更新VersionEdit写入Manifest（其中prev log number已被弃用，不需要再关注）。如果上述操作都成功完成，则可以释放对Immutable MemTable的引用，并通过`RemoveObsoleteFiles`方法回收不再需要保留的文件（该方法放在后续的章节中介绍）。
+
+接下来我们分析其中转储Immutable MemTable的方法：
+
+```cpp
+
+Status DBImpl::WriteLevel0Table(MemTable* mem, VersionEdit* edit,
+                                Version* base) {
+  mutex_.AssertHeld();
+  const uint64_t start_micros = env_->NowMicros();
+  FileMetaData meta;
+  meta.number = versions_->NewFileNumber();
+  pending_outputs_.insert(meta.number);
+  Iterator* iter = mem->NewIterator();
+  Log(options_.info_log, "Level-0 table #%llu: started",
+      (unsigned long long)meta.number);
+
+  Status s;
+  {
+    mutex_.Unlock();
+    s = BuildTable(dbname_, env_, options_, table_cache_, iter, &meta);
+    mutex_.Lock();
+  }
+
+  Log(options_.info_log, "Level-0 table #%llu: %lld bytes %s",
+      (unsigned long long)meta.number, (unsigned long long)meta.file_size,
+      s.ToString().c_str());
+  delete iter;
+  pending_outputs_.erase(meta.number);
+
+  // Note that if file_size is zero, the file has been deleted and
+  // should not be added to the manifest.
+  int level = 0;
+  if (s.ok() && meta.file_size > 0) {
+    const Slice min_user_key = meta.smallest.user_key();
+    const Slice max_user_key = meta.largest.user_key();
+    if (base != nullptr) {
+      level = base->PickLevelForMemTableOutput(min_user_key, max_user_key);
+    }
+    edit->AddFile(level, meta.number, meta.file_size, meta.smallest,
+                  meta.largest);
+  }
+
+  CompactionStats stats;
+  stats.micros = env_->NowMicros() - start_micros;
+  stats.bytes_written = meta.file_size;
+  stats_[level].Add(stats);
+  return s;
+}
+
+```
+
+`WriteLevel0Table`方法虽然较长但其逻辑非常简单，其获取了需要转储的MemTable的迭代器，并传给`BuildTable`方法。`BuildTable`方法会通过`TableBuilder`来构造SSTable文件然后写入，这里不再赘述。这里值得我们注意的是，`WriteLevel0Table`方法在处理完构造SSTable时需要的数据（及引用计数）后，在真正通过`BuildTable`方法转储SSTable时释放了全局的锁。因为Minor Compaction是由后台线程完成的，这样做可以在保证线程安全的前提下，避免后台线程执行耗时的Minor Compaction操作时阻塞LevelDB正常的读写。
+### 4.3 Major Compaction
+
+Major Compaction主要通过`DBImpl::DoCompactionWork`方法实现，其流程较为复杂，这里仍采用分段介绍的方式分析。
+
+```cpp
+
+Status DBImpl::DoCompactionWork(CompactionState* compact) {
+  // (1)
+  const uint64_t start_micros = env_->NowMicros();
+  int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
+
+  Log(options_.info_log, "Compacting %d@%d + %d@%d files",
+      compact->compaction->num_input_files(0), compact->compaction->level(),
+      compact->compaction->num_input_files(1),
+      compact->compaction->level() + 1);
+
+  assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
+  assert(compact->builder == nullptr);
+  assert(compact->outfile == nullptr);
+
+  // ... ...
+
+}
+
+```
+
+首先`DoCompactionWork`通过断言避免编码错误，同时做好日志，这里不再赘述。
+
+```cpp
+
+  // (2)
+  if (snapshots_.empty()) {
+    compact->smallest_snapshot = versions_->LastSequence();
+  } else {
+    compact->smallest_snapshot = snapshots_.oldest()->sequence_number();
+  }
+
+  Iterator* input = versions_->MakeInputIterator(compact->compaction);
+
+  // Release mutex while we're actually doing the compaction work
+  mutex_.Unlock();
+
+  // (...)
+  // ... ...
+
+  mutex_.Lock();
+  stats_[compact->compaction->level() + 1].Add(stats);
+
+  if (status.ok()) {
+    status = InstallCompactionResults(compact);
+  }
+  if (!status.ok()) {
+    RecordBackgroundError(status);
+  }
+  VersionSet::LevelSummaryStorage tmp;
+  Log(options_.info_log, "compacted to: %s", versions_->LevelSummary(&tmp));
+  return status;
+
+```
+
+接着我们来看第(2)段代码，这段代码看上去很长，但做的工作较为简单。`DoCompactionWork`方法在遍历和生成SSTable是解锁的，我们将其放在后面分析，第(2)代码主要关注解锁前和上锁后的部分。
+
+在解锁前，该方法准备了需要避免竟态的数据：需要保留的最大SequenceNumber（以实现Snapshot Read）和参与Major Compaction的所有SSTable的全局迭代器。
+
+在完成Compaction并上锁后，该方法更新了统计量和状态，输出日志后返回。
+
+### 4.4 Compaction清理
+
+`CleanupCompaction` -> 内存
+`RemoveObsoleteFiles` -> 文件
 
 
 

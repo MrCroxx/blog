@@ -77,7 +77,7 @@ enum Tag {
 6. Deleted File：(level, file number)该版本中删除的元数据。
 7. New File：(level, file number, file size, smallest key, largest key)该版本中新增文件的元数据。
 8.  ~~已弃用~~
-9. Prev Log Number：前一个Log文件编号。
+9. Prev Log Number：前一个Version Log（即上一个Manifest）文件编号（目前该字段已弃用）。
 
 因为VersionEdit是增量数据，因此并非每个VersionEdit中都有所有类型的数据，因此序列化VersionEdit的每种类型的数据前会将该类型对应的Tag以Varint32的编码方式写入到其数据之前。
 
