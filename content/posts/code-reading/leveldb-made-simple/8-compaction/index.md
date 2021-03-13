@@ -174,7 +174,7 @@ void DBImpl::MaybeScheduleCompaction() {
 
 `MaybeScheduleCompaction`方法是需要在上锁时被调用的，因此其首先断言当前正持有着锁。接下来，其按照顺序做了如下判断：
 
-1. 当前是否正在进行Compaction的调度，如果正在调度则不再调度。这里的“调度”开始于`Schedule`调度后台线程前，结束于后台线程中`BackgroundCompaction`真正完成Compaction操作后。
+1. 当前是否正在进行Compaction的调度，如果正在调度则不再调度。这里的“调度”开始于`Schedule`调度后台线程前，结束于后台线程中`BackgroundCompaction`方法中完成Compaction操作后。
 2. 数据库是否正在关闭，如果数据库已被关闭，则不再调度。
 3. 如果后台线程报告了错误，则不再调度。
 4. 如果此时还没有Immutable MemTable产生，也没有Major Compaction被触发，则不需要调度。
@@ -585,7 +585,7 @@ Major Compation生成的SSTable的level即为level-(i+1)。
 
 由于三种Major Compaction的起始条件与目标都不同，其确定这三个参数的方式稍有不同。本节笔者将介绍并分析各种Major Compaction确定Compaction范围的方法与实现。
 
-#### 3.2.1 Major Compaction元数据
+#### 3.2.1 Major Compaction的范围
 
 LevelDB通过`Compaction`类（位于`db/version_set.h`）记录Major Compaction所需元数据：
 
@@ -634,7 +634,7 @@ class Compaction {
 - `input[0]`：level-i层需要Compact的SSTable编号。
 - `input[1]`：level-(i+1)层需要Compact的SSTable编号。
 
-#### 3.2.2 Size Compaction与Seek Compaction
+#### 3.2.2 Size Compaction与Seek Compaction的范围
 
 LevelDB在触发Size Compaction时，已知Compaction的起始层级i；而LevelDB在触发Seek Compaction时，已知Compaction的起始层级i和level-i层的输入SSTable。LevelDB通过`VersionSet::PickCompaction`方法来计算其它参数：
 
@@ -702,7 +702,7 @@ Compaction* VersionSet::PickCompaction() {
 
 如果触发Compact的SSTable在level-0，`PickCompaction`方法会将level-0层中所有与该SSTable有overlap的SSTable加入level-0层的输入中。
 
-在确定了`input[0]`后，`PickCompcation`方法会调用`VersionSet::SetupOtherInputs`方法。该方法首先扩展`input[0]`范围，并确定`input[1]`，即参与Major Compaction的level-(i+1)层的SSTable。同样，`VersionSet::SetupOtherInputs`也会扩展`input[1]`的范围。扩展`input`范围的目的是避免Compaction后无法正确查找key版本的问题。这里我们先来看一下这一问题的成因：
+在确定了`input[0]`后，`PickCompcation`方法会调用`VersionSet::SetupOtherInputs`方法。该方法首先扩展`input[0]`范围，然后确定`input[1]`，即参与Major Compaction的level-(i+1)层的SSTable。扩展`input`范围的目的是避免Compaction后无法正确查找key版本的问题。这里我们先来看一下这一问题的成因：
 
 在Major Compaction发生前，UserKey `cat`在level-i层的SSTable中有两个版本，分别为`(cat, 101)`与`(cat, 100)`（这里仅关注UserKey与SequenceNumber）。此时，如果LevelDB查找UserKey `cat`的最新版本，其会首先查找到`(cat, 101)`，能够得到正常值。
 
@@ -714,19 +714,16 @@ Compaction* VersionSet::PickCompaction() {
 
 此时，如果LevelDB再次查找UserKey `cat`的最新版本，其首先会在level-i中查找到`(cat, 100)`，因此不会再继续查询level-(i+1)，此时返回了陈旧的值。
 
-为了避免这一问题，LevelDB在进行Major Compaction时，需要扩展每层中
+为了避免这一问题，LevelDB在进行Major Compaction时，需要Compaction的范围。LevelDB中扩展Compaction输入范围的方法是`AddBoundaryInputs`，`SetupOtherInputs`中就是通过调用`AddBoundaryInputs`方法实现的输入扩展。
 
+`AddBoundaryInputs`方法首先找到当前SSTable中最大的InternalKey记为`largest_key`，然后在这一level中查找满足其最小UserKey与`largest_key`相同且最小InternalKey大于`largest_key`的最小SSTable，将其加入到输入集中，并循环此过程，直到不再有新的SSTable被加入。`AddBoundaryInputs`方法依赖`FindLargestKey`与`FindSmallestBoundaryFile`方法实现了以上逻辑，这里不再赘述。
 
-
-
-
-
-# 施工中 ... ...
-
+在介绍了扩展`input`的原因与方法后，我们来分段分析`SetupOtherInputs`的实现：
 
 ```cpp
 
 void VersionSet::SetupOtherInputs(Compaction* c) {
+  // (1)
   const int level = c->level();
   InternalKey smallest, largest;
 
@@ -736,6 +733,32 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   current_->GetOverlappingInputs(level + 1, &smallest, &largest,
                                  &c->inputs_[1]);
 
+  // (2)
+  // ... ...
+
+  // (3)
+  // ... ...
+
+  // (4)
+  // ... ...
+
+}
+
+```
+
+首先我们来看(1)段。这部分通过`AddBoundaryInputs`方法扩展了level-i层参与Compaction的SSTable（即`input[0]`），然后在level-(i+1)中找到所有与level-i层参与Compaction的SSTable有overlap的SSTable，将其加入到`intput[1]`中。
+
+初次确定的`input`范围可能出现下图示例中的情况（注：图中SSTable的宽度表示其key范围，而非文件大小）：
+
+![初次确定的input范围](assets/reextend.svg "初次确定的input范围")
+
+图中*黄色*的SSTable是初次选取的input。如图的示例中，由于level-(i+1)层SSTable中的key较为分散，其input范围能够容纳level-i中更多的SSTable（即图中level-i层*蓝色*的SSTable）。显然，将这些SSTable加入到`input[0]`中，不需要扩展`input[1]`的范围。因此，LevelDB会将这部分SSTable一同合并，以减少未来需要的Compaction。
+
+`SetupOtherInputs`的段(2)实现了这一逻辑：
+
+```cpp
+
+  // (2)
   // Get entire range covered by compaction
   InternalKey all_start, all_limit;
   GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
@@ -772,6 +795,15 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
     }
   }
 
+```
+
+从段(2)可以看出，在再次扩展`input[0]`的范围时，除了需要保证不能引起`input[1]`的范围变化外，还需要扩展后的`input[0]`总的大小不超过扩展的限制（默认为25个`max_file_size`，即50MB）。
+
+`SetupOtherInputs`其余部分的逻辑比较简单：
+
+```cpp
+
+  // (3)
   // Compute the set of grandparent files that overlap this compaction
   // (parent == level+1; grandparent == level+2)
   if (level + 2 < config::kNumLevels) {
@@ -779,15 +811,140 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
                                    &c->grandparents_);
   }
 
+  // (4)
   // Update the place where we will do the next compaction for this level.
   // We update this immediately instead of waiting for the VersionEdit
   // to be applied so that if the compaction fails, we will try a different
   // key range next time.
   compact_pointer_[level] = largest.Encode().ToString();
   c->edit_.SetCompactPointer(level, largest);
+
+```
+
+段(3)计算了level-(i+1)层中与Compaction的范围有overlap的SSTable，以便后续操作使用。段(4)用来设置VersionEdit中记录的Compact Pointer，在Compcation前更新Compact Pointer的好处是：如果本次Compaction失败，则下次Size Compaction发生时，可以跳过这一部分，从下一个位置Compact。
+
+#### 3.2.3 Manual Compaction的范围
+
+# 施工中 ... ...
+
+
+```cpp
+
+void DBImpl::CompactRange(const Slice* begin, const Slice* end) {
+  int max_level_with_files = 1;
+  {
+    MutexLock l(&mutex_);
+    Version* base = versions_->current();
+    for (int level = 1; level < config::kNumLevels; level++) {
+      if (base->OverlapInLevel(level, begin, end)) {
+        max_level_with_files = level;
+      }
+    }
+  }
+  TEST_CompactMemTable();  // TODO(sanjay): Skip if memtable does not overlap
+  for (int level = 0; level < max_level_with_files; level++) {
+    TEST_CompactRange(level, begin, end);
+  }
+}
+
+void DBImpl::TEST_CompactRange(int level, const Slice* begin,
+                               const Slice* end) {
+  assert(level >= 0);
+  assert(level + 1 < config::kNumLevels);
+
+  InternalKey begin_storage, end_storage;
+
+  ManualCompaction manual;
+  manual.level = level;
+  manual.done = false;
+  if (begin == nullptr) {
+    manual.begin = nullptr;
+  } else {
+    begin_storage = InternalKey(*begin, kMaxSequenceNumber, kValueTypeForSeek);
+    manual.begin = &begin_storage;
+  }
+  if (end == nullptr) {
+    manual.end = nullptr;
+  } else {
+    end_storage = InternalKey(*end, 0, static_cast<ValueType>(0));
+    manual.end = &end_storage;
+  }
+
+  MutexLock l(&mutex_);
+  while (!manual.done && !shutting_down_.load(std::memory_order_acquire) &&
+         bg_error_.ok()) {
+    if (manual_compaction_ == nullptr) {  // Idle
+      manual_compaction_ = &manual;
+      MaybeScheduleCompaction();
+    } else {  // Running either my compaction or another compaction.
+      background_work_finished_signal_.Wait();
+    }
+  }
+  if (manual_compaction_ == &manual) {
+    // Cancel my manual compaction since we aborted early for some reason.
+    manual_compaction_ = nullptr;
+  }
+}
+
+Status DBImpl::TEST_CompactMemTable() {
+  // nullptr batch means just wait for earlier writes to be done
+  Status s = Write(WriteOptions(), nullptr);
+  if (s.ok()) {
+    // Wait until the compaction completes
+    MutexLock l(&mutex_);
+    while (imm_ != nullptr && bg_error_.ok()) {
+      background_work_finished_signal_.Wait();
+    }
+    if (imm_ != nullptr) {
+      s = bg_error_;
+    }
+  }
+  return s;
 }
 
 ```
+
+
+
+
+
+
+
+
+
+
+
+```cpp
+
+void DBImpl::BackgroundCompaction() {
+  
+  // ... ...
+
+  Compaction* c;
+  bool is_manual = (manual_compaction_ != nullptr);
+  InternalKey manual_end;
+  if (is_manual) {
+    ManualCompaction* m = manual_compaction_;
+    c = versions_->CompactRange(m->level, m->begin, m->end);
+    m->done = (c == nullptr);
+    if (c != nullptr) {
+      manual_end = c->input(0, c->num_input_files(0) - 1)->largest;
+    }
+    Log(options_.info_log,
+        "Manual compaction at level-%d from %s .. %s; will stop at %s\n",
+        m->level, (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
+        (m->end ? m->end->DebugString().c_str() : "(end)"),
+        (m->done ? "(end)" : manual_end.DebugString().c_str()));
+  }
+
+  // ... ...
+
+}
+
+```
+
+
+
 
 
 
