@@ -825,16 +825,11 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
 
 #### 3.2.3 Manual Compaction的范围
 
+Manual Compaction通过LevelDB提供的接口`void CompactRange(const Slice* begin, const Slice* end)`触发，其所知Compaction的范围信息最少，只知道需要Compact的起始与终止key，甚至不知道发生Compaction的level。这也意味着，需要Compact的key范围，既可能在MemTable或Immutable Table中，也可能在不同level的SSTable中，甚至二者都有。因此，在Compact的时候需要考虑所有情形。
 
+LevelDB为了确保用户给出的key范围都能够被Compact，其首先强制触发Minor Compaction，然后按照给定的key范围进行Major Compaction。
 
-
-
-
-
-
-
-# 施工中 ... ...
-
+我们从`DB::CompactRange`的实现`DBImpl::CompactRange`开始分析：
 
 ```cpp
 
@@ -854,6 +849,36 @@ void DBImpl::CompactRange(const Slice* begin, const Slice* end) {
     TEST_CompactRange(level, begin, end);
   }
 }
+
+```
+
+`DBImpl::CompactRange`方法首先根据给定key范围与每个level是否有overlap，得到需要Compact的最高level，然后通过`TEST_CompactMemTable`方法强制触发并等待Minor Compaction完成（当前版本因MemTable与给定key范围没有overlap而跳过Minor Compaction）。随后遍历从0到需要Compact的最高level，并按需对该层进行Major Compaction。
+
+接下来我们来分析`TEST_CompactMemTable`与`TEST_CompactRange`的实现：
+
+```cpp
+
+Status DBImpl::TEST_CompactMemTable() {
+  // nullptr batch means just wait for earlier writes to be done
+  Status s = Write(WriteOptions(), nullptr);
+  if (s.ok()) {
+    // Wait until the compaction completes
+    MutexLock l(&mutex_);
+    while (imm_ != nullptr && bg_error_.ok()) {
+      background_work_finished_signal_.Wait();
+    }
+    if (imm_ != nullptr) {
+      s = bg_error_;
+    }
+  }
+  return s;
+}
+
+```
+
+`TEST_CompactMemTable`方法会通过一次“null write batch”来触发`force`参数为true的`MakeRoomForWrite`调用，`force`为true的调用会强制触发Minor Compaction（详见[2.3 Minor Compaction的触发](/posts/code-reading/leveldb-made-simple/8-compaction/#23-minor-compaction的触发)）。随后该方法等待Minor Compaction完成后返回。
+
+```cpp
 
 void DBImpl::TEST_CompactRange(int level, const Slice* begin,
                                const Slice* end) {
@@ -894,62 +919,52 @@ void DBImpl::TEST_CompactRange(int level, const Slice* begin,
   }
 }
 
-Status DBImpl::TEST_CompactMemTable() {
-  // nullptr batch means just wait for earlier writes to be done
-  Status s = Write(WriteOptions(), nullptr);
-  if (s.ok()) {
-    // Wait until the compaction completes
-    MutexLock l(&mutex_);
-    while (imm_ != nullptr && bg_error_.ok()) {
-      background_work_finished_signal_.Wait();
-    }
-    if (imm_ != nullptr) {
-      s = bg_error_;
-    }
-  }
-  return s;
-}
-
 ```
 
-
-
-
-
-
-
-
-
-
+该方法的工作也很简单，其生成了需要Compact的InternalKey范围，并配置了`manual_compaction_`字段，然后通过`MaybeScheduleCompaction`方法触发Manual Compaction，并等待期执行结束后返回。随后，Manual Compaction的执行交由后台线程来触发。后台线程在执行Manual Compaction时，会通过`VersionSet::CompactRange`方法计算其具体范围：
 
 ```cpp
 
-void DBImpl::BackgroundCompaction() {
-  
-  // ... ...
-
-  Compaction* c;
-  bool is_manual = (manual_compaction_ != nullptr);
-  InternalKey manual_end;
-  if (is_manual) {
-    ManualCompaction* m = manual_compaction_;
-    c = versions_->CompactRange(m->level, m->begin, m->end);
-    m->done = (c == nullptr);
-    if (c != nullptr) {
-      manual_end = c->input(0, c->num_input_files(0) - 1)->largest;
-    }
-    Log(options_.info_log,
-        "Manual compaction at level-%d from %s .. %s; will stop at %s\n",
-        m->level, (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
-        (m->end ? m->end->DebugString().c_str() : "(end)"),
-        (m->done ? "(end)" : manual_end.DebugString().c_str()));
+Compaction* VersionSet::CompactRange(int level, const InternalKey* begin,
+                                     const InternalKey* end) {
+  std::vector<FileMetaData*> inputs;
+  current_->GetOverlappingInputs(level, begin, end, &inputs);
+  if (inputs.empty()) {
+    return nullptr;
   }
 
-  // ... ...
+  // Avoid compacting too much in one shot in case the range is large.
+  // But we cannot do this for level-0 since level-0 files can overlap
+  // and we must not pick one file and drop another older file if the
+  // two files overlap.
+  if (level > 0) {
+    const uint64_t limit = MaxFileSizeForLevel(options_, level);
+    uint64_t total = 0;
+    for (size_t i = 0; i < inputs.size(); i++) {
+      uint64_t s = inputs[i]->file_size;
+      total += s;
+      if (total >= limit) {
+        inputs.resize(i + 1);
+        break;
+      }
+    }
+  }
 
+  Compaction* c = new Compaction(options_, level);
+  c->input_version_ = current_;
+  c->input_version_->Ref();
+  c->inputs_[0] = inputs;
+  SetupOtherInputs(c);
+  return c;
 }
 
 ```
+
+该方法会在给定level中查找与给定key范围有overlap的所有SSTable。对于非level-0的层级，该方法会限制参与Compaciton的大小不超过配置中每层最大文件大小（如果需要Compact的范围超过了每层最大文件大小，说明之前还有Size Compcation任务）；而对于level-0，由于其SSTable间可能存在overlap，因此不能舍弃参与Compaction的SSTable。在`input[0]`确定后，同样通过`SetupOtherInputs`方法，配置其它输入参数（详见[3.2.2 Size Compaction与Seek Compaction的范围](/posts/code-reading/leveldb-made-simple/8-compaction/#322-size-compaction与seek-compaction的范围)）。
+
+# 施工中 ... ...
+
+
 
 
 
