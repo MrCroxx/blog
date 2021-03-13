@@ -1,7 +1,7 @@
 ---
 title: "深入浅出LevelDB —— 0x08 Compaction [施工中]"
 date: 2021-03-11T14:16:25+08:00
-lastmod: 2021-03-11T14:16:22+08:00
+lastmod: 2021-03-13T16:48:24+08:00
 draft: false
 keywords: []
 description: ""
@@ -824,6 +824,14 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
 段(3)计算了level-(i+1)层中与Compaction的范围有overlap的SSTable，以便后续操作使用。段(4)用来设置VersionEdit中记录的Compact Pointer，在Compcation前更新Compact Pointer的好处是：如果本次Compaction失败，则下次Size Compaction发生时，可以跳过这一部分，从下一个位置Compact。
 
 #### 3.2.3 Manual Compaction的范围
+
+
+
+
+
+
+
+
 
 # 施工中 ... ...
 
