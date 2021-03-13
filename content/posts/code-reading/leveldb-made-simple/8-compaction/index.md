@@ -962,6 +962,161 @@ Compaction* VersionSet::CompactRange(int level, const InternalKey* begin,
 
 该方法会在给定level中查找与给定key范围有overlap的所有SSTable。对于非level-0的层级，该方法会限制参与Compaciton的大小不超过配置中每层最大文件大小（如果需要Compact的范围超过了每层最大文件大小，说明之前还有Size Compcation任务）；而对于level-0，由于其SSTable间可能存在overlap，因此不能舍弃参与Compaction的SSTable。在`input[0]`确定后，同样通过`SetupOtherInputs`方法，配置其它输入参数（详见[3.2.2 Size Compaction与Seek Compaction的范围](/posts/code-reading/leveldb-made-simple/8-compaction/#322-size-compaction与seek-compaction的范围)）。
 
+## 4. Compaction的执行
+
+从本节开始，笔者将介绍并分析LevelDB中Compaction执行的过程。
+
+LevelDB将Compaction任务放入后台线程的Compaction任务队列后，由后台线程调度执行。其执行Compaction的行为可分为执行Minor Compaciton与Major Compaction两种。在介绍这两种Compaction的执行方法前，我们先从后台线程执行Comapciton的入口方法开始，分析Compaction的启动过程。
+
+### 4.1 后台线程Compaction入口
+
+```cpp
+
+void DBImpl::BGWork(void* db) {
+  reinterpret_cast<DBImpl*>(db)->BackgroundCall();
+}
+
+void DBImpl::BackgroundCall() {
+  MutexLock l(&mutex_);
+  assert(background_compaction_scheduled_);
+  if (shutting_down_.load(std::memory_order_acquire)) {
+    // No more background work when shutting down.
+  } else if (!bg_error_.ok()) {
+    // No more background work after a background error.
+  } else {
+    BackgroundCompaction();
+  }
+
+  background_compaction_scheduled_ = false;
+
+  // Previous compaction may have produced too many files in a level,
+  // so reschedule another compaction if needed.
+  MaybeScheduleCompaction();
+  background_work_finished_signal_.SignalAll();
+}
+
+```
+
+`DBImpl::BGWork`方法是后台线程的执行入口，该方法直接调用了`DBImpl::BackgroundCall`方法。`DBImpl::BackgroundCall`方法通过`MutexLock`对该方法整体上锁，`MutexLock`在构造时会对传入的互斥锁上锁，析构时会对传入的互斥锁解锁，因此只需要实例化MutexLock即可在其声明周期内加锁。该方法会判断LevelDB此时既没有被关闭，也没有发生后台线程错误，然后调用`DBImpl::BackgroundCompaction`方法正式开始Compaction执行。最后，在本次Compaction执行结束后，会再次调用`MaybeScheduleCompaction`方法以免本次Compaction导致某一层文件过大超出限制（这也是Size Compaction的触发代码，上文曾介绍过这段代码）。
+
+接着我们来分析`DBImpl::BackgroundCompaction`的实现。由于该方法较长，我们继续分段分析：
+
+```cpp
+
+void DBImpl::BackgroundCompaction() {
+  // (1)
+  mutex_.AssertHeld();
+
+  if (imm_ != nullptr) {
+    CompactMemTable();
+    return;
+  }
+
+  // ... ...
+
+}
+
+```
+
+`BackgroundCompaction`首先通过断言的方式确保当前持有锁，然后按照优先级来执行Compaction。首先其判断`imm_`是否存在，如果存在则通过`DBImpl::CompactionMemTable`方法来执行Minor Comapction并返回。
+
+```cpp
+
+  // (2)
+  Compaction* c;
+  bool is_manual = (manual_compaction_ != nullptr);
+  InternalKey manual_end;
+  if (is_manual) {
+    ManualCompaction* m = manual_compaction_;
+    c = versions_->CompactRange(m->level, m->begin, m->end);
+    m->done = (c == nullptr);
+    if (c != nullptr) {
+      manual_end = c->input(0, c->num_input_files(0) - 1)->largest;
+    }
+    Log(options_.info_log,
+        "Manual compaction at level-%d from %s .. %s; will stop at %s\n",
+        m->level, (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
+        (m->end ? m->end->DebugString().c_str() : "(end)"),
+        (m->done ? "(end)" : manual_end.DebugString().c_str()));
+  } else {
+    c = versions_->PickCompaction();
+  }
+
+```
+
+接着，`BackgroundCompaction`方法计算Compaction的具体范围。这段代码我们在上一节中介绍过，这里不再赘述。
+
+```cpp
+
+  // (3)
+  Status status;
+  if (c == nullptr) {
+    // Nothing to do
+  } else if (!is_manual && c->IsTrivialMove()) {
+    // Move file to next level
+    assert(c->num_input_files(0) == 1);
+    FileMetaData* f = c->input(0, 0);
+    c->edit()->RemoveFile(c->level(), f->number);
+    c->edit()->AddFile(c->level() + 1, f->number, f->file_size, f->smallest,
+                       f->largest);
+    status = versions_->LogAndApply(c->edit(), &mutex_);
+    if (!status.ok()) {
+      RecordBackgroundError(status);
+    }
+    VersionSet::LevelSummaryStorage tmp;
+    Log(options_.info_log, "Moved #%lld to level-%d %lld bytes %s: %s\n",
+        static_cast<unsigned long long>(f->number), c->level() + 1,
+        static_cast<unsigned long long>(f->file_size),
+        status.ToString().c_str(), versions_->LevelSummary(&tmp));
+  } else {
+    CompactionState* compact = new CompactionState(c);
+    status = DoCompactionWork(compact);
+    if (!status.ok()) {
+      RecordBackgroundError(status);
+    }
+    CleanupCompaction(compact);
+    c->ReleaseInputs();
+    RemoveObsoleteFiles();
+  }
+  delete c;
+
+```
+
+接下来，`BackgroundCompaction`方法会根据上一步中准备好的记录了Major Compaction所需数据的`Compaction`类型的实例`c`，执行相应的方法：
+1. 如果`c`为空，则无需执行，直接跳过这一步。
+2. 如果当前任务不是Manual Compaction，则判断Compaction任务`c`是否只需要SSTable从一层移动到下一层即可（被称为“trivial move”），即既不需要合并SSTable也不需要拆分SSTable。Manual Compaction不使用“trivial move”，以为用户提供显式回收不再需要的文件的接口。
+3. 否则，执行Compaction操作，依次调用`DoCompactionWork`、`CleanupCompaction`、`RemoveObsoleteFiles`。后文将详细分析每个方法的实现。
+
+该方法的步骤2会通过`Compaction::IsTrivialMove`方法来判断当前Comapction任务是否不需要合并或删除SSTable，而只需要将SSTable移到下一层。如果可以“trivial move”，则LevelDB只需要通过VersionEdit来修改Version中记录的每个level的文件编号即可，而不需要读写SSTable。`Compaction::IsTrivialMove`的实现如下：
+
+```cpp
+
+bool Compaction::IsTrivialMove() const {
+  const VersionSet* vset = input_version_->vset_;
+  // Avoid a move if there is lots of overlapping grandparent data.
+  // Otherwise, the move could create a parent file that will require
+  // a very expensive merge later on.
+  return (num_input_files(0) == 1 && num_input_files(1) == 0 &&
+          TotalFileSize(grandparents_) <=
+              MaxGrandParentOverlapBytes(vset->options_));
+}
+
+```
+
+`Compaction::IsTrivialMove`方法判断规则如下：
+1. 如果input[0]只有1个SSTable，input[1]中没有SSTable才可以“trivial move”，因为此时不需要合并多个SSTable。
+2. 检查level-(i+2)层中与将移动到level-(i+1)层的SSTable有overlap的文件总大小，不能超过一定上限（默认为10倍`max_file_size`，即20MB）。否则，该trivial move的SSTable下一次参与Major Compaction时其合并开销会非常大。
+
+下面，笔者将分别介绍Minor Compaction与Major Comapction的执行。
+
+### 4.2 Minor Compaction
+
+
+
+
+
+
+
 # 施工中 ... ...
 
 
