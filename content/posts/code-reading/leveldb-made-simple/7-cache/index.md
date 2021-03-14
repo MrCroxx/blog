@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x07 Cache"
+title: "深入浅出LevelDB —— 0x07 Cache [施工中]"
 date: 2021-03-10T11:17:19+08:00
 lastmod: 2021-03-10T19:28:42+08:00
 draft: false
@@ -24,9 +24,9 @@ resources:
 - BlockCache：缓存最近使用的SSTable中DataBlock数据。
 - TableCache：缓存最近打开的SSTable中的部分元数据（如索引等）。
 
-无论是BlockCache还是TableCache，其内部的核心实现都是LRU缓存（Least-Recently-Used）。该LRU缓存实现了`include/leveldb/cache.h`定义的缓存接口。
+无论是BlockCache还是TableCache，其内部的核心实现都是分片的LRU缓存（Least-Recently-Used）。该LRU缓存实现了`include/leveldb/cache.h`定义的缓存接口。
 
-本文主要介绍并分析LevelDB中Cache的设计与实现。关于BlockCache与TableCache的使用，将在本系列后续文章介绍LevelDB读写时介绍。
+本文主要介绍并分析LevelDB中Cache的设计与实现，并简单介绍了BlockCache与TableCache。
 
 ## 1.1 Cache接口
 
@@ -254,7 +254,7 @@ LevelDB的Cache实现中有两个用来保存缓存项`LRUHandle`的链表：*in
 
 LRUCache为了能够快速根据key来找到相应的LRUHandle，而不需要遍历链表，其还组装了一个哈希表`HandleTable`。LevelDB的哈希表与哈希函数都使用了自己的实现。
 
-LRUCache其实已经实现了完整的LRU缓存的功能。但是LevelDB又将其封装为`ShardedLRUCache`，并让`ShardedLRUCache`实现了`Cache`接口。ShardedLRUCache中保存了若干个`LRUCache`，并根据插入的key的哈希将其分配到相应的LRUCache中。因为每个LRUCache有独立的锁，这种方式可以减少锁的争用，以优化并行程序的性能。
+LRUCache其实已经实现了完整的LRU缓存的功能。但是LevelDB又将其封装为`ShardedLRUCache`，并让`ShardedLRUCache`实现了`Cache`接口，供用户使用。ShardedLRUCache中保存了若干个`LRUCache`，并根据插入的key的哈希将其分配到相应的LRUCache中。因为每个LRUCache有独立的锁，这种方式可以减少锁的争用，以优化并行程序的性能。
 
 接下来，我们自底向上地介绍并分析LevelDB中LRUHandle、HandleTable、LRUCache、ShardedLRUCache的实现。
 
@@ -499,3 +499,98 @@ class ShardedLRUCache : public Cache {
 ```
 
 `ShardedLRUCache`通过`HashSlice`方法对key进行一次哈希，并通过`Shard`方法为其分配shard。`ShardedLRUCache`中其它方法都是对shard的操作与对`LRUCache`的封装，这里也不再赘述。
+
+## 3. BlockCache与TableCache
+
+LevelDB在实现BlockCache与TableCache时，都用到了ShardedLRUCache。BlockCache直接使用了ShardedLRUCache，TableCache则对ShardedLRUCache的key/value又进行了一次简单的封装。二者的主要区别在于key/value的类型及cache的大小：
+
+- BlockCache：用户可通过Options.block_cache配置来自定义BlockCache的实现，其默认实现为8MB的ShardedLRUCache。其key/value为(table.cache_id,block.offset)->(Block*)。
+- TableCache：用户可通过OptionTable.max_open_file配置来自定义TableCache的大小，其默认可以保存1000个Table的信息。其key/value为(SSTable.file_number)->(TableAndFile*)。
+
+# 施工中 ... ...
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+其中BlockCache没有对ShardedLRUCache进行二次封装，而是直接使用了ShardedLRUCache，所以本文不对其做过多的介绍，而将其放在本系列后续文章介绍LevelDB的读写时介绍。
+
+而TableCache在ShardedLRUCache的基础上又进行了一次封装。为了后续文章能够从更高的层次介绍LevelDB的实现，因此本节将介绍TableCache的设计与实现。
+
+虽然叫做TableCache，但是其只缓存了SSTable的index与filter，以便caller能够在内存中快速索引到需要查找的SSTable与Key的位置。而对其中数据的索引需要使用BlockCache。
+
+### 3.1 TableCache接口
+
+`TableCache`的声明如下（位于`db/table_cache.h`）：
+
+```cpp
+
+class TableCache {
+ public:
+  TableCache(const std::string& dbname, const Options& options, int entries);
+  ~TableCache();
+
+  // Return an iterator for the specified file number (the corresponding
+  // file length must be exactly "file_size" bytes).  If "tableptr" is
+  // non-null, also sets "*tableptr" to point to the Table object
+  // underlying the returned iterator, or to nullptr if no Table object
+  // underlies the returned iterator.  The returned "*tableptr" object is owned
+  // by the cache and should not be deleted, and is valid for as long as the
+  // returned iterator is live.
+  Iterator* NewIterator(const ReadOptions& options, uint64_t file_number,
+                        uint64_t file_size, Table** tableptr = nullptr);
+
+  // If a seek to internal key "k" in specified file finds an entry,
+  // call (*handle_result)(arg, found_key, found_value).
+  Status Get(const ReadOptions& options, uint64_t file_number,
+             uint64_t file_size, const Slice& k, void* arg,
+             void (*handle_result)(void*, const Slice&, const Slice&));
+
+  // Evict any entry for the specified file number
+  void Evict(uint64_t file_number);
+
+ private:
+  Status FindTable(uint64_t file_number, uint64_t file_size, Cache::Handle**);
+
+  Env* const env_;
+  const std::string dbname_;
+  const Options& options_;
+  Cache* cache_;
+};
+
+}  // namespace leveldb
+
+```
+
+从`TableCache`的声明中可以发现，其除了构造与析构方法和生成迭代器的方法外，只对外提供了`Get`方法和`Evict`方法。caller通过使用SSTable的编号、待查找的key调用`Get`方法查找键值对时，`TableCache`会自动将该SSTable（的索引）放入缓存。
+
+### 3.2 TableAndFile
+
+在介绍TableCache的实现前，我们先来介绍一个TableCache中使用的重要数据结构`TableAndFile`。显然`TableAndFile`结构体中只有两个字段`table`和`file`：
+
+```cpp
+
+struct TableAndFile {
+  RandomAccessFile* file;
+  Table* table;
+};
+
+```
+
+其中`file`是一个`RandomAccessFile*`指针，该指针指向了真正的SSTable文件；而`table`字段是一个`Table*`指针，该类型为SSTable在内存中的表示：为了加快SSTable的查找并减少I/O次数，LevelDB将SSTable的index与filter加载到了内存中，`Table`即保存了这些数据：
+
+```cpp
+
+
+
+```
