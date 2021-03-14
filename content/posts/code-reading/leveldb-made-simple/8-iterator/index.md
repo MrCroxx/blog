@@ -98,3 +98,4 @@ LevelDB中几乎所有的迭代器，都实现了`Valid`、`SeekToFirst`、`Seek
 
 ## 2. Iterator分类
 
+![LevelDB Iterators](assets/iterator-system.svg "LevelDB Iterators")
