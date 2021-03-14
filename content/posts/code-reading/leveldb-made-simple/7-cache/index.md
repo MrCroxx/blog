@@ -502,36 +502,18 @@ class ShardedLRUCache : public Cache {
 
 ## 3. BlockCache与TableCache
 
-LevelDB在实现BlockCache与TableCache时，都用到了ShardedLRUCache。BlockCache直接使用了ShardedLRUCache，TableCache则对ShardedLRUCache的key/value又进行了一次简单的封装。二者的主要区别在于key/value的类型及cache的大小：
+### 3.1 BlockCache与TableCache概览
+
+LevelDB在实现BlockCache与TableCache时，都用到了ShardedLRUCache。BlockCache直接使用了ShardedLRUCache，TableCache则对ShardedLRUCache又进行了一次封装。二者的主要区别在于key/value的类型及cache的大小：
 
 - BlockCache：用户可通过Options.block_cache配置来自定义BlockCache的实现，其默认实现为8MB的ShardedLRUCache。其key/value为(table.cache_id,block.offset)->(Block*)。
 - TableCache：用户可通过OptionTable.max_open_file配置来自定义TableCache的大小，其默认可以保存1000个Table的信息。其key/value为(SSTable.file_number)->(TableAndFile*)。
 
-# 施工中 ... ...
+因为TableCache在ShardedLRUCache上又进行了一次封装，而读取TableCache时，所以本章主要关注TableCache及其实现。
 
+### 3.2 TableCache
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-其中BlockCache没有对ShardedLRUCache进行二次封装，而是直接使用了ShardedLRUCache，所以本文不对其做过多的介绍，而将其放在本系列后续文章介绍LevelDB的读写时介绍。
-
-而TableCache在ShardedLRUCache的基础上又进行了一次封装。为了后续文章能够从更高的层次介绍LevelDB的实现，因此本节将介绍TableCache的设计与实现。
-
-虽然叫做TableCache，但是其只缓存了SSTable的index与filter，以便caller能够在内存中快速索引到需要查找的SSTable与Key的位置。而对其中数据的索引需要使用BlockCache。
-
-### 3.1 TableCache接口
-
-`TableCache`的声明如下（位于`db/table_cache.h`）：
+`TableCache`中key/value为(SSTable.file_number)->(TableAndFile*)，该类如下（位于`db/table_cache.h`）：
 
 ```cpp
 
@@ -572,11 +554,9 @@ class TableCache {
 
 ```
 
-从`TableCache`的声明中可以发现，其除了构造与析构方法和生成迭代器的方法外，只对外提供了`Get`方法和`Evict`方法。caller通过使用SSTable的编号、待查找的key调用`Get`方法查找键值对时，`TableCache`会自动将该SSTable（的索引）放入缓存。
+从`TableCache`的声明中可以发现，其除了构造与析构方法和生成迭代器的方法外，只对外提供了`Get`方法和`Evict`方法。caller通过使用SSTable的编号、待查找的key调用`Get`方法查找键值对时，`TableCache`会自动将该SSTable相应的`TableAndFile`放入缓存。
 
-### 3.2 TableAndFile
-
-在介绍TableCache的实现前，我们先来介绍一个TableCache中使用的重要数据结构`TableAndFile`。显然`TableAndFile`结构体中只有两个字段`table`和`file`：
+`TableAndFile`结构体正如其名字一样，只有两个字段`table`和`file`：
 
 ```cpp
 
@@ -587,10 +567,171 @@ struct TableAndFile {
 
 ```
 
-其中`file`是一个`RandomAccessFile*`指针，该指针指向了真正的SSTable文件；而`table`字段是一个`Table*`指针，该类型为SSTable在内存中的表示：为了加快SSTable的查找并减少I/O次数，LevelDB将SSTable的index与filter加载到了内存中，`Table`即保存了这些数据：
+其中`file`字段表示SSTable相应的`RandomAccessFile`结构，即SSTable在文件中的表示；而`Table`字段表示SSTable的`Table`结构，其为SSTable在内存中的数据与接口，笔者将在下一节中介绍其结构。通过`TableAndFile`，caller可以获取其需要的结构。
+
+`TableCache`中我们主要关注两个方法的实现：`Get`与`FindTable`方法：
 
 ```cpp
 
+Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
+                             Cache::Handle** handle) {
+  Status s;
+  char buf[sizeof(file_number)];
+  EncodeFixed64(buf, file_number);
+  Slice key(buf, sizeof(buf));
+  *handle = cache_->Lookup(key);
+  if (*handle == nullptr) {
+    std::string fname = TableFileName(dbname_, file_number);
+    RandomAccessFile* file = nullptr;
+    Table* table = nullptr;
+    s = env_->NewRandomAccessFile(fname, &file);
+    if (!s.ok()) {
+      std::string old_fname = SSTTableFileName(dbname_, file_number);
+      if (env_->NewRandomAccessFile(old_fname, &file).ok()) {
+        s = Status::OK();
+      }
+    }
+    if (s.ok()) {
+      s = Table::Open(options_, file, file_size, &table);
+    }
+
+    if (!s.ok()) {
+      assert(table == nullptr);
+      delete file;
+      // We do not cache error results so that if the error is transient,
+      // or somebody repairs the file, we recover automatically.
+    } else {
+      TableAndFile* tf = new TableAndFile;
+      tf->file = file;
+      tf->table = table;
+      *handle = cache_->Insert(key, tf, 1, &DeleteEntry);
+    }
+  }
+  return s;
+}
+
+```
+
+内部方法`FindTable`首先会构造key并在TableCache查找是否已经缓存该SSTable。如果有则直接返回缓存结构；否则根据传入的`file_number`和`file_size`参数，通过`Table::Open`方法打开相应的`SSTable`，并将`file`与`table`写入`TableAndFile`结构体，放入自己的ShardedLRUCache缓存中。其中`Table::Open`方法会加载SSTable中的index和filter，笔者会在下一节介绍其实现。
+
+```cpp
+
+Status TableCache::Get(const ReadOptions& options, uint64_t file_number,
+                       uint64_t file_size, const Slice& k, void* arg,
+                       void (*handle_result)(void*, const Slice&,
+                                             const Slice&)) {
+  Cache::Handle* handle = nullptr;
+  Status s = FindTable(file_number, file_size, &handle);
+  if (s.ok()) {
+    Table* t = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
+    s = t->InternalGet(options, k, arg, handle_result);
+    cache_->Release(handle);
+  }
+  return s;
+}
+
+```
+
+`Get`方法是`TableCache`暴露给caller的外部方法，该方法首先通过`FindTable`方法打开所需的SSTable，然后通过`Table`结构体的`InternalGet`结构获取给定key对应的value。`Table::InternalGet`方法中既使用了SSTable的index和filter，又使用了BlockCache，下节中笔者将详细介绍其实现。
+
+从`TableCache`的代码可以发现，`Table`是实现TableCache的关键。下一节中，笔者将介绍并分析其实现。
+
+### 3.3 Table
+
+`Table`接口定义位于`include/leveldb/table.h`中，LevelDB的用户可以该接口中的`Open`方法打开SSTable并通过迭代器来访问其中数据，或者通过`ApproximateOffsetOf`方法估算key在SSTable中的位置；而`TableCache`作为其友元类，可以访问其私有方法。
+
+```cpp
+
+// A Table is a sorted map from strings to strings.  Tables are
+// immutable and persistent.  A Table may be safely accessed from
+// multiple threads without external synchronization.
+class LEVELDB_EXPORT Table {
+ public:
+  // Attempt to open the table that is stored in bytes [0..file_size)
+  // of "file", and read the metadata entries necessary to allow
+  // retrieving data from the table.
+  //
+  // If successful, returns ok and sets "*table" to the newly opened
+  // table.  The client should delete "*table" when no longer needed.
+  // If there was an error while initializing the table, sets "*table"
+  // to nullptr and returns a non-ok status.  Does not take ownership of
+  // "*source", but the client must ensure that "source" remains live
+  // for the duration of the returned table's lifetime.
+  //
+  // *file must remain live while this Table is in use.
+  static Status Open(const Options& options, RandomAccessFile* file,
+                     uint64_t file_size, Table** table);
+
+  Table(const Table&) = delete;
+  Table& operator=(const Table&) = delete;
+
+  ~Table();
+
+  // Returns a new iterator over the table contents.
+  // The result of NewIterator() is initially invalid (caller must
+  // call one of the Seek methods on the iterator before using it).
+  Iterator* NewIterator(const ReadOptions&) const;
+
+  // Given a key, return an approximate byte offset in the file where
+  // the data for that key begins (or would begin if the key were
+  // present in the file).  The returned value is in terms of file
+  // bytes, and so includes effects like compression of the underlying data.
+  // E.g., the approximate offset of the last key in the table will
+  // be close to the file length.
+  uint64_t ApproximateOffsetOf(const Slice& key) const;
+
+ private:
+  friend class TableCache;
+  struct Rep;
+
+  static Iterator* BlockReader(void*, const ReadOptions&, const Slice&);
+
+  explicit Table(Rep* rep) : rep_(rep) {}
+
+  // Calls (*handle_result)(arg, ...) with the entry found after a call
+  // to Seek(key).  May not make such a call if filter policy says
+  // that key is not present.
+  Status InternalGet(const ReadOptions&, const Slice& key, void* arg,
+                     void (*handle_result)(void* arg, const Slice& k,
+                                           const Slice& v));
+
+  void ReadMeta(const Footer& footer);
+  void ReadFilter(const Slice& filter_handle_value);
+
+  Rep* const rep_;
+};
+
+```
+
+`Table`的所有数据都通过`Table::Rep`类型的字段`rep_`保存，其实现位于`table/table.cc`中：
+
+```cpp
+
+struct Table::Rep {
+  ~Rep() {
+    delete filter;
+    delete[] filter_data;
+    delete index_block;
+  }
+
+  Options options;
+  Status status;
+  RandomAccessFile* file;
+  uint64_t cache_id;
+  FilterBlockReader* filter;
+  const char* filter_data;
+
+  BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
+  Block* index_block;
+};
 
 
 ```
+
+`Table`中封装了用来读取SSTable元数据的方法`ReadMeta`，该方法会根据SSTable的Footer找到Filter Block，并通过`ReadFilter`方法将filter加载到`Table::Rep`结构体`rep_`中。`Table`在读取Block时使用的是`table/format.h`中定义的方法`ReadBlock`。这些方法主要用来反序列化数据，有关SSTable的数据格式可以参考[深入浅出LevelDB —— 0x05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)，本文不再赘述。本节我们主要关注`Table`的`Open`、`InternalGet`方法的实现。
+
+
+
+
+
+# 施工中 ... ...
