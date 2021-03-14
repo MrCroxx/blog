@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x07 Cache [施工中]"
+title: "深入浅出LevelDB —— 0x07 Cache"
 date: 2021-03-10T11:17:19+08:00
 lastmod: 2021-03-10T19:28:42+08:00
 draft: false
@@ -22,13 +22,13 @@ resources:
 为了减少热点数据访问时磁盘I/O频繁导致的效率问题，LevelDB在访问SSTable时加入了缓存。LevelDB中使用的缓存从功能上可分为两种：
 
 - BlockCache：缓存最近使用的SSTable中DataBlock数据。
-- TableCache：缓存最近打开的SSTable中的部分元数据（如索引等）。
+- TableCache：TableCache可以认为是一个双层Cache。其第一层Cache缓存最近打开的SSTable中的部分元数据（如索引等）；而第二层Cache即为BlockCache，缓存了当前SSTable中的DataBlock数据。TableCache提供的Get接口会同时查询两层缓存。
 
 无论是BlockCache还是TableCache，其内部的核心实现都是分片的LRU缓存（Least-Recently-Used）。该LRU缓存实现了`include/leveldb/cache.h`定义的缓存接口。
 
 本文主要介绍并分析LevelDB中Cache的设计与实现，并简单介绍了BlockCache与TableCache。
 
-## 1.1 Cache接口
+## 1. Cache接口
 
 LevelDB的`include/leveldb/cache.h`定义了其内部使用的缓存接口，在介绍LevelDB中LRU缓存的实现前，我们首先关注该文件中定义的缓存接口：
 
@@ -728,10 +728,172 @@ struct Table::Rep {
 
 ```
 
-`Table`中封装了用来读取SSTable元数据的方法`ReadMeta`，该方法会根据SSTable的Footer找到Filter Block，并通过`ReadFilter`方法将filter加载到`Table::Rep`结构体`rep_`中。`Table`在读取Block时使用的是`table/format.h`中定义的方法`ReadBlock`。这些方法主要用来反序列化数据，有关SSTable的数据格式可以参考[深入浅出LevelDB —— 0x05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)，本文不再赘述。本节我们主要关注`Table`的`Open`、`InternalGet`方法的实现。
+`Table`中封装了用来读取SSTable元数据的方法`ReadMeta`，该方法会根据SSTable的Footer找到Filter Block，并通过`ReadFilter`方法将filter加载到`Table::Rep`结构体`rep_`中。`Table`在读取Block时使用的是`table/format.h`中定义的方法`ReadBlock`。这些方法主要用来反序列化数据，有关SSTable的数据格式可以参考[深入浅出LevelDB —— 0x05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)，本文不再赘述。本节我们介绍关注`Table`的`Open`、`BlockReader`、`InternalGet`方法的功能。
+
+```cpp
+
+Status Table::Open(const Options& options, RandomAccessFile* file,
+                   uint64_t size, Table** table) {
+  *table = nullptr;
+  if (size < Footer::kEncodedLength) {
+    return Status::Corruption("file is too short to be an sstable");
+  }
+
+  char footer_space[Footer::kEncodedLength];
+  Slice footer_input;
+  Status s = file->Read(size - Footer::kEncodedLength, Footer::kEncodedLength,
+                        &footer_input, footer_space);
+  if (!s.ok()) return s;
+
+  Footer footer;
+  s = footer.DecodeFrom(&footer_input);
+  if (!s.ok()) return s;
+
+  // Read the index block
+  BlockContents index_block_contents;
+  ReadOptions opt;
+  if (options.paranoid_checks) {
+    opt.verify_checksums = true;
+  }
+  s = ReadBlock(file, opt, footer.index_handle(), &index_block_contents);
+
+  if (s.ok()) {
+    // We've successfully read the footer and the index block: we're
+    // ready to serve requests.
+    Block* index_block = new Block(index_block_contents);
+    Rep* rep = new Table::Rep;
+    rep->options = options;
+    rep->file = file;
+    rep->metaindex_handle = footer.metaindex_handle();
+    rep->index_block = index_block;
+    rep->cache_id = (options.block_cache ? options.block_cache->NewId() : 0);
+    rep->filter_data = nullptr;
+    rep->filter = nullptr;
+    *table = new Table(rep);
+    (*table)->ReadMeta(footer);
+  }
+
+  return s;
+}
+
+```
+
+`Open`方法实现的功能主要是读取SSTable的Footer并加载其filter block与index block中的数据到内存。该方法还会并为Table分配一个`cache_id`，在通过Table读取其中DataBlock的数据时，会拼接`cache_id`与Block的`offset`拼接作为BlockCache的key。
+
+```cpp
+
+// Convert an index iterator value (i.e., an encoded BlockHandle)
+// into an iterator over the contents of the corresponding block.
+Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
+                             const Slice& index_value) {
+  Table* table = reinterpret_cast<Table*>(arg);
+  Cache* block_cache = table->rep_->options.block_cache;
+  Block* block = nullptr;
+  Cache::Handle* cache_handle = nullptr;
+
+  BlockHandle handle;
+  Slice input = index_value;
+  Status s = handle.DecodeFrom(&input);
+  // We intentionally allow extra stuff in index_value so that we
+  // can add more features in the future.
+
+  if (s.ok()) {
+    BlockContents contents;
+    if (block_cache != nullptr) {
+      char cache_key_buffer[16];
+      EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
+      EncodeFixed64(cache_key_buffer + 8, handle.offset());
+      Slice key(cache_key_buffer, sizeof(cache_key_buffer));
+      cache_handle = block_cache->Lookup(key);
+      if (cache_handle != nullptr) {
+        block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
+      } else {
+        s = ReadBlock(table->rep_->file, options, handle, &contents);
+        if (s.ok()) {
+          block = new Block(contents);
+          if (contents.cachable && options.fill_cache) {
+            cache_handle = block_cache->Insert(key, block, block->size(),
+                                               &DeleteCachedBlock);
+          }
+        }
+      }
+    } else {
+      s = ReadBlock(table->rep_->file, options, handle, &contents);
+      if (s.ok()) {
+        block = new Block(contents);
+      }
+    }
+  }
+
+  Iterator* iter;
+  if (block != nullptr) {
+    iter = block->NewIterator(table->rep_->options.comparator);
+    if (cache_handle == nullptr) {
+      iter->RegisterCleanup(&DeleteBlock, block, nullptr);
+    } else {
+      iter->RegisterCleanup(&ReleaseBlock, block_cache, cache_handle);
+    }
+  } else {
+    iter = NewErrorIterator(s);
+  }
+  return iter;
+}
+
+```
+
+`BlockReader`方法可以将在IndexBlock中查到的value值转为相应DataBlock的Iterator（index block中key/value为(index key -> DataBlockHandle)，详见[深入浅出LevelDB —— 0x05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)）。关于数据的解析这里不再赘述，我们主要关注的是该方法使用BlockCache的方式：
+1. 如果options中没有传入`block_cache`，则直接通过`ReadBlock`方法读取DataBlock的内容并返回构造好的`Block`实例。
+2. 如果options中传入了`block_cache`，则通过当前`Table`的`cache_id`字段与DataBlock的`offset`以Fixed64编码拼接为一个Slice作为BlockCache（默认为8M的ShardedLRUCache）的key。
+3. 拼接好key后，首先通过BlockCache查找key是否在其中，如果key存在直接将其相应的DataBlock作为结果。
+4. 如果key不存在，则通过`ReadBlock`方法读取DataBlock的内容。此时，如果options的`fill_cache`为true且Block的`cachable`也为true，则通过BlockCache缓存该DataBlock。
 
 
+了解了`Open`加载的内容和`BlockReader`的功能后，我们把重点放在`InternalGet`方法上。`InternalGet`方法是在SSTable中通过key查找value的方法：
 
+```cpp
 
+Status Table::InternalGet(const ReadOptions& options, const Slice& k, void* arg,
+                          void (*handle_result)(void*, const Slice&,
+                                                const Slice&)) {
+  Status s;
+  Iterator* iiter = rep_->index_block->NewIterator(rep_->options.comparator);
+  iiter->Seek(k);
+  if (iiter->Valid()) {
+    Slice handle_value = iiter->value();
+    FilterBlockReader* filter = rep_->filter;
+    BlockHandle handle;
+    if (filter != nullptr && handle.DecodeFrom(&handle_value).ok() &&
+        !filter->KeyMayMatch(handle.offset(), k)) {
+      // Not found
+    } else {
+      Iterator* block_iter = BlockReader(this, options, iiter->value());
+      block_iter->Seek(k);
+      if (block_iter->Valid()) {
+        (*handle_result)(arg, block_iter->key(), block_iter->value());
+      }
+      s = block_iter->status();
+      delete block_iter;
+    }
+  }
+  if (s.ok()) {
+    s = iiter->status();
+  }
+  delete iiter;
+  return s;
+}
 
-# 施工中 ... ...
+```
+
+`InternalGet`方法实现的方式可分为如下步骤：
+1. 获取IndexBlock上的Iterator，并通过该Iterator来seek需要查找的key所在的BlockHandle。
+2. 如果找到了key所在的BlockHandle则继续按下面步骤查找，否则释放Iterator并返回。
+3. 如果使用了filter，但filter没有在该DataBlock中找到相应的key/value，则跳至2；否则继续查找。
+4. 通过`BlockReader`方法获取该DataBlock上的Iterator，并通过DataBlock的Iterator来seek需要查找的key。如果找到则调用查找成功的回调方法`handle_result`。最后更新执行状态并释放DataBlock上的Iterator。
+
+## 4. 小结
+
+本文介绍并分析了LevelDB中Cache接口及其实现。同时，本文还介绍了BlockCache和TableCache的功能及其实现方式。
+
+准确来说，TableCache其实是两层Cache。第一层Cache缓存了（默认）1000个SSTable的index与filter，第二层通过BlockCache缓存了当前SSTable中（默认）8M的DataBlock。
+
+因为TableCache可以在cache miss时自动查找SSTable文件并替换其中缓存项，所以LevelDB在查找SSTable中的数据时，只需要通过TableCache查找即可，不需要再额外查找SSTable。
