@@ -356,3 +356,11 @@ mutex_.Lock();
 ```
 
 `SyncFd`会根据宏定义来检查编译环境下系统支持的系统调用，并在保证安全的条件下选择开销最小的系统调用实现。
+
+### 2.4 WAL裁剪
+
+如果LevelDB永远都不对WAL进行裁剪，那么随着对LevelDB的读写增加，WAL会越来越长。因此，在适当时机，LevelDB需要裁剪WAL文件。
+
+当WAL中记录的操作被写入到稳定存储后，就可以安全地释放旧的WAL文件。显然，这一时机即为Minor Comapction。Minor Compaction会将当前MemTable转为Immutable MemTable，并通过后台线程将Immutable MemTable写入到稳定存储。而裁剪WAL的方式也非常简单，只需要通过新的WAL文件记录Minor Compaction后的操作并删除旧的WAL文件即可。
+
+LevelDB对这一流程进行了优化。为了避免Minor Compaction阻塞LevelDB正常的读写操作，LevelDB在将MemTable转为Immutable MemTable时，就会切换到新的WAL写入。但此时，LevelDB不会删除旧的WAL文件，而是等到Minor Compaction完成后才会删除旧的WAL文件。这样便保证了如果Minor Compaction过程中失败，LevelDB也能通过旧的WAL文件和新的WAL文件来恢复其状态。
