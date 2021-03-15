@@ -71,13 +71,13 @@ enum Tag {
 这些Tag分别对应以下数据：
 1. Comparator Name：InternalKey比较器的名称字符串。
 2. Log Number：当前Log文件编号。
-3. Prev Log Number：前一个Log文件编号。
+3. Next File Number：为下一个文件分配的编号。
 4. Last SequenceNumber：当前版本最后一个SequenceNumber的值（仅对于SSTable文件而言，在LevelDB掉电后恢复时，还需要从WAL中恢复MemTable的状态，WAL中的SequenceNumber比文件中的更高）。
 5. Compact Pointers：(level, compaction key)记录某个level上次Compaction的位置，在Size Compaction中通过该字段来确定Compact的范围。
 6. Deleted File：(level, file number)该版本中删除的元数据。
 7. New File：(level, file number, file size, smallest key, largest key)该版本中新增文件的元数据。
 8.  ~~已弃用~~
-9. Prev Log Number：前一个Version Log（即上一个Manifest）文件编号（目前该字段已弃用）。
+9. Prev Log Number：前一个Version Log（即上一个Manifest）文件编号（目前该字段已弃用，详见[commit#ac1d69](https://github.com/google/leveldb/commit/ac1d69da31205a979b5a8510f33c31ae977530f0)）。
 
 因为VersionEdit是增量数据，因此并非每个VersionEdit中都有所有类型的数据，因此序列化VersionEdit的每种类型的数据前会将该类型对应的Tag以Varint32的编码方式写入到其数据之前。
 

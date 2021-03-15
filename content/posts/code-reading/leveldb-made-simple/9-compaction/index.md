@@ -1,7 +1,7 @@
 ---
-title: "深入浅出LevelDB —— 0x09 Compaction [施工中]"
+title: "深入浅出LevelDB —— 0x09 Compaction"
 date: 2021-03-11T14:16:25+08:00
-lastmod: 2021-03-13T16:48:24+08:00
+lastmod: 2021-03-15T23:26:52+08:00
 draft: false
 keywords: []
 description: ""
@@ -275,9 +275,11 @@ Status DBImpl::MakeRoomForWrite(bool force) {
 4. 如果`force`为false且MemTable估算的大小没有超过限制（默认为4MB），则直接退出，不需要进行Minor Compaction。
 5. 如果此时有未完成Minor Compaction的Immutable MemTable，此时循环等待Minor Compaction执行完成再执行。
 6. 如果当前level-0层的SSTable数过多（默认为8），此时循环等待level-0层SSTable数低于该上限，以避免level-0层SSTable过多
-7. 否则，将当前的MemTable转为Immutable，并调用`MaybeScheduleCompaction`方法尝试通过后台线程调度Compcation执行（此时`imm_`会引用旧的MemTable，以让`MaybeScheduleCompaction`得知当前需要Minor Compaction）。
+7. 否则，首先打开新的WAL文件用来记录后续操作，并释放旧的WAL文件。然后将当前的MemTable转为Immutable，调用`MaybeScheduleCompaction`方法尝试通过后台线程调度Compcation执行（此时`imm_`会引用旧的MemTable，以让`MaybeScheduleCompaction`得知当前需要Minor Compaction）。
 
 `DBImpl::MakeRoomForWrite`方法在判断是否需要进行Minor Compaction时，LevelDB通过流控与等待的方式，避免level-0层SSTable数过多。这是因为level-0层的key之间是有重叠的，因此当查询level-0层SSTable时，需要查找level-0层的所有SSTable。如果level-0层SSTable太多，会严重拖慢查询效率。
+
+从步骤7可以看出，在LevelDB触发Minor Compaction前，其就切换到新的WAL写入。如果Minor Compaction失败，此时可能需要从该Minor Compaction前的WAL恢复。在[深入浅出LevelDB —— 0x06 Version](/posts/code-reading/leveldb-made-simple/6-version/)介绍LevelDB的恢复中可知，当前版本的LevelDB会查找所有仍存在的WAL文件并恢复；而如果Minor Comapction未完成，LevelDB不会删除旧的WAL。因此，这里不会出现数据丢失问题。LevelDB这样做是为了在保证安全地情况下，避免Minor Compaction操作阻塞对LevelDB的正常读写，详见本系列[深入浅出LevelDB —— 0x03 Log](/posts/code-reading/leveldb-made-simple/3-log/#2-log的实现)的2.4节。
 
 ### 2.4 Size Compaction的触发
 
@@ -1449,6 +1451,6 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
 在`BackgroundCompaction`方法通过`DoCompactionWork`执行Compaction完成后，会依次调用`CleanupCompaction`和`RemoveObsoleteFiles`方法来进行清理。
 
-# 施工中 ... ...
+`CleanupCompaction`方法用来释放Compaction过程中的占用（主要是内存）。
 
-btw. Tier Compaction ( Tiering vs. Leveling )
+`RemoveObsoleteFiles`方法用来删除Compaction后不再需要的旧文件。
