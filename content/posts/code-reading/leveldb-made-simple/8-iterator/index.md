@@ -187,7 +187,7 @@ Iterator* NewMergingIterator(const Comparator* comparator, Iterator** children, 
 
 LevelDB中主要只有一处使用了`MergingIterator`，即用访问整个LevelDB中数据的迭代器`InternalIterator`。该迭代器组合了MemTable Iterator、Immutable MemTable Iterator、每个Level-0 SSTable的Iterator，和level>1的所有SSTable的Concatenating Iterator
 
-| Collection<div style='width:8em'></div> | Iterators[0]<div style='width:30em'></div> |
+| Collection<div style='width:8em'></div> | Iterators[0]<div style='width:60em'></div> |
 | :-: | :-: |
 | InternalIterator | MemTatble Iterator、Immutable MemTable Iterator、Level-0 SSTavke Iterators、Level>0 SSTable Concatenating Iterator |
 
