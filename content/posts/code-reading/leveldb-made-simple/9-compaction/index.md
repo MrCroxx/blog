@@ -1443,15 +1443,12 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
     1. 如果当前key的UserKey不是第一次出现，且其SequenceNumber小于保留的最小snapshot number，则丢弃该key/value。
     2. 如果该key的InternalKey类型为`kTypeDeletion`、且其SequenceNumber小于需要保留的最小snapshot number，同时更高的level中不存在该key时，可以丢弃该key/value。
 
-
+如果`drop`被置为true，则在段(7)中该key不会被写入到SSTable中。关于drop key的规则，需要注意的是，对于非`kTypeDeletion`类型的key，不能丢弃虽然SequenceNumber在smallest_snapshot前，但是其UserKey第一次出现的key；另外，对于`kTypeDeletion`类型，虽然可以丢弃在smallest_snapshot前的key，但是还需要保证在更高的level中没有该UserKey，否则在查询时，在当前level失配后会在下层中找到该UserKey的更旧的版本。
 
 ### 4.4 Compaction清理
 
+在`BackgroundCompaction`方法通过`DoCompactionWork`执行Compaction完成后，会依次调用`CleanupCompaction`和`RemoveObsoleteFiles`方法来进行清理。
 
-
-
-`CleanupCompaction` -> 内存
-`RemoveObsoleteFiles` -> 文件
-
+# 施工中 ... ...
 
 btw. Tier Compaction ( Tiering vs. Leveling )
