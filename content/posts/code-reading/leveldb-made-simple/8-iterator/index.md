@@ -185,11 +185,16 @@ Iterator* NewMergingIterator(const Comparator* comparator, Iterator** children, 
 
 在创建`MergingIterator`时，需要传入待组合的`Iterator`数组，及用来比较每个`Iterator`中的key的`Comparator`。在通过`MerginIterator`遍历所有iterator的key时，`MergingIterator`会比较其中所有iterator的key，并按照顺序选取最小的遍历；在所有iterator的空间中seek时，`MergingIterator`会调用所有iterator的`Seek`方法，然后比较所有iterator的seek结果，按顺序选取最小的返回。
 
-LevelDB中主要只有一处使用了`MergingIterator`，即用访问整个LevelDB中数据的迭代器`InternalIterator`。该迭代器组合了MemTable Iterator、Immutable MemTable Iterator、每个Level-0 SSTable的Iterator，和level>1的所有SSTable的Concatenating Iterator
+LevelDB中主要有两处使用了`MergingIterator`：
 
-| Collection<div style='width:8em'></div> | Iterators[0]<div style='width:60em'></div> |
+其一是用来访问整个LevelDB中数据的迭代器`InternalIterator`。该迭代器组合了MemTable Iterator、Immutable MemTable Iterator、每个Level-0 SSTable的Iterator，和level>1的所有SSTable的Concatenating Iterator。
+
+其二是执行Major Compaction时访问需要Compact的所有SSTable的迭代器`InputIterator`。对于level-0的SSTable，其直接组装了所有SSTable的Table Iterator，因为level-0中每个SSTable的key空间不保证全局有序；而对于其它level的SSTable，其通过Concatenating Iterator（即组装了LevelFileNumIterator和Table Iterator的TwoLevelIterator），该Concatenating Iterator中组装了该层需要参与Major Compaction的SSTable。
+
+| Collection<div style='width:8em'></div> | Iterators<div style='width:60em'></div> |
 | :-: | :-: |
-| InternalIterator | MemTatble Iterator、Immutable MemTable Iterator、Level-0 SSTavke Iterators、Level>0 SSTable Concatenating Iterator |
+| InternalIterator | MemTatble Iterator、Immutable MemTable Iterator、level-0 SSTavke Iterators、level>0 SSTable Concatenating Iterator |
+| InputIterator | level-0 Table Iterator、level>0 Concatenating Iterator (if necessary) |
 
 ### 2.2.3 通过cache优化TwoLevelIterator与MergingIterator
 
