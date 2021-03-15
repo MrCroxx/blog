@@ -152,7 +152,7 @@ Iterator* NewTwoLevelIterator(
 
 如果从key顺序的角度来看`TwoLevelIterator`，其需要index有序、每个index下的data有序、所有index下的所有data全局有序。即`TwoLevelIterator`实际上是一个建立在多级查找结构上的iterator。LevelDB中主要有两个符合该结构的组件：
 
-其一是level>0的SSTable，其每层SSTable可以按照key排序，每个SSTable内也按照key排序，且每层SSTable中的key没有overlap且全局有序。因此LevelDB中Version的Comcaterating Iterator实际上就是一个`TwoLevelIterator`，其第一级iterator是`LevelFileNumIterator`，该iterator按照key的顺序遍历每层SSTable；其第二级iterator是Table Iterator，该iterator可以按照key的顺序遍历SSTable中的key/value。Table Iterator本身也是一个`TwoLevelIterator`，这也是LevelDB中第二个符合该结构的部分。
+其一是level>0的SSTable，其每层SSTable可以按照key排序，每个SSTable内也按照key排序，且每层SSTable中的key没有overlap且全局有序。因此LevelDB中Version的Concaterating Iterator实际上就是一个`TwoLevelIterator`，其第一级iterator是`LevelFileNumIterator`，该iterator按照key的顺序遍历每层SSTable；其第二级iterator是Table Iterator，该iterator可以按照key的顺序遍历SSTable中的key/value。Table Iterator本身也是一个`TwoLevelIterator`，这也是LevelDB中第二个符合该结构的部分。
 
 其二即为SSTable内部的index与data。Table Iterator作为`TwoLevelIterator`，其第一级iterator遍历SSTable中的index，第二级iterator遍历index相应的data block中的key/value。
 
@@ -184,6 +184,12 @@ Iterator* NewMergingIterator(const Comparator* comparator, Iterator** children, 
 ```
 
 在创建`MergingIterator`时，需要传入待组合的`Iterator`数组，及用来比较每个`Iterator`中的key的`Comparator`。在通过`MerginIterator`遍历所有iterator的key时，`MergingIterator`会比较其中所有iterator的key，并按照顺序选取最小的遍历；在所有iterator的空间中seek时，`MergingIterator`会调用所有iterator的`Seek`方法，然后比较所有iterator的seek结果，按顺序选取最小的返回。
+
+LevelDB中主要只有一处使用了`MergingIterator`，即用访问整个LevelDB中数据的迭代器`InternalIterator`。该迭代器组合了MemTable Iterator、Immutable MemTable Iterator、每个Level-0 SSTable的Iterator，和level>1的所有SSTable的Concatenating Iterator
+
+| Collection<div style='width:8em'></div> | Iterators[0]<div style='width:30em'></div> |
+| :-: | :-: |
+| InternalIterator | MemTatble Iterator、Immutable MemTable Iterator、Level-0 SSTavke Iterators、Level>0 SSTable Concatenating Iterator |
 
 ### 2.2.3 通过cache优化TwoLevelIterator与MergingIterator
 
