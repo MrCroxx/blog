@@ -1265,34 +1265,193 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
 接着我们来看第(2)段代码，这段代码看上去很长，但做的工作较为简单。`DoCompactionWork`方法在遍历和生成SSTable是解锁的，我们将其放在后面分析，第(2)代码主要关注解锁前和上锁后的部分。
 
-在解锁前，该方法准备了需要避免竟态的数据：需要保留的最大SequenceNumber（以实现Snapshot Read）和参与Major Compaction的所有SSTable的全局迭代器。
+在解锁前，该方法准备了需要避免竟态的数据：需要保留的最大SequenceNumber（以实现Snapshot Read），并通过`MakeInputIterator`方法生成了所有参与Major Compaction的SSTable的全局迭代器Input Iterator（详见[深入浅出LevelDB —— 0x08 Iterator](/posts/code-reading/leveldb-made-simple/8-iterator/)）。
 
 在完成Compaction并上锁后，该方法更新了统计量和状态，输出日志后返回。
 
+下面我们介绍的部分，几乎都是在解锁的情况下执行的，其不会阻塞LevelDB正常的读写操作。
+
+```cpp
+
+  // (3)
+  input->SeekToFirst();
+  Status status;
+  ParsedInternalKey ikey;
+  std::string current_user_key;
+  bool has_current_user_key = false;
+  SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
+  while (input->Valid() && !shutting_down_.load(std::memory_order_acquire)) {
+
+    // (...)
+    // ... ...
+
+    input->Next();
+  }
+
+  if (status.ok() && shutting_down_.load(std::memory_order_acquire)) {
+    status = Status::IOError("Deleting DB during compaction");
+  }
+  if (status.ok() && compact->builder != nullptr) {
+    status = FinishCompactionOutputFile(compact, input);
+  }
+  if (status.ok()) {
+    status = input->status();
+  }
+  delete input;
+  input = nullptr;
+
+  CompactionStats stats;
+  stats.micros = env_->NowMicros() - start_micros - imm_micros;
+  for (int which = 0; which < 2; which++) {
+    for (int i = 0; i < compact->compaction->num_input_files(which); i++) {
+      stats.bytes_read += compact->compaction->input(which, i)->file_size;
+    }
+  }
+  for (size_t i = 0; i < compact->outputs.size(); i++) {
+    stats.bytes_written += compact->outputs[i].file_size;
+  }
+
+```
+
+第(3)段代码主要通过InputIterator顺序遍历参与Major Compaction的key/value，对每个key/value的处理会在下文介绍。在处理完所有key后，根据状态判断是否需要返回错误，同时通过`FinishCompactionOutputFile`方法关闭最后一个写入的SSTable。
+
+因为LevelDB限制了每个SSTable的大小，因此在Major Compaction期间，如果当前写入的SSTable过大，会将其拆分成多个SSTable写入，所以这里关闭的是最后一个SSTable。该方法主要通过SSTable的Builder的`Finish`方法完成对SSTable的写入，这里不再赘述，感兴趣的读者可以自行阅读。
+
+最后，这段代码更新了相关统计量。
+
+接下来我们来看LevelDB对每个key/value的处理：
+
+
+```cpp
+
+    // (4)
+    // Prioritize immutable compaction work
+    if (has_imm_.load(std::memory_order_relaxed)) {
+      const uint64_t imm_start = env_->NowMicros();
+      mutex_.Lock();
+      if (imm_ != nullptr) {
+        CompactMemTable();
+        // Wake up MakeRoomForWrite() if necessary.
+        background_work_finished_signal_.SignalAll();
+      }
+      mutex_.Unlock();
+      imm_micros += (env_->NowMicros() - imm_start);
+    }
+
+    // (5)
+    Slice key = input->key();
+    if (compact->compaction->ShouldStopBefore(key) &&
+        compact->builder != nullptr) {
+      status = FinishCompactionOutputFile(compact, input);
+      if (!status.ok()) {
+        break;
+      }
+    }
+
+    // (6)
+    // Handle key/value, add to state, etc.
+    bool drop = false;
+    // ... ...
+
+    // (7)
+    if (!drop) {
+      // Open output file if necessary
+      if (compact->builder == nullptr) {
+        status = OpenCompactionOutputFile(compact);
+        if (!status.ok()) {
+          break;
+        }
+      }
+      if (compact->builder->NumEntries() == 0) {
+        compact->current_output()->smallest.DecodeFrom(key);
+      }
+      compact->current_output()->largest.DecodeFrom(key);
+      compact->builder->Add(key, input->value());
+
+      // Close output file if it is big enough
+      if (compact->builder->FileSize() >=
+          compact->compaction->MaxOutputFileSize()) {
+        status = FinishCompactionOutputFile(compact, input);
+        if (!status.ok()) {
+          break;
+        }
+      }
+    }
+
+```
+
+我们首先来看(4)、(5)、(7)。
+
+段(4)判断当前是否有需要Minor Compaction的Immutable MemTable，如果有则让出任务，先进行Minor Compaction（该过程需要加锁）。
+
+段(5)通过`ShouldStopBefore`方法估算当前SSTable大小，并判断其是否超过了`max_file_size`的限制，如果超过了则通过`FinishCompactionOutputFile`完整对当前SSTable的写入。
+
+段(6)会判断当前key/value是否保留，如果保留则将`drop`置为true。其判断规则在下文介绍。
+
+段(7)用来将需要保留的key/value加入到当前SSTable中。因为在段(5)中当前写入的SSTable可能已因文件过大而被关闭，所以这里需要在SSTable被关闭时通过`OpenCompactionOutputFIle`打开一个新的SSTable并为其分配新的编号。
+
+最后我们来看段(6)中判断key/value是否需要保留的实现：
+
+
+```cpp
+
+    if (!ParseInternalKey(key, &ikey)) {
+      // Do not hide error keys
+      current_user_key.clear();
+      has_current_user_key = false;
+      last_sequence_for_key = kMaxSequenceNumber;
+    } else {
+      if (!has_current_user_key ||
+          user_comparator()->Compare(ikey.user_key, Slice(current_user_key)) !=
+              0) {
+        // First occurrence of this user key
+        current_user_key.assign(ikey.user_key.data(), ikey.user_key.size());
+        has_current_user_key = true;
+        last_sequence_for_key = kMaxSequenceNumber;
+      }
+
+      if (last_sequence_for_key <= compact->smallest_snapshot) {
+        // Hidden by an newer entry for same user key
+        drop = true;  // (A)
+      } else if (ikey.type == kTypeDeletion &&
+                 ikey.sequence <= compact->smallest_snapshot &&
+                 compact->compaction->IsBaseLevelForKey(ikey.user_key)) {
+        // For this user key:
+        // (1) there is no data in higher levels
+        // (2) data in lower levels will have larger sequence numbers
+        // (3) data in layers that are being compacted here and have
+        //     smaller sequence numbers will be dropped in the next
+        //     few iterations of this loop (by rule (A) above).
+        // Therefore this deletion marker is obsolete and can be dropped.
+        drop = true;
+      }
+
+      last_sequence_for_key = ikey.sequence;
+    }
+
+```
+
+段(6)中记录了当前key的UserKey的两个重要状态：
+- `has_current_user_key`：当前key的UserKey之前是否出现过。
+- `last_sequence_for_key`：当前key的UserKey的上一次出现时的SequenceNumber，如果该UserKey之前未出现过，则将其置为最大的SequenceNumber（`kMaxSequenceNumber`），以避免当前key的最新状态在小于需要保留的snapshot number时被丢弃。
+
+
+段(6)执行了如下流程：
+1. 解析当前key/value，如果解析失败则跳过当前key/value。
+2. 如果当前key/value解析成功，判断其UserKey是否未出现过，如果是则更新`has_current_user_key`和`last_sequence_for_key`的状态。
+3. 判断当前是否丢弃当前key/value：
+    1. 如果当前key的UserKey不是第一次出现，且其SequenceNumber小于保留的最小snapshot number，则丢弃该key/value。
+    2. 如果该key的InternalKey类型为`kTypeDeletion`、且其SequenceNumber小于需要保留的最小snapshot number，同时更高的level中不存在该key时，可以丢弃该key/value。
+
+
+
 ### 4.4 Compaction清理
+
+
+
 
 `CleanupCompaction` -> 内存
 `RemoveObsoleteFiles` -> 文件
 
-
-
-
-# 施工中 ... ...
-
-
-
-
-
-
-
-
-## x. Minor Compaction
-
-## x. Major Compaction
-
-
-DBImpl::BackgroundCompaction
-
-DBImplCompactMemTable
 
 btw. Tier Compaction ( Tiering vs. Leveling )
