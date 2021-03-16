@@ -201,4 +201,58 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
 段(5)是Write线程完成写入后的收尾阶段，该阶段会在持有锁的情况下将`writers_`队列中已完成写入的Writer的`done`字段置为true，并将这些Writer从`writers_`中移除。最后，Write线程通过信号量通知后续Write线程继续执行。
 
+## 2. ReadOnly
+
+### 2.1 ReadOnly接口
+
+本章主要介绍与读取LevelDB中数据相关的接口，其包括`Get`、`GetSnapshot`、`ReleaseSnapshot`方法。除了这些方法外，LevelDB还提供了获取能够改变遍历方向遍历所有数据的Iterator的方法`NewIterator`和获取LevelDB统计量和估算占用量等方法，但本文主要介绍LevelDB读写流程的设计与实现，因此本章不会介绍这些方法。
+
+```cpp
+
+  // If the database contains an entry for "key" store the
+  // corresponding value in *value and return OK.
+  //
+  // If there is no entry for "key" leave *value unchanged and return
+  // a status for which Status::IsNotFound() returns true.
+  //
+  // May return some other Status on an error.
+  virtual Status Get(const ReadOptions& options, const Slice& key,
+                     std::string* value) = 0;
+
+  // Return a handle to the current DB state.  Iterators created with
+  // this handle will all observe a stable snapshot of the current DB
+  // state.  The caller must call ReleaseSnapshot(result) when the
+  // snapshot is no longer needed.
+  virtual const Snapshot* GetSnapshot() = 0;
+
+  // Release a previously acquired snapshot.  The caller must not
+  // use "snapshot" after this call.
+  virtual void ReleaseSnapshot(const Snapshot* snapshot) = 0;
+
+```
+
+### 2.2 Snapshot
+
+LevelDB中与Snapshot相关的接口实现非常简单，其只需要在加锁的条件下，向`snapshot_`中加入最新的SequenceNumber的Snapshot即可。而Snapshot Read主要体现在LevelDB的Get方法与Compaction中（详见[深入浅出LevelDB —— 0x09 Compaction](/posts/code-reading/leveldb-made-simple/9-compaction/)中介绍的Major Compaction中drop key/value的条件）。
+
+```cpp
+
+const Snapshot* DBImpl::GetSnapshot() {
+  MutexLock l(&mutex_);
+  return snapshots_.New(versions_->LastSequence());
+}
+
+void DBImpl::ReleaseSnapshot(const Snapshot* snapshot) {
+  MutexLock l(&mutex_);
+  snapshots_.Delete(static_cast<const SnapshotImpl*>(snapshot));
+}
+
+```
+
+### 2.3 Get
+
+
+
+
+
 # 施工中 ... ...
