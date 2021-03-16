@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x10 Read & Write [施工中]"
+title: "深入浅出LevelDB —— 0x10 Read & Write"
 date: 2021-03-16T12:49:45+08:00
 lastmod: 2021-03-16T12:49:48+08:00
 draft: false
@@ -251,8 +251,208 @@ void DBImpl::ReleaseSnapshot(const Snapshot* snapshot) {
 
 ### 2.3 Get
 
+本节笔者将分段介绍并分析`DBImpl::Get`方法的设计与实现。虽然`Get`方法不会修改LevelDB中的数据，但是为了避免在读取期间MemTable、Immutable MemTable或Snapshot被释放，因此`Get`方法在真正读取数据前，还是需要通过锁来保护其所需的元数据。
 
+```cpp
 
+Status DBImpl::Get(const ReadOptions& options, const Slice& key,
+                   std::string* value) {
 
+  // (1)                     
+  Status s;
+  MutexLock l(&mutex_);
+  SequenceNumber snapshot;
+  if (options.snapshot != nullptr) {
+    snapshot =
+        static_cast<const SnapshotImpl*>(options.snapshot)->sequence_number();
+  } else {
+    snapshot = versions_->LastSequence();
+  }
 
-# 施工中 ... ...
+  MemTable* mem = mem_;
+  MemTable* imm = imm_;
+  Version* current = versions_->current();
+  mem->Ref();
+  if (imm != nullptr) imm->Ref();
+  current->Ref();
+
+  bool have_stat_update = false;
+  Version::GetStats stats;
+
+  // (2)
+  // Unlock while reading from files and memtables
+  {
+    mutex_.Unlock();
+    // First look in the memtable, then in the immutable memtable (if any).
+    LookupKey lkey(key, snapshot);
+    if (mem->Get(lkey, value, &s)) {
+      // Done
+    } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
+      // Done
+    } else {
+      s = current->Get(options, lkey, value, &stats);
+      have_stat_update = true;
+    }
+    mutex_.Lock();
+  }
+
+  // (3)
+  if (have_stat_update && current->UpdateStats(stats)) {
+    MaybeScheduleCompaction();
+  }
+  mem->Unref();
+  if (imm != nullptr) imm->Unref();
+  current->Unref();
+  return s;
+}
+
+```
+
+我们先来看`Get`方法持有锁时，即段(1)和(3)的操作：
+
+在段(1)中，`Get`方法会根据`ReadOptions`获取其需要读取的Snapshot的SequenceNumber，对于非Snapshot Read，`Get`方法会将当前最新的SequenceNumber作为本次查找可见的最大SequenceNumber。随后，`Get`方法保存了此时MemTable和Immutable MemTable的引用及current Version，同时增加这些对象的引用计数避免其在读取阶段被其它线程回收。
+
+在段(3)中，`Get`方法按需更新current Version的统计量，并按需尝试触发Compaction。最后释放之前增加的引用计数，并返回查询状态。
+
+`Get`的段(2)是真正执行查找的部分，因为当前线程已经持有了所需对象的引用，因此不需要再加锁。在这一部分中，`Get`方法首先根据caller传入的UserKey和Snapshot Read的SequenceNumber构造LookupKey。然后一次按照MemTable->Immutable MemTable->SSTable的顺序查找，如果中途找到所需key/value，则不需要继续查找。
+
+在MemTable和Immutable MemTable上的查找，都是在`SkipList`上的查找，这里不再赘述。下面我们关注一下在SSTable中查找的实现。
+
+在SSTable中查找给定UserKey是通过current Version的`Version::Get`方法实现的：
+
+```cpp
+
+Status Version::Get(const ReadOptions& options, const LookupKey& k,
+                    std::string* value, GetStats* stats) {
+  stats->seek_file = nullptr;
+  stats->seek_file_level = -1;
+
+  struct State {
+    Saver saver;
+    GetStats* stats;
+    const ReadOptions* options;
+    Slice ikey;
+    FileMetaData* last_file_read;
+    int last_file_read_level;
+
+    VersionSet* vset;
+    Status s;
+    bool found;
+
+    static bool Match(void* arg, int level, FileMetaData* f) {
+      State* state = reinterpret_cast<State*>(arg);
+
+      if (state->stats->seek_file == nullptr &&
+          state->last_file_read != nullptr) {
+        // We have had more than one seek for this read.  Charge the 1st file.
+        state->stats->seek_file = state->last_file_read;
+        state->stats->seek_file_level = state->last_file_read_level;
+      }
+
+      state->last_file_read = f;
+      state->last_file_read_level = level;
+
+      state->s = state->vset->table_cache_->Get(*state->options, f->number,
+                                                f->file_size, state->ikey,
+                                                &state->saver, SaveValue);
+      if (!state->s.ok()) {
+        state->found = true;
+        return false;
+      }
+      switch (state->saver.state) {
+        case kNotFound:
+          return true;  // Keep searching in other files
+        case kFound:
+          state->found = true;
+          return false;
+        case kDeleted:
+          return false;
+        case kCorrupt:
+          state->s =
+              Status::Corruption("corrupted key for ", state->saver.user_key);
+          state->found = true;
+          return false;
+      }
+
+      // Not reached. Added to avoid false compilation warnings of
+      // "control reaches end of non-void function".
+      return false;
+    }
+  };
+
+  State state;
+  state.found = false;
+  state.stats = stats;
+  state.last_file_read = nullptr;
+  state.last_file_read_level = -1;
+
+  state.options = &options;
+  state.ikey = k.internal_key();
+  state.vset = vset_;
+
+  state.saver.state = kNotFound;
+  state.saver.ucmp = vset_->icmp_.user_comparator();
+  state.saver.user_key = k.user_key();
+  state.saver.value = value;
+
+  ForEachOverlapping(state.saver.user_key, state.ikey, &state, &State::Match);
+
+  return state.found ? state.s : Status::NotFound(Slice());
+}
+
+```
+
+在介绍LevelDB中Compaction的实现时已经介绍过了`Match`方法，介绍过`Match`方法判断需要Seek Comapction的部分，而`Match`方法在查找SSTable时，是在TableCache上查找的。关于TableCache的部分，本系列也在[深入浅出LevelDB —— 0x07 Cache](posts/code-reading/leveldb-made-simple/7-cache/)中介绍过，这里不再赘述。
+
+`Version::Get`方法通过`ForEachOverlapping`方法，逐层扫描当前Version中的SSTable，并对其调用`Match`方法匹配LookupKey，直到LookupKey匹配或没有更多SSTable。
+
+`Version::ForEachOverLapping`方法实现如下：
+
+```cpp
+
+void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
+                                 bool (*func)(void*, int, FileMetaData*)) {
+  const Comparator* ucmp = vset_->icmp_.user_comparator();
+
+  // Search level-0 in order from newest to oldest.
+  std::vector<FileMetaData*> tmp;
+  tmp.reserve(files_[0].size());
+  for (uint32_t i = 0; i < files_[0].size(); i++) {
+    FileMetaData* f = files_[0][i];
+    if (ucmp->Compare(user_key, f->smallest.user_key()) >= 0 &&
+        ucmp->Compare(user_key, f->largest.user_key()) <= 0) {
+      tmp.push_back(f);
+    }
+  }
+  if (!tmp.empty()) {
+    std::sort(tmp.begin(), tmp.end(), NewestFirst);
+    for (uint32_t i = 0; i < tmp.size(); i++) {
+      if (!(*func)(arg, 0, tmp[i])) {
+        return;
+      }
+    }
+  }
+
+  // Search other levels.
+  for (int level = 1; level < config::kNumLevels; level++) {
+    size_t num_files = files_[level].size();
+    if (num_files == 0) continue;
+
+    // Binary search to find earliest index whose largest key >= internal_key.
+    uint32_t index = FindFile(vset_->icmp_, files_[level], internal_key);
+    if (index < num_files) {
+      FileMetaData* f = files_[level][index];
+      if (ucmp->Compare(user_key, f->smallest.user_key()) < 0) {
+        // All of "f" is past any data for user_key
+      } else {
+        if (!(*func)(arg, level, f)) {
+          return;
+        }
+      }
+    }
+  }
+}
+
+```
+
+`ForEachOverlapping`方法在level-0中查找时，由于level-0 SSTable之间可能存在overlap，所以其按照level-0 SSTable的生成顺序，从新SSTable到旧SSTable匹配；而在level>0中查找时，由于该层key全局有序，因此可以通过二分搜索的方式定位LookupKey所在的SSTable并匹配。
