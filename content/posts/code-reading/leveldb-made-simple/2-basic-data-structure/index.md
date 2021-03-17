@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x02 Bisic Data Format [施工中]"
+title: "深入浅出LevelDB —— 0x02 Slice"
 date: 2021-03-04T20:20:15+08:00
 lastmod: 2021-03-04T20:20:19+08:00
 draft: false
@@ -20,9 +20,11 @@ resources:
 
 ## 0. 引言
 
-为了便于后续的分析，本节将介绍LevelDB中常用的基本数据格式。
+为了避免操作字节数组或字符串时不必要的拷贝，LevelDB使用了其自己实现的Slice类。同时，提供了字节数组和定长或变长整型的编码方式。
 
-## 1.切片Slice
+本文将介绍LevelDB中的Slice及相关编码方式，以便介绍并分析LevelDB的实现。
+
+## 1.Slice
 
 相关文件：`include/leveldb/slice.h`。
 
@@ -189,9 +191,9 @@ char* EncodeVarint64(char* dst, uint64_t v) {
 
 在解码时，LevelDB只需要根据字节的最高位判断变长编码是否结束即可，这里不再赘述。另外，LevelDB提供了解码同时返回一些信息的方法，以方便在不通场景下的使用。
 
-### 2.3 长度确定的Slice编码
+### 2.3 带长度的Slice编码
 
-长度确定的Slice的编码方式非常简单，只需要在原Slice之前加上用变长整型表示的Slice长度即可：
+带长度的Slice的编码方式非常简单，只需要在原Slice之前加上用变长整型表示的Slice长度即可：
 
 ```cpp
 
@@ -201,14 +203,3 @@ void PutLengthPrefixedSlice(std::string* dst, const Slice& value) {
 }
 
 ```
-
-
-
-
-
-
-
-
-
-
-# 施工中 ... ...
