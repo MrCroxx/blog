@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x09 Compaction"
+title: "深入浅出LevelDB —— 09 Compaction"
 date: 2021-03-11T14:16:25+08:00
 lastmod: 2021-03-15T23:26:52+08:00
 draft: false
@@ -279,7 +279,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
 
 `DBImpl::MakeRoomForWrite`方法在判断是否需要进行Minor Compaction时，LevelDB通过流控与等待的方式，避免level-0层SSTable数过多。这是因为level-0层的key之间是有重叠的，因此当查询level-0层SSTable时，需要查找level-0层的所有SSTable。如果level-0层SSTable太多，会严重拖慢查询效率。
 
-从步骤7可以看出，在LevelDB触发Minor Compaction前，其就切换到新的WAL写入。如果Minor Compaction失败，此时可能需要从该Minor Compaction前的WAL恢复。在[深入浅出LevelDB —— 0x06 Version](/posts/code-reading/leveldb-made-simple/6-version/)介绍LevelDB的恢复中可知，当前版本的LevelDB会查找所有仍存在的WAL文件并恢复；而如果Minor Comapction未完成，LevelDB不会删除旧的WAL。因此，这里不会出现数据丢失问题。LevelDB这样做是为了在保证安全地情况下，避免Minor Compaction操作阻塞对LevelDB的正常读写，详见本系列[深入浅出LevelDB —— 0x03 Log](/posts/code-reading/leveldb-made-simple/3-log/#2-log的实现)的2.4节。
+从步骤7可以看出，在LevelDB触发Minor Compaction前，其就切换到新的WAL写入。如果Minor Compaction失败，此时可能需要从该Minor Compaction前的WAL恢复。在[深入浅出LevelDB —— 06 Version](/posts/code-reading/leveldb-made-simple/6-version/)介绍LevelDB的恢复中可知，当前版本的LevelDB会查找所有仍存在的WAL文件并恢复；而如果Minor Comapction未完成，LevelDB不会删除旧的WAL。因此，这里不会出现数据丢失问题。LevelDB这样做是为了在保证安全地情况下，避免Minor Compaction操作阻塞对LevelDB的正常读写，详见本系列[深入浅出LevelDB —— 03 Log](/posts/code-reading/leveldb-made-simple/3-log/#2-log的实现)的2.4节。
 
 ### 2.4 Size Compaction的触发
 
@@ -1267,7 +1267,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
 接着我们来看第(2)段代码，这段代码看上去很长，但做的工作较为简单。`DoCompactionWork`方法在遍历和生成SSTable是解锁的，我们将其放在后面分析，第(2)代码主要关注解锁前和上锁后的部分。
 
-在解锁前，该方法准备了需要避免竟态的数据：需要保留的最大SequenceNumber（以实现Snapshot Read），并通过`MakeInputIterator`方法生成了所有参与Major Compaction的SSTable的全局迭代器Input Iterator（详见[深入浅出LevelDB —— 0x08 Iterator](/posts/code-reading/leveldb-made-simple/8-iterator/)）。
+在解锁前，该方法准备了需要避免竟态的数据：需要保留的最大SequenceNumber（以实现Snapshot Read），并通过`MakeInputIterator`方法生成了所有参与Major Compaction的SSTable的全局迭代器Input Iterator（详见[深入浅出LevelDB —— 08 Iterator](/posts/code-reading/leveldb-made-simple/8-iterator/)）。
 
 在完成Compaction并上锁后，该方法更新了统计量和状态，输出日志后返回。
 

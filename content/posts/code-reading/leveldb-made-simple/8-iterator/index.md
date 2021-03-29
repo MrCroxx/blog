@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x08 Iterator"
+title: "深入浅出LevelDB —— 08 Iterator"
 date: 2021-03-11T11:17:19+08:00
 lastmod: 2021-03-15T15:17:49+08:00
 draft: false

@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x04 MemTable"
+title: "深入浅出LevelDB —— 04 MemTable"
 date: 2021-03-05T20:03:13+08:00
 lastmod: 2021-03-06T16:23:30+08:00
 draft: false
