@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x02 Slice"
+title: "深入浅出LevelDB —— 02 Slice"
 date: 2021-03-04T20:20:15+08:00
 lastmod: 2021-03-04T20:20:19+08:00
 draft: false

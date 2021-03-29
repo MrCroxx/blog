@@ -18,7 +18,7 @@ resources:
 
 <!--more-->
 
-## 1. 引言
+## 0. 引言
 
 boltDB是一个完全由go语言编写的基于B+树的kv数据库，其完全支持事务的ACID特性，整个数据库只有一个文件，且有较高的读性能与加载时间。etcd的后端存储使用的便是基于boltdb优化的kv存储[etcd-io/bbolt](https://github.com/etcd-io/bbolt)。
 
@@ -34,7 +34,7 @@ boltdb的源码非常适合用来学习B+Tree的实现。boltdb支持完整的�
 与前一个《深入浅出etcd/raft》系列相比，boltdb更多偏向工程实现而非算法，因此本系列不会逐行地分析每一行源码。
 
 
-## 2. 目录
+## 1. 目录
 
 - [深入浅出boltdb —— 0x00 引言](/posts/code-reading/boltdb-made-simple/0-introduction/)
 - [深入浅出boltdb —— 0x01 存储与缓存](/posts/code-reading/boltdb-made-simple/1-storage-cache/)
@@ -42,7 +42,7 @@ boltdb的源码非常适合用来学习B+Tree的实现。boltdb支持完整的�
 - [深入浅出boltdb —— 0x03 bucket & cursor](/posts/code-reading/boltdb-made-simple/3-bucket-cursor/)
 - [深入浅出boltdb —— 0x04 事务](/posts/code-reading/boltdb-made-simple/4-transaction/)
 
-## 3. 施工路线图
+## 2. 施工路线图
 
 - [x] 引言
 - [x] 存储

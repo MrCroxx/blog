@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x05 SSTable"
+title: "深入浅出LevelDB —— 05 SSTable"
 date: 2021-03-06T16:54:17+08:00
 lastmod: 2021-03-07T19:57:30+08:00
 draft: false
