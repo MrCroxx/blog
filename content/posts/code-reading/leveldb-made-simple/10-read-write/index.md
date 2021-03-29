@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x10 Read & Write"
+title: "深入浅出LevelDB —— 10 Read & Write"
 date: 2021-03-16T12:49:45+08:00
 lastmod: 2021-03-16T12:49:48+08:00
 draft: false
@@ -233,7 +233,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
 ### 2.2 Snapshot
 
-LevelDB中与Snapshot相关的接口实现非常简单，其只需要在加锁的条件下，向`snapshot_`中加入最新的SequenceNumber的Snapshot即可。而Snapshot Read主要体现在LevelDB的Get方法与Compaction中（详见[深入浅出LevelDB —— 0x09 Compaction](/posts/code-reading/leveldb-made-simple/9-compaction/)中介绍的Major Compaction中drop key/value的条件）。
+LevelDB中与Snapshot相关的接口实现非常简单，其只需要在加锁的条件下，向`snapshot_`中加入最新的SequenceNumber的Snapshot即可。而Snapshot Read主要体现在LevelDB的Get方法与Compaction中（详见[深入浅出LevelDB —— 09 Compaction](/posts/code-reading/leveldb-made-simple/9-compaction/)中介绍的Major Compaction中drop key/value的条件）。
 
 ```cpp
 
@@ -402,7 +402,7 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
 
 ```
 
-在介绍LevelDB中Compaction的实现时已经介绍过了`Match`方法，介绍过`Match`方法判断需要Seek Comapction的部分，而`Match`方法在查找SSTable时，是在TableCache上查找的。关于TableCache的部分，本系列也在[深入浅出LevelDB —— 0x07 Cache](posts/code-reading/leveldb-made-simple/7-cache/)中介绍过，这里不再赘述。
+在介绍LevelDB中Compaction的实现时已经介绍过了`Match`方法，介绍过`Match`方法判断需要Seek Comapction的部分，而`Match`方法在查找SSTable时，是在TableCache上查找的。关于TableCache的部分，本系列也在[深入浅出LevelDB —— 07 Cache](posts/code-reading/leveldb-made-simple/7-cache/)中介绍过，这里不再赘述。
 
 `Version::Get`方法通过`ForEachOverlapping`方法，逐层扫描当前Version中的SSTable，并对其调用`Match`方法匹配LookupKey，直到LookupKey匹配或没有更多SSTable。
 

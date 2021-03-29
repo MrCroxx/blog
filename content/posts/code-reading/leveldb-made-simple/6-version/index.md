@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x06 Version"
+title: "深入浅出LevelDB —— 06 Version"
 date: 2021-03-07T20:45:05+08:00
 lastmod: 2021-03-09T22:56:48+08:00
 draft: false
@@ -42,7 +42,7 @@ key/value的版本实际上也是依赖于内存与稳定存储，其分别在Co
 
 在LevelDB中，与Version相关的类有三个，分别是：`VersionEdit`、`Version`与`VersionSet`，而相关文件主要有`Manifest`和`Current`
 
-正如引言中所述，LevelDB中Version相关信息记录的是LevelDB生成的文件的版本信息与相关元数据。LevelDB的版本信息是增量存储的，其存储方式与WAL相同，将版本的增量变化信息作为Record顺序写入Manifest文件中（详见本系列文章[深入浅出LevelDB —— 0x03 Log](/posts/code-reading/leveldb-made-simple/3-log/)）。
+正如引言中所述，LevelDB中Version相关信息记录的是LevelDB生成的文件的版本信息与相关元数据。LevelDB的版本信息是增量存储的，其存储方式与WAL相同，将版本的增量变化信息作为Record顺序写入Manifest文件中（详见本系列文章[深入浅出LevelDB —— 03 Log](/posts/code-reading/leveldb-made-simple/3-log/)）。
 
 ### 1.1 VersionEdit、Manifest、Current
 

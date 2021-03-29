@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x03 Log"
+title: "深入浅出LevelDB —— 03 Log"
 date: 2021-03-05T12:43:16+08:00
 lastmod: 2021-03-05T12:43:19+08:00
 draft: false

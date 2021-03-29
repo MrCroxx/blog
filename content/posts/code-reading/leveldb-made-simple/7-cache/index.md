@@ -1,5 +1,5 @@
 ---
-title: "深入浅出LevelDB —— 0x07 Cache"
+title: "深入浅出LevelDB —— 07 Cache"
 date: 2021-03-10T11:17:19+08:00
 lastmod: 2021-03-10T19:28:42+08:00
 draft: false
@@ -728,7 +728,7 @@ struct Table::Rep {
 
 ```
 
-`Table`中封装了用来读取SSTable元数据的方法`ReadMeta`，该方法会根据SSTable的Footer找到Filter Block，并通过`ReadFilter`方法将filter加载到`Table::Rep`结构体`rep_`中。`Table`在读取Block时使用的是`table/format.h`中定义的方法`ReadBlock`。这些方法主要用来反序列化数据，有关SSTable的数据格式可以参考[深入浅出LevelDB —— 0x05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)，本文不再赘述。本节我们介绍关注`Table`的`Open`、`BlockReader`、`InternalGet`方法的功能。
+`Table`中封装了用来读取SSTable元数据的方法`ReadMeta`，该方法会根据SSTable的Footer找到Filter Block，并通过`ReadFilter`方法将filter加载到`Table::Rep`结构体`rep_`中。`Table`在读取Block时使用的是`table/format.h`中定义的方法`ReadBlock`。这些方法主要用来反序列化数据，有关SSTable的数据格式可以参考[深入浅出LevelDB —— 05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)，本文不再赘述。本节我们介绍关注`Table`的`Open`、`BlockReader`、`InternalGet`方法的功能。
 
 ```cpp
 
@@ -841,7 +841,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
 
 ```
 
-`BlockReader`方法可以将在IndexBlock中查到的value值转为相应DataBlock的Iterator（index block中key/value为(index key -> DataBlockHandle)，详见[深入浅出LevelDB —— 0x05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)）。关于数据的解析这里不再赘述，我们主要关注的是该方法使用BlockCache的方式：
+`BlockReader`方法可以将在IndexBlock中查到的value值转为相应DataBlock的Iterator（index block中key/value为(index key -> DataBlockHandle)，详见[深入浅出LevelDB —— 05 SSTable](/posts/code-reading/leveldb-made-simple/5-sstable/)）。关于数据的解析这里不再赘述，我们主要关注的是该方法使用BlockCache的方式：
 1. 如果options中没有传入`block_cache`，则直接通过`ReadBlock`方法读取DataBlock的内容并返回构造好的`Block`实例。
 2. 如果options中传入了`block_cache`，则通过当前`Table`的`cache_id`字段与DataBlock的`offset`以Fixed64编码拼接为一个Slice作为BlockCache（默认为8M的ShardedLRUCache）的key。
 3. 拼接好key后，首先通过BlockCache查找key是否在其中，如果key存在直接将其相应的DataBlock作为结果。
