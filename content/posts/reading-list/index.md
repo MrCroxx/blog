@@ -1,7 +1,7 @@
 ---
 title: "Reading List"
-date: 2021-10-30T20:22:00+08:00
-lastmod: 2021-10-30T20:22:00+08:00
+date: 2021-10-30T20:00:00+08:00
+lastmod: 2021-10-30T20:00:00+08:00
 draft: false
 keywords: []
 
@@ -28,7 +28,3 @@ resources:
 - [new writeback error reporting](https://lwn.net/Articles/724232/)
 - [improved block-layer error handling](https://lwn.net/Articles/724307/)
 - [PostgreSQL's fsync() error is unsafe](https://www.postgresql.org/message-id/CAMsr+YHh+5Oq4xziwwoEfhoTZgr07vdGG+hu=1adXx59aTeaoQ@mail.gmail.com)
-
-
-
-
