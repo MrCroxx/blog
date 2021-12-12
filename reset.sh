@@ -15,7 +15,6 @@ RESET(){
     echo 'clone build dir from remote...'
     cd ${BASEDIR}/build
     git clone git@github.com:MrCroxx/mrcroxx.github.io.git github
-    git clone git@e.coding.net:croxx-dev/blog.git coding
     
     echo 'done.'
 }
