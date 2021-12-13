@@ -6,8 +6,8 @@ draft: false
 keywords: []
 
 description: ""
-tags: ["Reading"]
-categories: ["Indexes"]
+tags: ["Reading List"]
+categories: ["Reading List"]
 author: ""
 resources:
 - name: featured-image
