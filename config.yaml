@@ -87,7 +87,7 @@ params:
       disclaimer: ""
     posts:
       enable: true
-      paginate: 5
+      paginate: 10
   social:
     GitHub: mrcroxx
     Email: mrcroxx@outlook.com
