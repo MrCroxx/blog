@@ -4,7 +4,7 @@ languageCode: zh-CN
 hasCJKLanguage: true
 enableEmoji: true
 title: 叉鸽 MrCroxx 的博客
-theme: LoveIt
+theme: DoIt
 author:
   name: 叉鸽
   email: mrcroxx@outlook.com
@@ -66,12 +66,6 @@ params:
       maxShownLines: 10000
     comment:
       enable: false
-      gitalk:
-        enable: true
-        owner: MrCroxx
-        repo: mrcroxx.github.io
-        clientId: cea7c74a1c09d447d6bc
-        clientSecret: 5ee9349a6af24ec56fbe5f545f858adb4fe0a1a7
     math:
       enable: true
       blockLeftDelimiter: ""
@@ -131,6 +125,15 @@ menu:
       url: /tags/
       title: ""
       weight: 3
+    -
+      identifier: about-me
+      pre: ""
+      post: ""
+      name: 关于我
+      url: /posts/about-me
+      title: ""
+      weight: 4
+
 markup:
   tableOfContents:
     startLevel: 2
