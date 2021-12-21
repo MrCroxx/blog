@@ -20,6 +20,30 @@ resources:
 
 碎碎念：在更了很多论文翻译后，发现翻译论文实在太花费精力了，而且英语水平有限，翻译质量也不高；另外，需要看这些论文的小伙伴英语似乎也不差，就不再献丑了。所以之后遇到的比较好的 paper 或者 blog 我会不定期地分类整理在这里。
 
+## BigData Infra
+
+- [The Google File System](https://dl.acm.org/doi/pdf/10.1145/945445.945450) Google 老三篇之一，GFS、BigTable、MapReduce 三篇 paper 基本上可以看做从此开创了大数据时代。
+- [MapReduce: simplified data processing on large clusters](https://dl.acm.org/doi/abs/10.1145/1327452.1327492) Google 老三篇之一，提出了 MapReduce 模型，也是大数据时代开山之作之一。
+- [Spark: Cluster Computing with Working Sets](https://www.usenix.org/legacy/event/hotcloud10/tech/full_papers/Zaharia.pdf) Spark 的 paper，分析了 MapReduce 在迭代计算、编程模型等上的不足，很详细地介绍了 Spark 最初为了解决的问题。
+
+
+## Distributed Consensus
+
+- [The part-time parliament](https://dl.acm.org/doi/pdf/10.1145/3335772.3335939) Paxos 开山之作，祖师爷 Leslie Lamport 一个人的成果差不多养活了一个行业，这篇写的比较晦涩，建议拜读一下。
+- [Paxos Made Simple](https://courses.cs.washington.edu/courses/cse550/17au/papers/CSE550.paxos-simple.pdf) 因为 Paxos 最初的 paper 写的太晦涩，Lamport 老爷子亲自下场解释 Paxos 其实很简单，提供了完整、清晰的数学证明（作为工程背景的读起来仍然很难 orz）。
+- [Paxos made live: an engineering perspective](https://dl.acm.org/doi/abs/10.1145/1281100.1281103) 从工程的角度介绍了 Paxos 算法在 Chubby 上的的使用，提出了 Multi-Paxos。*注：Multi-Paxos 与 Multi-Raft 的 Multi 一般所指的并非为一个问题。Multi-Paxos 的 Multi 指连续的多次 Paxos 算法对连续的 log 达成 linearizability 共识；Multi-Raft 的 Multi 一般指 sharding 系统中每个 shard 通过单独的 Raft Group 维护副本一致性。*
+- [In Search of an Understandable Consensus Algorithm (Extended Version)](https://people.eecs.berkeley.edu/~kubitron/courses/cs262a-F18/handouts/papers/raft-technicalReport.pdf) Raft 算法的小论文，终于有能让工程背景的容易理解的满足 Linearizability Consistency 的 Consensus 算法了。
+- [CONSENSUS: BRIDGING THEORY AND PRACTICE](http://files.catwell.info/misc/mirror/2014-ongaro-raft-phd.pdf) Diego Ongaro 的 Ph.D thesis，详细介绍了 Raft 算法，并提出了很多优化点与形式化证明，其中的大部分优化点至今都在工业界使用。
+
+
+## LSM-Tree
+
+- [The log-structured merge-tree (LSM-tree)](https://link.springer.com/article/10.1007/s002360050048) 最早提出 LSM-Tree 的 paper，其中很多设计与假设已经发生了变化。
+- [Bigtable: A Distributed Storage System for Structured Data](https://dl.acm.org/doi/abs/10.1145/1365815.1365816) Google 老三篇之一，重新捡起了 LSM-Tree 存储格式。
+- [WiscKey: Separating Keys from Values in SSD-Conscious Storage](https://dl.acm.org/doi/abs/10.1145/3033273) WiscKey 的 paper，基于 KV 分离优化 LSM-Tree 写放大的开篇，BadgerDB、Titan、TerarkDB 都是基于类似思想在工业实现上的变种。
+- [PebblesDB: Building Key-Value Stores using Fragmented Log-Structured Merge Trees](https://dl.acm.org/doi/abs/10.1145/3132747.3132765) 引入了 Guard 允许 Guard 划分的区间内 SSTable Keyspace overlap 以减少 Compaction 写放大。
+- [https://ieeexplore.ieee.org/abstract/document/9556071](Building A Fast and Efficient LSM-tree Store by Integrating Local Storage with Cloud Storage) 根据 EC2 Instance Store 与 EBS 的性能、计费差异分层存储 LSM-Tree 的工作。
+
 ## Scylla Userspace I/O Scheduler
 
 Scylla 使用 Seastar 作为 c++ 的异步编程 runtime，Seastar 是一个 thread-per-core 的 runtime，也是在 thread-per-core 的 disk I/O 方面做的比较领先的框架，同时 Scylla 的 blog 写的也很详细。
