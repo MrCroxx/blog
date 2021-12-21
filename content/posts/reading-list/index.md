@@ -1,7 +1,7 @@
 ---
-title: "Reading List"
-date: 2021-10-30T18:00:00+08:00
-lastmod: 2021-10-30T18:00:00+08:00
+title: "[置顶] Reading List"
+date: 2021-12-21T00:00:00+08:00
+lastmod: 2021-12-21T00:00:00+08:00
 draft: false
 keywords: []
 
@@ -27,7 +27,7 @@ resources:
 - [Spark: Cluster Computing with Working Sets](https://www.usenix.org/legacy/event/hotcloud10/tech/full_papers/Zaharia.pdf) Spark 的 paper，分析了 MapReduce 在迭代计算、编程模型等上的不足，很详细地介绍了 Spark 最初为了解决的问题。
 
 
-## Distributed Consensus
+## Consensus
 
 - [The part-time parliament](https://dl.acm.org/doi/pdf/10.1145/3335772.3335939) Paxos 开山之作，祖师爷 Leslie Lamport 一个人的成果差不多养活了一个行业，这篇写的比较晦涩，建议拜读一下。
 - [Paxos Made Simple](https://courses.cs.washington.edu/courses/cse550/17au/papers/CSE550.paxos-simple.pdf) 因为 Paxos 最初的 paper 写的太晦涩，Lamport 老爷子亲自下场解释 Paxos 其实很简单，提供了完整、清晰的数学证明（作为工程背景的读起来仍然很难 orz）。
