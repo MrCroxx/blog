@@ -140,7 +140,7 @@ type JointConfig [2]MajorityConfig
 
 ```
 
-为了实现方便，`JointConfig`的元素0表示$C_{new}$或非*joint consensus*状态下的当前配置，元素0表示$C_{old}$，在非*joint consensus*状态下的元素1应是一个空配置。
+`JointConfig`的元素0统一表示$C_{new}$；元素1在*joint consensus*下表示$C_{old}$，在非*joint consensus*下应为一个空配置。*（之前这里有个笔误，感谢 codedump gg 的提醒。）*
 
 `JointConfig`提供的方法与`MajorityConfig`几乎一样，其也提供了`CommittedIndex`方法与`VoteResult`方法。
 
