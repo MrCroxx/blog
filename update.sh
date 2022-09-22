@@ -10,7 +10,7 @@ UPDATE(){
     # UPDATE RAW BLOG
     git add .
     git commit -m "update"
-    git push origin master
+    git push origin main
 
     # UPDATE GENERATED BLOG
     ## github page
@@ -21,7 +21,7 @@ UPDATE(){
     cd build/github
     git add .
     git commit -m "update"
-    git push origin master
+    git push origin main
 }
 
 UPDATE
