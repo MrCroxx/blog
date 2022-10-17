@@ -19,7 +19,7 @@ UPDATE(){
     hugo --baseURL=https://mrcroxx.github.io --destination=build/github
     cp extra/* build/github/
     cd build/github
-    echo "mrcroxx.github.io" > CNAME
+    echo "blog.github.com" > CNAME
     git add .
     git commit -m "update"
     git push -u origin main
