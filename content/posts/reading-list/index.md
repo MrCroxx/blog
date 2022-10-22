@@ -23,6 +23,7 @@ resources:
 ## System
 - [Memory Models](https://research.swtch.com/mm) Plan 9 与 Go 语言的作者 Russ Cox 关于 memory models 的三篇 blog。从硬件、编程语言、Go 语言的视角自底向上地介绍了 memory models。
 - **Linux Kernel Development (Third Edition)** 《Linux 内核设计与实现》的英文原版。建议在阅读 Linux 源码时作为工具书看。最早看的时候还没有深入接触过 Linux 源码，所以感觉书比较流水账。但是工作需要深入查 fs 和 bio 层源码的时候，很多关键的比较难懂的地方可以在这本书里找到。
+- [Practical lock-freedom](https://www.cl.cam.ac.uk/techreports/UCAM-CL-TR-579.pdf) 一本比较详细介绍无锁编程和无锁数据结构等内容的书，比较硬。
 
 ## BigData Infra
 
