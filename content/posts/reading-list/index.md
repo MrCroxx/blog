@@ -20,6 +20,8 @@ resources:
 
 碎碎念：在更了很多论文翻译后，发现翻译论文实在太花费精力了，而且英语水平有限，翻译质量也不高；另外，需要看这些论文的小伙伴英语似乎也不差，就不再献丑了。所以之后遇到的比较好的 paper 或者 blog 我会不定期地分类整理在这里。
 
+本文主要列出较为系统的文献，比较碎片的材料后续我会同步到我的 telegram channel [What does MrCroxx read?](https://t.me/whatdoesmrcroxxread) 中。
+
 ## System
 - [Memory Models](https://research.swtch.com/mm) Plan 9 与 Go 语言的作者 Russ Cox 关于 memory models 的三篇 blog。从硬件、编程语言、Go 语言的视角自底向上地介绍了 memory models。
 - **Linux Kernel Development (Third Edition)** 《Linux 内核设计与实现》的英文原版。建议在阅读 Linux 源码时作为工具书看。最早看的时候还没有深入接触过 Linux 源码，所以感觉书比较流水账。但是工作需要深入查 fs 和 bio 层源码的时候，很多关键的比较难懂的地方可以在这本书里找到。
