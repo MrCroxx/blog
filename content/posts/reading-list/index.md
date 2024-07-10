@@ -1,5 +1,5 @@
 ---
-title: "[置顶] Reading List"
+title: "[Pinned] Reading List"
 date: 2022-10-08T00:00:00+08:00
 lastmod: 2022-10-08T00:00:00+08:00
 draft: false
