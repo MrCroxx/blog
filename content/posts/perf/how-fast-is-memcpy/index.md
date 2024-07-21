@@ -18,4 +18,8 @@ resources:
 
 <!--more-->
 
-这个人很懒，还没写。
+When writing programs, especially performance-sensitive ones, we often try to avoid memory copies to improve performance. Sometimes, it is easy to eliminate memory copies by using pointers or references. However, there are also times when it is challenging to eliminate memory copies, requiring careful memory lifecycle management and the introduction of additional synchronization mechanisms to avoid concurrent read and write operations. The latter often introduces additional overhead, which can sometimes make our program slower with our "optimization".
+
+Determining whether a memory copy needs to be eliminated, it is important to understand how slow (or fast) the memory copy operation actually is. 
+
+# TODO
