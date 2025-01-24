@@ -5,8 +5,8 @@ title = "叉鸽的博客 | MrCroxx's Blog"
 theme = "DoIt"
 
 [params]
-version = "0.2.X"
 description = "Welcome to MrCroxx's Blog."
+images = ["favicon-32x32.png"]
 
 [params.author]
 name = "叉鸽 | MrCroxx"
