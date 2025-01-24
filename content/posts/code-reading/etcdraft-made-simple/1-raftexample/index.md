@@ -8,9 +8,7 @@ description: ""
 tags: ["etcd", "Raft"]
 categories: ["深入浅出etcd/raft"]
 author: ""
-resources:
-- name: featured-image
-  src: etcd-raft.jpg
+featuredImage: img/etcd-raft.jpg
 ---
 
 *本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*

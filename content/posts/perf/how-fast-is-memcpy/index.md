@@ -9,9 +9,7 @@ description: ""
 tags: ["memcpy"]
 categories: ["Performance Optimization"]
 author: ""
-resources:
-- name: featured-image
-  src: index.png
+featuredImage: index.png
 ---
 
 *本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*

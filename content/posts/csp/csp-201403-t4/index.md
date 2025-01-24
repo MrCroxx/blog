@@ -4,11 +4,12 @@ date: 2019-07-30T13:36:30+08:00
 draft: false
 categories: ["CCF CSP"]
 tags: ["CCF CSP","Algorithm"]
-
-resources:
-- name: featured-image
-  src: ccf-csp.jpg
+featuredImage: img/ccf-csp.jpg
 ---
+
+*本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
+
+<!--more-->
 
 # CCF CSP 201403 T4 无线网络
 

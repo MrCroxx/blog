@@ -8,9 +8,7 @@ description: ""
 tags: ["Bigtable", "Translation"]
 categories: ["Paper Reading"]
 author: ""
-resources:
-- name: featured-image
-  src: paper-reading.jpg
+featuredImage: img/paper-reading.jpg
 ---
 
 *本篇文章是对论文[Bigtable-OSDI06](https://static.googleusercontent.com/media/research.google.com/zh-CN//archive/bigtable-osdi06.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
