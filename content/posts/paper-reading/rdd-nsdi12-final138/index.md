@@ -1,7 +1,7 @@
 ---
 title: "《Resilient Distributed Datasets: A Fault-Tolerant Abstraction for In-Memory Cluster Computing》论文翻译（RDD-NSDI12-FINAL138）"
 date: 2020-09-07T11:14:45+08:00
-lastmod: 22020-09-10T14:29:45+08:00
+lastmod: 2020-09-10T14:29:45+08:00
 draft: false
 keywords: []
 description: ""
