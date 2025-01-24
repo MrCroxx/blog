@@ -8,9 +8,7 @@ description: ""
 tags: ["MVCC", "Translation"]
 categories: ["Paper Reading"]
 author: ""
-resources:
-- name: featured-image
-  src: paper-reading.jpg
+featuredImage: img/paper-reading.jpg
 ---
 
 *本篇文章是对论文[An Empirical Evaluation of In-Memory Multi-Version Concurrency Control](https://15721.courses.cs.cmu.edu/spring2019/papers/03-mvcc1/wu-vldb2017.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*

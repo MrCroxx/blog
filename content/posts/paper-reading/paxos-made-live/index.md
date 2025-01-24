@@ -8,9 +8,7 @@ description: ""
 tags: ["Paxos", "Translation"]
 categories: ["Paper Reading"]
 author: ""
-resources:
-- name: featured-image
-  src: paper-reading.jpg
+featuredImage: img/paper-reading.jpg
 ---
 
 *本篇文章是对论文[Paxos Made Live - An Engineering Perspective](http://www8.cs.umu.se/kurser/5DV153/HT14/literature/chandra2006paxos.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
