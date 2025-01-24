@@ -8,9 +8,7 @@ description: ""
 tags: ["Consistent Hashing", "Translation"]
 categories: ["Paper Reading"]
 author: ""
-resources:
-- name: featured-image
-  src: paper-reading.jpg
+featuredImage: img/paper-reading.jpg
 ---
 
 *本篇文章是对论文[Web caching with consistent hashing](http://www.academia.edu/download/49325809/pd1.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*

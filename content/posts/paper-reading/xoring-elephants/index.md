@@ -8,9 +8,7 @@ description: ""
 tags: ["Erasure Code", "Translation"]
 categories: ["Paper Reading"]
 author: ""
-resources:
-- name: featured-image
-  src: paper-reading.jpg
+featuredImage: img/paper-reading.jpg
 ---
 
 *本篇文章是对论文[XORing Elephants: Novel Erasure Codes for Big Data](https://arxiv.org/pdf/1301.3791.pdf)的原创翻译，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*

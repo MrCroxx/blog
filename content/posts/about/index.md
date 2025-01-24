@@ -9,9 +9,7 @@ description: ""
 tags: ["About Me"]
 categories: ["About Me"]
 author: ""
-resources:
-- name: featured-image
-  src: index.jpg
+featuredImage: index.jpg
 ---
 
 *本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
