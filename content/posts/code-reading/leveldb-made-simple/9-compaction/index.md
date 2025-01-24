@@ -8,9 +8,7 @@ description: ""
 tags: ["LevelDB", "LSM-Tree"]
 categories: ["深入浅出LevelDB"]
 author: ""
-resources:
-- name: featured-image
-  src: leveldb.jpg
+featuredImage: img/leveldb.jpg
 ---
 
 *本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*

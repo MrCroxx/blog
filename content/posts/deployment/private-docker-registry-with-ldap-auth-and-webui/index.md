@@ -4,11 +4,12 @@ date: 2019-07-22T16:37:55+08:00
 draft: false
 tags: ["Deployment"]
 categories: ["Docker"]
-
-resources:
-- name: featured-image
-  src: config.jpg
+featuredImage: config.jpg
 ---
+
+*本文为原创文章，转载请严格遵守[CC BY-NC-SA协议](https://creativecommons.org/licenses/by-nc-sa/4.0/)。*
+
+<!--more-->
 
 # 带LDAP认证与WebUI的Docker私有仓库搭建
 
