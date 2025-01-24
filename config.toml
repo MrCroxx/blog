@@ -4,14 +4,14 @@ enableEmoji = true
 title = "叉鸽的博客 | MrCroxx's Blog"
 theme = "DoIt"
 
-[author]
-name = "叉鸽 | MrCroxx"
-email = "mrcroxx@outlook.com"
-link = "/posts/about"
-
 [params]
 version = "0.2.X"
 description = "Welcome to MrCroxx's Blog."
+
+[params.author]
+name = "叉鸽 | MrCroxx"
+email = "mrcroxx@outlook.com"
+link = "/posts/about"
 
 [params.search]
 enable = true
@@ -61,7 +61,7 @@ twemoji = true
 lightgallery = true
 ruby = true
 fraction = true
-fontawesome = true
+fontawesome = false
 linkToMarkdown = true
 rssFullText = false
 
@@ -110,9 +110,6 @@ douban = "mrcroxx"
 rss = true
 [params.social.github]
 id = "MrCroxx"
-[params.social.github.icon]
-class = "fab fa-github fa-fw"
-
 
 [outputs]
 home = ["HTML", "RSS", "JSON"]
