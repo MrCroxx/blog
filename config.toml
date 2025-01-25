@@ -6,7 +6,7 @@ theme = "DoIt"
 
 [params]
 description = "Welcome to MrCroxx's Blog."
-images = ["favicon-32x32.png"]
+images = ["image.png"]
 
 [params.author]
 name = "叉鸽 | MrCroxx"
@@ -92,7 +92,7 @@ rss = 10
 [params.home.profile]
 enable = true
 gravatarEmail = ""
-avatarURL = "/avatar.jpg"
+avatarURL = "/avatar-256x256.png"
 title = "叉鸽 | MrCroxx"
 subtitle = "Grind in. Grind on."
 typeit = true
