@@ -2,4 +2,4 @@
 infp = "infp"
 
 [files]
-extend-exclude = ["themes/**" ]
+extend-exclude = ["themes/**", "*.svg"]

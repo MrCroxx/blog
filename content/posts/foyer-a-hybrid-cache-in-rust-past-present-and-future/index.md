@@ -92,12 +92,27 @@ In the end, we decided to rewrite a hybrid cache in Rust, which is ***Foyer***. 
 
 ## 2. Build to be Solid
 
-Nowadays, especially with the help of AI, most startups aim to move as fast as possible. But in my career at a database company, I want do something a bit different — to build **solid** systems.
+Nowadays, especially with the help of AI, most startups and developers aim to move as fast as possible. But in my career at a database company, I want do something a bit different — to build **solid** systems, especially for infrastructures.
 
-A complex production environment is the best way to test whether a system is solid. The more widely a project is used, the more opportunities it has to be tested in various real-world scenarios. The best way to make a project widely adopted is to build with **open source**, build in **public**, and build for **general propose**. This has always been the core philosophy of the ***Foyer***.
+A complex production environment is the best way to test whether a system is solid. The more widely a project is used, the more opportunities it has to be tested in various real-world scenarios. The best way to make a project widely adopted is to build with **open source**, build in **public**, and build for **general** scenarios. This has always been the core philosophy of the ***Foyer***.
 
 And with the inspiration from many excellent open source project, such as [***CacheLib***](https://github.com/facebook/CacheLib), [***Caffeine***](https://github.com/ben-manes/caffeine), [***Moka***](https://github.com/moka-rs/moka), and [***Quick Cache***](https://github.com/arthurprs/quick-cache), ***Foyer*** aims to achieve the following goals:
 
-1. 
+1. Suitable for most general scenarios.
+2. Meanwhile, performance is not compromised.
+3. A user- and developer-friendly experience.
 
+The first and second goals seem to be in conflict with each other. That's true, at least under peak performance conditions. Many of ***Foyer***'s key trade-offs are also about balancing these two goals. Let's talk about them.
+
+### 2.1 Build to be Suitable for Most General Scenarios
+
+In production environments, different systems have diverse caching requirements. This is also the one of the philosophies in ***CacheLib***'s paper. Hence, to build a hybrid cache system suitable for most general scenarios, it must offer enough flexibility to handle a wide range of caching requirements. The flexibility includes, but is not limited to, the following aspects:
+
+1. The flexibility to switch between various cache algorithms.
+2. The flexibility to switch between cache engines to be optimal for specified workload.
+3. Minimizing the effort for develops to switch between different configurations.
+
+To achieve this, ***Foyer*** learned from the excellent architecture of ***CacheLib***. Let's go through it.
+
+![Foyer Architecture - Hybrid Cache](assets/hybrid-cache.svg)
 
