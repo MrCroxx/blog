@@ -57,19 +57,30 @@ When researching options for hybrid caching, I also looked into the newly open-s
 
 This limitation means that entries must be serialized, even if only in-memory cache is used and disk cache is not involved. 
 
-> For more details, please refer to ***CacheLib***'s official document, [CacheLib - Write data to cache](https://cachelib.org/docs/Cache_Library_User_Guides/Write_data_to_cache#allocate-memory-for-data-from-cache).
+> For more details, please refer to ***CacheLib***'s official document, [CacheLib - Write data to cache](https://cachelib.org/docs/Cache_Library_User_Guides/Write_data_to_cache#allocate-memory-for-data-from-cache). Here is a code snippet from it.
+>
+> ```cpp
+> string data("new data");
+>
+> // Allocate memory for the data.
+> auto handle = cache->allocate(pool_id, "key2", data.size());
+> 
+> // Write the data to the cache.
+> std::memcpy(handle->getMemory(), data.data(), data.size());
+> 
+> // Insert the item handle into the cache.
+> cache->insertOrReplace(handle);
+> ```
 
 Since disk bandwidth is much lower than memory bandwidth, not all entries can be written to disk cache under heavy load. This is especially true when using EBS in the cloud. Some entries need to be dropped in advance to avoid OOM issues. Additionally, hot entries may not need to use disk cache when they are updated or deleted. Under this limitation, some entries will be unnecessarily serialized, resulting in extra performance overhead.
 
-Additionally, we were not fully confident in the effectiveness of hybrid cache at that time. Therefore, we needed a way to configure the system so that hybrid cache could seamlessly fall back to pure in-memory cache without any overhead. Clearly, this limitation did not meet our requirements.
+Moreover, we were not fully confident in the effectiveness of hybrid cache at that time. Therefore, we needed a way to configure the system so that hybrid cache could seamlessly fall back to pure in-memory cache without any overhead. Clearly, this limitation did not meet our requirements.
 
 2. ***CacheLib***, as a C++ project, cannot be easily integrated with the Rust ecosystem of ***RisingWave***.
 
 This is quite obvious. Maintaining the version, build scripts, and FFI for a C++ project within a Rust project requires extra effort. But what I'm taking about here is more than these.
 
 Debugging performance issues and annoying concurrency problems requires comprehensive observability support, including logging, metrics, and tracing. Without patching the ***CacheLib*** code, it is impossible to achieve full observability. Even if we patch the code and maintain a fork, integrating with Rust’s observability ecosystem would still require significant additional effort. These uncertainties could be even greater than rewriting the component in Rust.
-
-
 
 3. (**For me**) Rewriting a production-grade system is always an interesting challenge.
 
@@ -79,4 +90,14 @@ Other methods help you understand the current state of a project, but rewriting 
 
 In the end, we decided to rewrite a hybrid cache in Rust, which is ***Foyer***. And personally, I did't expect ***Foyer*** to be just yet another "**RIIR (Rewrite it in Rust)**" project, but a production-ready solution with unique and outstanding features.
 
-## 2. 
+## 2. Build to be Solid
+
+Nowadays, especially with the help of AI, most startups aim to move as fast as possible. But in my career at a database company, I want do something a bit different — to build **solid** systems.
+
+A complex production environment is the best way to test whether a system is solid. The more widely a project is used, the more opportunities it has to be tested in various real-world scenarios. The best way to make a project widely adopted is to build with **open source**, build in **public**, and build for **general propose**. This has always been the core philosophy of the ***Foyer***.
+
+And with the inspiration from many excellent open source project, such as [***CacheLib***](https://github.com/facebook/CacheLib), [***Caffeine***](https://github.com/ben-manes/caffeine), [***Moka***](https://github.com/moka-rs/moka), and [***Quick Cache***](https://github.com/arthurprs/quick-cache), ***Foyer*** aims to achieve the following goals:
+
+1. 
+
+
