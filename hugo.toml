@@ -112,10 +112,16 @@ url = "/categories"
 name = "tags"
 url = "/tags"
 
-# Syntax highlight on code blocks
 [markup]
+
+# Syntax highlight on code blocks
 [markup.highlight]
-style = 'algol'
+style = 'github'
+
+# Table of Contents
+[markup.tableOfContents]
+startLevel = 2
+endLevel = 4
 
 # Giscus comments
 [params.giscus]

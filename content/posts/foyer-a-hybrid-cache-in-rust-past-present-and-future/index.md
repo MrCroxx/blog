@@ -104,7 +104,9 @@ And with the inspiration from many excellent open source project, such as [***Ca
 
 The first and second goals seem to be in conflict with each other. That's true, at least under peak performance conditions. Many of ***Foyer***'s key trade-offs are also about balancing these two goals. Let's talk about them.
 
-### 2.1 Build to be Suitable for Most General Scenarios
+### 2.1 Flexible Architecture for Most General Scenarios
+
+> This section is mostly taken from ***Foyer***'s official document [Foyer - Architecture](https://foyer-rs.github.io/foyer/docs/design/architecture). But reorganized to fit the blog.
 
 In production environments, different systems have diverse caching requirements. This is also the one of the philosophies in ***CacheLib***'s paper. Hence, to build a hybrid cache system suitable for most general scenarios, it must offer enough flexibility to handle a wide range of caching requirements. The flexibility includes, but is not limited to, the following aspects:
 
@@ -112,6 +114,144 @@ In production environments, different systems have diverse caching requirements.
 2. The flexibility to switch between cache engines to be optimal for specified workload.
 3. Minimizing the effort for develops to switch between different configurations.
 
-To achieve this, ***Foyer*** learned from the excellent architecture of ***CacheLib***. Let's go through it.
+To achieve this, ***Foyer*** learned from the excellent architecture of ***CacheLib*** — adopts a **plug-and-play** modular design throughout its architecture. Let's go through it.
 
-![Foyer Architecture - Hybrid Cache](assets/hybrid-cache.svg#p40 "Foyer Architecture - Hybrid Cache")
+#### 2.1.1 Hybrid Cache Architecture
+
+![Foyer Architecture - Hybrid Cache](assets/hybrid-cache.svg "Foyer Architecture - Hybrid Cache")
+
+As a hybrid cache, ***Foyer*** automatically manages the behavior and lifecycle of cache entries between the in-memory cache and the disk cache. It consists of three components to provide hybrid cache functionality.
+
+1. **Memory Cache (provided by crate `foyer-memory`):** Pure in-memory cache library. Similar to other in-memory cache libraries, it provides functionalities such as adding, deleting, updating, and querying cache entries. Besides, to be compatible with the disk cache, it also provides optimizations such as request merging and support for asynchronous interfaces. (This crate can be used separately as a pure in-memory cache with minimal overhead.)
+2. **Disk Cache (provided by crate `foyer-storage`):** Includes the disk cache engines, IO engines, and device driver layer. It cannot be used independently and can only be utilized through ***Foyer***.
+3. **Cooperator (Integrated in crate `foyer`):** A lightweight wrapper to coordinate in-memory cache and disk cache.
+
+Besides the hybrid cache mode, ***Foyer*** can also operate as a pure in-memory cache in compatibility mode. This mode doesn't require any API modifications based on the hybrid cache and is therefore suitable for systems that need both pure in-memory cache and hybrid cache operation. In this mode, ***Foyer*** provisions a no-op disk cache engine. This introduces only a minimal overhead in exchange for API compatibility.
+
+![Foyer - Hybrid Cache Compatible Mode](assets/hybrid-cache-compatible-mode.svg "Foyer - Hybrid Cache Compatible Mode")
+
+If you only need to use ***Foyer*** as a pure in-memory cache, you can directly use `Cache` instead of `HybridCache`. `Cache` is a re-export from the `foyer-memory` crate. It provides APIs and usage similar to mainstream cache libraries, and also offers all the features of the in-memory cache part within the ***Foyer*** hybrid cache, including: interchangeable cache algorithms, request deduplication optimization, etc.
+
+![Foyer - Pure In-memory Cache Mode](assets/pure-in-memory-cache-mode.svg "Foyer - Pure In-memory Cache Mode")
+
+#### 2.1.2 In-memory Cache Architecture
+
+***Foyer***'s memory cache provides a high-performance, flexible, and composable pure in-memory cache implementation with the following key features:
+
+- **Plug-and-Play Algorithms**: Empowers users with easily replaceable caching algorithms, ensuring adaptability to diverse use cases.
+- **Fearless Concurrency**: Built to handle high concurrency with robust thread-safe mechanisms, guaranteeing reliable performance under heavy loads.
+- **Zero-Copy In-Memory Cache Abstraction**: Leveraging Rust's robust type system, the in-memory cache in foyer achieves a better performance with zero-copy abstraction.
+
+![Foyer - In-memory Cache Architecture](assets/memory-cache.svg "Foyer - In-memory Cache Architecture")
+
+***Foyer***'s in-memory cache consists of three main components:
+
+1. **Flexible & Composable Framework:** A framework that adopts a flexible and composable design. Supports arbitrary combinations of different indexer implementations and eviction algorithm implementations. Provides basic CRUD operation support, lock/lock-free algorithm supports, automatic cache refill and request dedup supports on cache miss.
+2. **Indexer:** Pluggable indexer implementations. Currently, hash table implementation provided by hashbrown is supported to enable point get queries. In future versions, indexer implementations based on trie are planned to support advanced functions like prefix queries.
+3. **Eviction Algorithm:** Pluggable cache eviction algorithm implementations. Currently, ***Foyer*** provides algorithms such as FIFO, LRU with high priorities, w-TinyLFU, S3-FIFO, and SIEVE. More production-ready algorithms and a simpler custom algorithm framework will be supported in future versions.
+
+#### 2.1.3 Disk Cache Architecture
+
+***Foyer***'s disk cache is designed to support disk caches ranging from tens of gigabytes to hundreds of terabytes in size with minimal overhead. It consists of the following main components:
+
+1. **Flexible & Composable Framework:** A flexible and composable framework adaptable to various disk cache engines, IO engines, and IO devices.
+2. **Disk Cache Engine:** Pluggable disk cache engine. Users can choose a specific engine for their own scenarios to better adapt to their workload. Currently, ***Foyer*** provides or plans to provide the following types of disk cache engines:
+    - *Set-Associated Engine (WIP):*: Optimized for ~4KiB cache entries.  
+    - *Block Engine:* General-proposed engine that is optimized for 4KiB~1GiB cache entries.
+    - *Object Engine (WIP):* Optimized for 1MiB~ cache entries.
+    - *Customized Engine*: Users can customize the disk cache engine, or combine the existing disk cache engines provided by ***Foyer*** according to rules.
+3. **IO Engine:** Engine for performing disk cache IO operations. Currently, ***Foyer*** provides or plans to provide the following types of io engines:
+    - *Psync Engine:* Use a thread pool and blocking `pread(2)/pwrite(2)` syscalls to perform IO operations.
+    - *Libaio Engine (WIP):* Use `libaio` asynchronous IO to perform IO operations.
+    - *Uring Engine:* Use `io_uring` asynchronous IO toe perform IO operations.
+4. **IO Device:** Device abstraction layer. Currently supports single file, raw block device, and filesystem directory.
+
+![Foyer - Disk Cache Architecture](./assets/disk-cache.svg "Foyer - Disk Cache Architecture")
+
+### 2.2 Uncompromised Performance
+
+As mentioned before, it’s challenging to achieve optimal performance with a flexible architecture. It requires careful design and optimizaion. This sections will talk about some techniques that ***Foyer*** applied for it.
+
+#### 2.2.1 Sharding for High Concurrency
+
+The memory cache framework of ***Foyer*** adopts sharding design to improve performance under high concurrency loads. Each shard has its own indexer and eviction algorithm container. This design greatly simplifies the engineering of concurrent data structures. Although usage imbalance between shards may occur when the capacity is extremely small, such severe data skew rarely happens in production environments.
+
+![Foyer - Sharding in In-memory Cache](assets/memory-cache-shards.svg "[Foyer - Sharding in In-memory Cache")
+
+#### 2.2.2 Intrusive Data Structures
+
+For ultimate performance optimization, ***Foyer***'s in-memory cache is implemented using intrusive data structures. This not only increases ***Foyer***'s performance ceiling but also enables ***Foyer*** to model the indexer and eviction algorithm as containers. The in-memory cache data structure is designed as a multi-indexer data structure, providing more flexible and composable support for the indexer and eviction algorithm.
+
+![Foyer - Intrusive Data Structure](assets/intrusive-data-structure.svg "Foyer - Intrusive Data Structure")
+
+It is not easy to implement this kind of intrusive multi-container data structure in Rust. ***Foyer*** uses an implementation that based on [crates.io - intrusive-collections](https://crates.io/crates/intrusive-collections) to provide an efficient and safe API
+
+In addition, ***Foyer*** also has a proposal based on **Arena** Memory Allocator. However, there is no obvious advantage in microbench, so it has not been adopted for the time being.
+
+#### 2.2.3 "All-in-one" API for Concurrent Queries
+
+***Foyer*** provides a powerful `fetch()` API. When using the `fetch()` API to access an entry, the caller can provide an async task that fetches the entry from remote storage. If a cache miss occurs, ***Foyer*** will automatically call this async task to retrieve the entry and backfill it into the cache. Additionally, this interface is optimized for concurrent requests for the same key. If multiple concurrent `fetch()` requests access the same key, only one request will be sent to remote storage; other callers will wait for the task to backfill the entry into the cache and then retrieve the result directly from the cache, thereby reducing the load on remote storage.
+
+![Foyer - fetch() API](assets/fetch.svg "Foyer - fetch() API")
+
+Moreover, hybrid cache also provides a `fetch()` API. Unlike the `fetch()` API of memory cache, the `fetch()` API of the hybrid cache offers additional compatibility and optimization for disk cache: when concurrent requests encounter a memory cache miss, only one request will be sent to the disk cache. If the disk cache also misses, then only one request will be sent to the remote storage. In addition, the `fetch()` API of this hybrid cache will also perform targeted optimizations based on the causes of disk cache misses: for example, if the miss is due to disk cache performance throttling, cache refill will not be triggered, and so on.
+
+With `fetch()` API, an "all-in-one" query can be written as:
+
+```rust
+let entry = hybrid
+    .fetch(20230512, || async {
+        let value = s3.get(&20230512).await?;
+        Ok(value)
+    })
+    .await?;
+```
+
+Moreover, ***Foyer*** is also refining the design of the interfaces for querying. It will combine the current complex interfaces like `get()`, `obtain()`, and `fetch()`. (Don't worry if you are not familiar with other APIs. They will soon become things of the past.)
+
+With the new design, you can use `get()` API to query entryes through a `Future` that returns a result of optilnal entry like with any other cache library . And `.fetch_on_miss()` API can be applied before awaiting the `Future` to achieve the same functionality as the current `fetch()` API. For example:
+
+```rust
+// Get an result of an optional entry.
+let entry_or_nothing = hybrid
+    .get(&20230512)
+    .await?;
+
+// Get an result of an entry, or fetch it from
+// remote storage on cahce miss with optimization.
+let entry = hybrid
+    .get(&20230512)
+    .fetch_on_miss(|| async {
+        let value = s3.get(&20230512).await?;
+        Ok(value)
+    })
+    .await?;
+```
+
+#### 2.2.4 Encode/Decode on Demand
+
+In [1. Not Only Yet Another Hybrid Cache](#1-not-only-yet-another-hybrid-cache), I mentioned one of the reason that ***RisingWave*** didn't choose ***CacheLib*** as its hybrid cache implementation, which is, it always requires the entry to be copied to the ***cacheLib***'s managed memory, which involves encoding and decoding for complex structs on writting and reading, not matter if an entry actually goes to the disk cache.
+
+In contrast, ***Foyer*** only requires entries to be encoded ordecoded when writing to or reading from the disk cache. If an entry only lives in memory, it is never required to be encoded or decoded. 
+
+And thanks to Rust's powerful type system, ***Foyer***'s APIs are always typed with the key and value's type. ***Foyer*** carefully hides unsafe implementations behind safe interfaces, achieving a balance between performance and usability.
+
+#### 2.2.5 
+
+- [ ] Raw device?
+- [ ] Bypass page cache?
+- [ ] io_uring?
+ 
+!!!!!!!!!!
+
+!!!!!!!!!!
+
+!!!!!!!!!!
+
+!!!!!!!!!!
+
+!!!!!!!!!!
+
+!!!!!!!!!!
+
+
