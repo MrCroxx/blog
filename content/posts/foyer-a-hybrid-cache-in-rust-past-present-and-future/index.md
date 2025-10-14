@@ -236,7 +236,11 @@ In contrast, ***Foyer*** only requires entries to be encoded ordecoded when writ
 
 And thanks to Rust's powerful type system, ***Foyer***'s APIs are always typed with the key and value's type. ***Foyer*** carefully hides unsafe implementations behind safe interfaces, achieving a balance between performance and usability.
 
-#### 2.2.5 
+#### 2.2.5 Make the Hidden Overhead Controllable
+
+Before this blog, there were some articles, presentations and discussions about ***Foyer***, such as this [Hacker News Topic](https://news.ycombinator.com/item?id=45349218). (The referenced article was actually written by Yingjun Wu, the CEO of RisingWave, based on ***Foyer***'s documentation. Thank you Yingjun for promoting ***Foyer***. 🙏) The most common question is: Operating systems already have mechanisms like swap and page cache. Why do we need to build our own hybrid cache system to achieve similar functionality?
+
+Although the underlying mechanisms can be complex, the answer to this question is actually quite simple: ***Make the hidden overhead controllable***.
 
 - [ ] Raw device?
 - [ ] Bypass page cache?
