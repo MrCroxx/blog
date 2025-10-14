@@ -114,5 +114,4 @@ In production environments, different systems have diverse caching requirements.
 
 To achieve this, ***Foyer*** learned from the excellent architecture of ***CacheLib***. Let's go through it.
 
-![Foyer Architecture - Hybrid Cache](assets/hybrid-cache.svg)
-
+![Foyer Architecture - Hybrid Cache](assets/hybrid-cache.svg#p40 "Foyer Architecture - Hybrid Cache")
