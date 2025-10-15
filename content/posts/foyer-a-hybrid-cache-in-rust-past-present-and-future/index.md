@@ -238,13 +238,65 @@ And thanks to Rust's powerful type system, ***Foyer***'s APIs are always typed w
 
 #### 2.2.5 Make the Hidden Overhead Controllable
 
-Before this blog, there were some articles, presentations and discussions about ***Foyer***, such as this [Hacker News Topic](https://news.ycombinator.com/item?id=45349218). (The referenced article was actually written by Yingjun Wu, the CEO of RisingWave, based on ***Foyer***'s documentation. Thank you Yingjun for promoting ***Foyer***. 🙏) The most common question is: Operating systems already have mechanisms like swap and page cache. Why do we need to build our own hybrid cache system to achieve similar functionality?
+Before this blog, there were some articles, presentations and discussions about ***Foyer***, such as this [Hacker News Topic](https://news.ycombinator.com/item?id=45349218). (The referenced article was actually written by *Yingjun Wu*, the CEO of ***RisingWave***, based on ***Foyer***'s documentation. Thank you *Yingjun* for promoting ***Foyer***. 🙏) The most common question is: Operating systems already have mechanisms like **swap** and **page cache**. Why do we need to build our own hybrid cache system to achieve similar functionality?
 
 Although the underlying mechanisms can be complex, the answer to this question is actually quite simple: ***Make the hidden overhead controllable***.
 
-- [ ] Raw device?
-- [ ] Bypass page cache?
-- [ ] io_uring?
+To build applications with higher performance and lower overhead, modern programming languages and developers often use coroutine programming for IO-intensive applications. The ***Rust*** ecosystem follows the same approach. ***Rust*** provides built-in `async`/`await` support at the language level.
+
+For readers who are not familiar with coroutine programming, here's a brief explanation. Coroutine programming shifts task scheduling to a user-space runtime and handles slow IO tasks asynchronously. When a slow IO operation begins, the user-level scheduler can switch to other tasks to keep executing, without blocking and waiting for the IO operation to finish. Because switching between coroutines is much lighter than switching between threads, this approach can greatly increase system throughput and reduce the overhead caused by thread switching. **In the coroutine programming model, blocking the current thread is very costly.**
+
+Let's continue the topic about why ***Foyer*** doesn't directly use **swap** or **page cache** to implement a hybrid cache.
+
+When reading, **swap** is triggered by a **page fault**. Unfortunately, due to hardware limitations, a **page fault** can only be handled synchronously, blocking the entire thread. Frequent **page fault**s can cause significant performance degradation in coroutine-based programming. Moreover, it is difficult to predict when **swap** will be triggered. Even when using synchronous programming, **swap** can still seriously impact performance in critical paths. This is why most performance-sensitive systems recommend disabling swap in production environments. THe same goes for ***Foyer***.
+
+In contrast, the **page cache** is not as harmful to performance. In fact, in the latest version, ***Foyer*** also recommends that general users use IO devices that support the page cache (that is, not using direct IO mode). However, since ***Foyer*** itself offers an in-memory cache, and its algorithm can be tuned to better fit the workload. Enabling the **page cache** may lead to redundant data being cached in some cases. Additionally, to support efficient index compression and compatibility with raw block devices, ***Foyer***’s disk cache engine often aligns read and write addresses to 4K boundaries. Therefore, for special scenarios, users can choose Direct IO mode to bypass the **page cache**.
+
+In addition, operating systems need to handle a wide range of complex requirements. A dedicated system can focus on a single use case, eliminate unnecessary overhead, and deliver better performance. 
+
+Here's another example that ***Foyer*** encountered previously. One of ***Foyer***'s disk cache engines may perform concurrent reads and writes on the same block under high concurrency. When using a filesystem directory instead of a raw block device as the IO device, we observed increased read tail latency. Because it is the tail latency of syscall `pread(2)` to be observed, I used **eBPF** probes to trace it.
+
+```text
+vfs_read                     |  39.767ms | ========================================
+ext4_file_read_iter          |  39.756ms | =======================================
+iomap_dio_rw                 |   4.270ms |                                  ======
+filemap_write_and_wait_range |   4.146µs |                                  =
+```
+
+The result shows that the abnormal latency comes from a **inode** mutex in **ext4** file system.
+
+```c
+static ssize_t ext4_dio_read_iter(struct kiocb *iocb, struct iov_iter *to)
+{
+    ssize_t ret;
+    struct inode *inode = file_inode(iocb->ki_filp);
+
+    if (iocb->ki_flags & IOCB_NOWAIT) {
+        if (!node_trylock_shared(inode))
+            return -EAGAIN;
+    } else {
+        inode_lock_shared(inode); // <============ here
+    }
+
+    // ... ...
+}
+```
+
+In fact, **inode** locks like this exist in most filesystem implementations. It is hard to avoid with file systems. Therefore, ***Foyer*** supports using the disk cache directly on raw block devices. Since the operating system requires raw block devices to be accessed with Direct IO, the **page cache cannot** be used in this setup. Meanwhile, by eliminating an intermediate layer, it also helps reduce NAND erasures to some extent, which is beneficial for SSD lifespan.
+
+#### 2.2.6 Asynchronous I/O Engine Support — `io_uring`
+
+To further improve disk cache performance, ***Foyer*** also supports the true asynchronous I/O engine, such as `io_uring`. However, ***Foyer*** is not only for **Linux** users, so it still needs to support other I/O engines, such as an engine powered by `pread(2)`/`pwrite(2)` and thread pool.
+
+To achieve this, ***Foyer*** uses a plug-and-play I/O engine design. (You can find the disk cache architecture in [2.1.3 Disk Cache Architecture](#213-disk-cache-architecture).)
+
+Inheriting design concepts from the file system in operating systems, ***Foyer***’s I/O Engine operations directly with the file descriptors (`fd`), or `FileHandle` in Windows. And ***Foyer***'s Device abstraction works as a translator that maps logical addresses to file descriptors (`fd`) or `FileHandle`s and their corresponding offsets. This design hides the implementation details of different I/O engines, and can be easily fallback to other I/O engiens if some is not supported on the specificed platforms.
+
+According to benchmark results, with proper parameter settings, the `io_uring` engine can reduce the p50 latency of ***Foyer*** disk cache by more than 30%.
+
+> `io_uring` is not always better than using `pread(2)`/`pwrite(2)` with a thread pool, but it offers more configurable parameters, making it easier to tune and debug in extreme situations.
+
+### 2.3 Evolving User- and Developer-friendly Experience
  
 !!!!!!!!!!
 
