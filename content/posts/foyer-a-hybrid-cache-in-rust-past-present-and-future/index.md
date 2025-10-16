@@ -297,7 +297,34 @@ According to benchmark results, with proper parameter settings, the `io_uring` e
 > `io_uring` is not always better than using `pread(2)`/`pwrite(2)` with a thread pool, but it offers more configurable parameters, making it easier to tune and debug in extreme situations.
 
 ### 2.3 Evolving User- and Developer-friendly Experience
- 
+
+Although ***Foyer***’s architecture, API design, and development and benchmark tools have gone through several iterations of refinement, its goal of providing a user-friendly and developer-friendly experience has never changed.
+
+#### 2.3.1 Out-of-the-box Observability
+
+Whether you are debugging or optimizing performance, it is always important to observe into the system.
+
+For observability, ***Foyer*** leverages **Rust**’s strong ecosystem to provide a out-of-the-box observability experience.
+
+**Foyer** provides observability for monitoring in 3 aspects:
+
+- **Logging**: Provides logging in trace/debug/info/warn/error levels with tracing ecosystem.
+- **Meter**: Provides operation counters, operation duration histograms, information gauges with metrics ecosystem.
+- **Tracing**: Provide tail-based tracing for slow operation diagnosis with fastrace.
+
+To simplify the configuration process, each setting in the ***Foyer*** side can be completed with just a single line of code. Of course, you still need to configure the settings required by the related ecosystem itself.
+
+> Please refer to [Foyer - Setup Monitor System](https://foyer-rs.github.io/foyer/docs/getting-started/monitor) to setup monitor system.
+
+***Foyer*** uses the following tools from the ecosystem to achieve observability.
+
+| Observability | Crate | Notes |
+| :-: | :-: | :- |
+| Logging | [`tracing`](https://crates.io/crates/tracing) | The most widely used logging ecosystem in Rust. Can connect to other systems through exporters. |
+| Meter | [`mixtrics`](https://crates.io/crates/mixtrics) | A meter adapter also maintained under GIthub Org [***foyer-rs***](https://github.com/foyer-rs). Can connect to other Rust crates, such as [`prometheus`](https://crates.io/crates/prometheus), [`prometheus-client`](https://crates.io/crates/prometheus-client), [`opentelemetry`](https://crates.io/crates/opentelemetry). |
+| Tracing | [`tracing`](https://crates.io/crates/tracing) & [`fastrace`](https://crates.io/crates/fastrace) | With no performance requirements, the [`tracing`](https://crates.io/crates/tracing) ecosystem can still be used. However, when observing high-concurrency core functions, it is recommended to use [fastrace](https://crates.io/crates/fastrace) for tail-based tracing. |
+
+
 !!!!!!!!!!
 
 !!!!!!!!!!
