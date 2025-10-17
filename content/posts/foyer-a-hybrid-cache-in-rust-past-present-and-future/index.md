@@ -207,26 +207,9 @@ let entry = hybrid
     .await?;
 ```
 
-Moreover, ***Foyer*** is also refining the design of the interfaces for querying. It will combine the current complex interfaces like `get()`, `obtain()`, and `fetch()`. (Don't worry if you are not familiar with other APIs. They will soon become things of the past.)
-
-With the new design, you can use `get()` API to query entryes through a `Future` that returns a result of optilnal entry like with any other cache library . And `.fetch_on_miss()` API can be applied before awaiting the `Future` to achieve the same functionality as the current `fetch()` API. For example:
-
-```rust
-// Get an result of an optional entry.
-let entry_or_nothing = hybrid
-    .get(&20230512)
-    .await?;
-
-// Get an result of an entry, or fetch it from
-// remote storage on cahce miss with optimization.
-let entry = hybrid
-    .get(&20230512)
-    .fetch_on_miss(|| async {
-        let value = s3.get(&20230512).await?;
-        Ok(value)
-    })
-    .await?;
-```
+> The APIs are being refactored to be more and more user- and developer-friendly.
+>
+> [2.3.2 Improving the APIs](#232-improving-the-apis) will provide more details on this topic.
 
 #### 2.2.4 Encode/Decode on Demand
 
@@ -322,7 +305,70 @@ To simplify the configuration process, each setting in the ***Foyer*** side can 
 | :-: | :-: | :- |
 | Logging | [`tracing`](https://crates.io/crates/tracing) | The most widely used logging ecosystem in Rust. Can connect to other systems through exporters. |
 | Meter | [`mixtrics`](https://crates.io/crates/mixtrics) | A meter adapter also maintained under GIthub Org [***foyer-rs***](https://github.com/foyer-rs). Can connect to other Rust crates, such as [`prometheus`](https://crates.io/crates/prometheus), [`prometheus-client`](https://crates.io/crates/prometheus-client), [`opentelemetry`](https://crates.io/crates/opentelemetry). |
-| Tracing | [`tracing`](https://crates.io/crates/tracing) & [`fastrace`](https://crates.io/crates/fastrace) | With no performance requirements, the [`tracing`](https://crates.io/crates/tracing) ecosystem can still be used. However, when observing high-concurrency core functions, it is recommended to use [fastrace](https://crates.io/crates/fastrace) for tail-based tracing. |
+| Tracing | [`tracing`](https://crates.io/crates/tracing) & [`fastrace`](https://crates.io/crates/fastrace) | With no performance requirements, the [`tracing`](https://crates.io/crates/tracing) ecosystem can still be used. However, when observing high-concurrency core functions, it is recommended to use [`fastrace`](https://crates.io/crates/fastrace) for tail-based tracing. |
+
+These Rust ecosystem components have greatly helped ***Foyer*** with debugging and performance optimization.
+
+For example, when troubleshooting query tail latency issues in a canary environment, we needed to trace the lifecycle of slow queries from millions of concurrent cache queries. Most tracing methods struggle to keep overhead acceptable under such high concurrency. The extra overhead may affect the results and hide the real issues. But with [`fastrace`](https://crates.io/crates/fastrace), It can capture tracing with minimal overhead and only report the necessary traces, such as the slower tasks in this example.
+
+![Fastrace Tail-based Tracing Under High Concurrency](assets/tail-based-tracing.png "Fastrace Tail-based Tracing Under High Concurrency")
+
+Finally, we obtained the tracing shown in the figure under a concurrency of one million. As shown, during the full **3.44 s** of the long-tail task, ***Foyer*** only took **1.15 ms**, and S3 access took **742 ms**. The unusual part is that the tokio runtime waited **2,687 ms** after the task finished before polling the result. This finding guided us in optimizing our system.
+
+#### 2.3.2 Improving the APIs
+
+To provide more and more user- and developer-friendly experiences, ***Foyer*** is continuously improving the APIs.
+
+Previously, ***Foyer***’s APIs have experienced several major refactorings. For example:
+
+- The integration of memory and disk cache in the hybrid cache has been refactored.
+- The architecture evolved from a disk cache engine design similar to ***CacheLib***, to a layered and plug-and-play architecture with disk cache engine, IO engine, and IO device.
+- Each disk cache engine has its own internal refactories.
+- ... and more.
+
+Even though Foyer is still under active development, all changes since the v0.1.0 release have been documented in [Foyer - Changelog](https://foyer-rs.github.io/foyer/blog/remote/CHANGELOG). This makes it easy for developers and users to track changes.
+
+Even now, ***Foyer*** is still evolving itself.
+
+For example, here is a upcoming update. In ["All-in-one" API for Concurrent Queries](#223-all-in-one-api-for-concurrent-queries), I introduced ***Foyer***’s powerful `fetch()` API, and I'm working to make it even better.
+
+***Foyer*** is refining the design of the interfaces for querying. It will combine the current complex interfaces like `get()`, `obtain()`, and `fetch()`. (Don't worry if you are not familiar with other APIs. They will soon become things of the past.)
+
+With the new design, you can use `get()` API to query entryes through a `Future` that returns a result of optilnal entry like with any other cache library . And `.fetch_on_miss()` API can be applied before awaiting the `Future` to achieve the same functionality as the current `fetch()` API. For example:
+
+```rust
+// Get an result of an optional entry.
+let entry_or_nothing = hybrid
+    .get(&20230512)
+    .await?;
+
+// Get an result of an entry, or fetch it from
+// remote storage on cahce miss with optimization.
+let entry = hybrid
+    .get(&20230512)
+    .fetch_on_miss(|| async {
+        let value = s3.get(&20230512).await?;
+        Ok(value)
+    })
+    .await?;
+```
+
+#### 2.3.3 Refining Related Utilities
+
+Improvements to related tools are just as important as API enhancements.
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 !!!!!!!!!!
