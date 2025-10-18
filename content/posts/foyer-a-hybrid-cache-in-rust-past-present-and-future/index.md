@@ -357,19 +357,337 @@ let entry = hybrid
 
 Improvements to related tools are just as important as API enhancements.
 
+To make it easier for developers to develop, debug, and benchmark Foyer, a utility called `foyer-bench` is provided. With `foyer-bench`, developers can easily benchmark `foyer` with various configurations and wordloads. It also provides the ability of fine-grained tuning. Here is an example of the arguments and options that `foyer-bench` accetps.
+
+```text
+> foyer-bench -h
+
+bench tool for foyer - Hybrid cache for Rust
+
+Usage: foyer-bench [OPTIONS] <--file <FILE>|--dir <DIR>|--no-disk>
+
+Options:
+      --no-disk
+          Run with in-memory cache compatible mode
+  -f, --file <FILE>
+          File for disk cache data. Use `DirectFile` as device
+  -d, --dir <DIR>
+          Directory for disk cache data. Use `DirectFs` as device
+      --mem <MEM>
+          In-memory cache capacity [default: "1.0 GiB"]
+      --disk <DISK>
+          Disk cache capacity [default: "1.0 GiB"]
+  -t, --time <TIME>
+          (s) [default: 60]
+      --report-interval <REPORT_INTERVAL>
+          (s) [default: 2]
+      --w-rate <W_RATE>
+          Write rate limit per writer [default: "0 B"]
+      --r-rate <R_RATE>
+          Read rate limit per reader [default: "0 B"]
+      --entry-size-min <ENTRY_SIZE_MIN>
+          Min entry size [default: "64.0 KiB"]
+      --entry-size-max <ENTRY_SIZE_MAX>
+          Max entry size [default: "64.0 KiB"]
+      --get-range <GET_RANGE>
+          Reader lookup key range [default: 10000]
+      --block-size <BLOCK_SIZE>
+          Disk cache blocks size [default: "64.0 MiB"]
+      --flushers <FLUSHERS>
+          Flusher count [default: 4]
+      --reclaimers <RECLAIMERS>
+          Reclaimer count [default: 4]
+      --writers <WRITERS>
+          Writer count [default: 16]
+      --readers <READERS>
+          Reader count [default: 16]
+      --recover-mode <RECOVER_MODE>
+          [default: none] [possible values: none, quiet, strict]
+      --recover-concurrency <RECOVER_CONCURRENCY>
+          Recover concurrency [default: 16]
+      --disk-write-iops <DISK_WRITE_IOPS>
+          Disk write iops throttle [default: 0]
+      --disk-read-iops <DISK_READ_IOPS>
+          Disk read iops throttle [default: 0]
+      --disk-write-throughput <DISK_WRITE_THROUGHPUT>
+          Disk write throughput throttle [default: "0 B"]
+      --disk-read-throughput <DISK_READ_THROUGHPUT>
+          Disk read throughput throttle [default: "0 B"]
+      --clean-block-threshold <CLEAN_BLOCK_THRESHOLD>
+          `0` means use default [default: 0]
+      --shards <SHARDS>
+          Shards of both in-memory cache and disk cache indexer [default: 64]
+      --metrics
+          weigher to enable metrics exporter
+      --user-runtime-worker-threads <USER_RUNTIME_WORKER_THREADS>
+          Benchmark user runtime worker threads [default: 0]
+      --runtime <RUNTIME>
+          Dedicated runtime type [default: disabled] [possible values: disabled, unified, separated]
+      --runtime-worker-threads <RUNTIME_WORKER_THREADS>
+          Dedicated runtime worker threads [default: 0]
+      --runtime-max-blocking-threads <RUNTIME_MAX_BLOCKING_THREADS>
+          Max threads for blocking io [default: 0]
+      --write-runtime-worker-threads <WRITE_RUNTIME_WORKER_THREADS>
+          Dedicated runtime for writes worker threads [default: 0]
+      --write-runtime-max-blocking-threads <WRITE_RUNTIME_MAX_BLOCKING_THREADS>
+          Dedicated runtime for writes Max threads for blocking io [default: 0]
+      --read-runtime-worker-threads <READ_RUNTIME_WORKER_THREADS>
+          Dedicated runtime for reads worker threads [default: 0]
+      --read-runtime-max-blocking-threads <READ_RUNTIME_MAX_BLOCKING_THREADS>
+          Dedicated runtime for writes max threads for blocking io [default: 0]
+      --compression <COMPRESSION>
+          compression algorithm [default: none] [possible values: none, zstd, lz4]
+      --engine <ENGINE>
+          Disk cache engine [default: block] [possible values: block]
+      --distribution <DISTRIBUTION>
+          Time-series operation distribution [default: none]
+      --distribution-zipf-n <DISTRIBUTION_ZIPF_N>
+          For `--distribution zipf` only [default: 100]
+      --distribution-zipf-s <DISTRIBUTION_ZIPF_S>
+          For `--distribution zipf` only [default: 0.5]
+      --warm-up <WARM_UP>
+          [default: 2]
+      --flush
+
+      --invalid-ratio <INVALID_RATIO>
+          [default: 0.8]
+      --eviction <EVICTION>
+          [default: lru] [possible values: lru, lfu, fifo, s3fifo]
+      --policy <POLICY>
+          [default: eviction] [possible values: eviction, insertion]
+      --buffer-pool-size <BUFFER_POOL_SIZE>
+          [default: "16.0 MiB"]
+      --blob-index-size <BLOB_INDEX_SIZE>
+          [default: "4.0 KiB"]
+      --set-size <SET_SIZE>
+          [default: "16.0 KiB"]
+      --set-cache-capacity <SET_CACHE_CAPACITY>
+          [default: 64]
+      --trace-insert <TRACE_INSERT>
+          Record insert trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-get <TRACE_GET>
+          Record get trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-obtain <TRACE_OBTAIN>
+          Record obtain trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-remove <TRACE_REMOVE>
+          Record remove trace threshold. Only effective with "tracing" feature [default: 1s]
+      --trace-fetch <TRACE_FETCH>
+          Record fetch trace threshold. Only effective with "tracing" feature [default: 1s]
+      --flush-on-close
+
+      --block-engine-fifo-probation-ratio <BLOCK_ENGINE_FIFO_PROBATION_RATIO>
+          [default: 0.1]
+      --io-engine <IO_ENGINE>
+          [default: psync] [possible values: psync, io_uring]
+      --direct
+
+      --io-uring-threads <IO_URING_THREADS>
+          [default: 1]
+      --io-uring-cpus <IO_URING_CPUS>
+
+      --io-uring-iodepth <IO_URING_IODEPTH>
+          [default: 64]
+      --io-uring-sqpoll
+
+      --io-uring-sqpoll-idle <IO_URING_SQPOLL_IDLE>
+          [default: 10]
+      --io-uring-sqpoll-cpus <IO_URING_SQPOLL_CPUS>
+
+      --io-uring-weight <IO_URING_WEIGHT>
+          [default: 1]
+      --io-uring-iopoll
+
+      --latency <LATENCY>
+          Simulated fetch on cache miss latency [default: 0ms]
+      --write-io-latency <WRITE_IO_LATENCY>
+          Simulated additional write I/O latency for testing purposes
+      --read-io-latency <READ_IO_LATENCY>
+          Simulated additional read I/O latency for testing purposes
+  -h, --help
+          Print help (see more with '--help')
+  -V, --version
+          Print version
+```
+
+After the benchmark, `foyer-bench` will output relevant metrics and histograms. For example:
+
+```text
+Total:
+disk total iops: 35866.0
+disk total throughput: 3.2 GiB/s
+disk read iops: 19018.7
+disk read throughput: 1.2 GiB/s
+disk write iops: 16847.3
+disk write throughput: 2.0 GiB/s
+insert iops: 16204.9/s
+insert throughput: 1.0 GiB/s
+insert lat p50: 5us
+insert lat p90: 14us
+insert lat p99: 30us
+insert lat p999: 183us
+insert lat p9999: 863us
+insert lat p99999: 2351us
+insert lat pmax: 16063us
+get iops: 34524.8/s
+get miss: 6.11%
+get throughput: 2.0 GiB/s
+get hit lat p50: 127us
+get hit lat p90: 403us
+get hit lat p99: 1455us
+get hit lat p999: 6431us
+get hit lat p9999: 18047us
+get hit lat p99999: 34303us
+get hit lat pmax: 60927us
+get miss lat p50: 134us
+get miss lat p90: 431us
+get miss lat p99: 1359us
+get miss lat p999: 4383us
+get miss lat p9999: 14207us
+get miss lat p99999: 34303us
+get miss lat pmax: 56063us
+
+Close takes: 1.400514ms
+```
+
+Additionally, if the `--metrics` option is enabled, it can be integrated with ***Prometheus*** and ***Grafana*** to monitor various metrics in real time during the benchmark.
+
+![Foyer - Benchmark Monitor](assets/grafana.png "Foyer - Benchmark Monitor")
+
+To further simplify the process of setting up the environment for developers, such as installing dependency scripts, setting up ***Prometheus*** and ***Grafana*** for `foyer-bench`, and performing quick checks and tests, ***Foyer*** also provides an automated command-line build system.
+
+```text
+> cargo x -h
+
+Usage: xtask [OPTIONS] [COMMAND]
+
+Commands:
+  all      Run all checks and tests
+  tools    Install necessary tools for development and testing
+  check    Static code analysis and checks
+  test     Run unit tests
+  example  Run examples
+  udeps    Find unused dependeicies
+  license  Check licenses headers
+  madsim   Run checks and tests with madsim
+  msrv     Run checks and tests with MSRV toolchain
+  json     Minimize Grafana Dashboard json files
+  monitor  Setup monitoring environment for foyer benchmark
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+  -y, --yes   Automatically answer yes to prompts
+  -f, --fast  Skip slow or heavy checks and tests for a fast feedback
+```
+
+The command-line utilitity is inspired by [***cargo-x***](https://github.com/liuchong/cargo-x). This tool only depends on the ***Rust*** toolchain and does not require other build tools like make or just. You can use it directly and it will compile itself.
+
+With `cargo x` utility, the developers can easily setup the monitor environment for `foyer-bench` with:
+
+```bash
+> cargo x monitor up    # Bring up monitor env.
+> cargo x monitor down  # Tear down monitor env.
+> cargo x monitor clear # Clear monitor data.
+```
+
+Or run necessary checks and tests or all checks and tests with:
+
+```bash
+> cargo x        # Run necessary checks and tests.
+> cargo x --fast # Run all checks and tests.
+```
+
+When the tool detects a missing dependency, it will ask the user whether to install it automatically. Users can also use the `-y` or `--yes` flag to automatically confirm all prompts.
+
+![Foyer - cargo x command-line tool](assets/cargo-x.png "Foyer - cargo x command-line tool")
+
+## 3. Refined in production
+
+Writing a toy project is always exciting, but it's easy to stop there. To help a project grow, it needs to be continuously refined in real-world production. 
+
+Fortunately, ***Foyer*** has this opportunity. Thanks for the support from ***RisingWave Labs***. The open work environment at ***RisingWave Labs*** gives ***Foyer*** both the chance to grow and the opportunity to be refined in real production scenarios.
+
+In this chapter, I will introduce how ***Foyer*** is used in ***RisingWave*** and the results it has achieved.
+
+> This chapter is mostly taken from ***Foyer***'s official document [Foyer - Case Study in RisingWave](https://foyer-rs.github.io/foyer/docs/case-study/risingwave). But reorganized to fit the blog.
+
+### 3.1 Foyer and RisingWave - Background
+
+[***RisingWave***](https://github.com/risingwavelabs/risingwave) is a real-time event streaming platform based on **S3**. This sector will introduce how RisingWave uses ***Foyer*** to improve performance and reduce costs.
+
+***RisingWave***'s storage engine, ***Hummock***, is a distributed LSM-Tree storage engine based on **S3**. Just like most data infrastructure that uses S3 for storage, ***RisingWave*** has the following advantages and disadvantages when using S3 as storage:
+
+- **Pros:**
+    1. **Simplified design:** Using S3 as shared storage and the source of truth can greatly simplify the design of distributed storage systems, eliminating the need to spend significant effort on obscure consistency protocols and complex fault tolerance.
+    2. **High availability:** Fully leverage S3's high availability and durability to ensure service SLA.
+    3. **Strong scalability:** S3's scalability is virtually unlimited. Storage can be easily scaled out at any time as the service grows.
+    4. **Lower storage costs:** Compared with other storage services, S3 has lower storage costs. The larger the amount of data, the greater the cost advantage.
+- **Cons:**
+    1. **High latency:** S3’s latency is several orders of magnitude higher compared to other storage services (such as local NVME drives, EBS, etc.). Without optimization, this will lead to overall system performance degradation.
+    2. **High access cost:** S3 charges based on the number of accesses. Without optimization, frequent S3 access will negate the storage cost advantage, or even make it worse.
+
+Based on the above issue, ***RisingWave*** initially introduced a pure memory `ShardedLruCache`, adapted from ***RocksDB***, to cache SSTable blocks of the S3-based LSM-tree. However, simply introducing an in-memory cache is not enough. In production environments, RisingWave still faces the issues discussed in the next section.
+
+### 3.2 Foyer and RisingWave - Challenges and Solutions
+
+#### 3.2.1 Working Set is Large
+
+***RisingWave***, as an S3-based streaming system, is often used to handle large-scale streaming computation tasks. Compared to disk-based streaming systems, its tasks often have a larger working set. 
+
+For example, ***RisingWave*** is often used to handle streaming join tasks where the state ranges from tens of gigabytes to several terabytes. The state of the hash aggregation operator far exceeds the capacity of the memory cache. Data needs to be frequently swapped in and out between the memory cache and S3.
+
+![Working Set is Too Large](assets/working-set.svg "Working Set is Large")
+
+However, due to the high latency of S3 and its charge-by-access pricing model. This can result in severe performance degradation and increased costs. Also, because memory resources are more expensive and limited, it is often difficult to the scale as large as disk.
+
+After introducing ***Foyer***, ***Foyer*** can use both memory and disk as cache and automatically manage them. If you need more advanced features, such as automatic cache refill on miss or request deduplication, only very minor modifications are required.
+
+![Working Set is Fine with Foyer](assets/working-set-foyer.svg "Working Set is Fine with Foyer")
 
 
+After introducing ***Foyer*** as a hybrid cache, when the operator's state is relatively large, the total of memory cache and disk cache can fully accommodate the state, or accommodate much more state than pure memory alone. This reduces the amount of data that needs to be swapped in and out with S3, improves system performance, and lowers data access costs. This makes the solution comparable to a pure disk-based state store approach.
 
+#### 3.2.2 Cache Miss Caused by LSM-tree Compaction
 
+***RisingWave***'s storage engine uses an S3-based **LSM-tree** as main data structure. Its structure can be simplified as shown in the diagram.
 
+![LSM-tree Structure](assets/lsm-tree.svg "LSM-tree Structure")
 
+> The diagram is simplified; in reality, ***RisingWave*** uses the block of an SSTable as the smallest unit of retrieval, not the SSTable itself.
 
+LSM-tree needs compaction to optimize the index structure, reclaim expired data, and reduce space amplification and read amplification. LSM-tree compaction selects a group of SSTables, merges them, and generates a new group of SSTables. Compaction is executed asynchronously. When the compaction task is completed, the cluster’s meta node notifies other nodes, which asynchronously update the SSTable manifest. Therefore, compaction can cause entries in the cache that use the old SSTable to become invalid, resulting in cache misses during subsequent access and generating additional S3 accesses.
 
+![LSM-tree Compaction](assets/compaction.svg "LSM-tree Compaction")
 
+To avoid cache misses caused by LSM-tree compaction, ***RisingWave*** introduces **compaction-aware cache refill**. After compaction is completed and the compute node is notified to update the manifest, the compute node first refills the new SSTables into the cache, and then updates the local manifest. In this way, the new SSTables are already in the cache during the next access, preventing cache misses on the critical path. Therefore, system performance is improved.
 
+![LSM-tree Compaction Refilling](assets/refill.svg "LSM-tree Compaction Refilling")
 
+In addition, to avoid the impact of refilled data on the hot cache, cache refill will directly place the data into the disk cache instead of the memory cache. In this way, hot cache jitter is minimized.
 
+Moreover, as mentioned in the tips above, RisingWave actually fetches S3 in blocks rather than SSTables. During normal reads, only a single block is fetched, while a refill can fetch dozens to thousands of consecutive blocks in one request, reducing S3 access, improving system performance, and lowering costs.
 
+![Comparison w/wo Cache Refilling](./assets/refill-comparison.png "Comparison w/wo Cache Refilling")
+
+#### 3.2.3 Block Size, S3 Access Ops, and Cache Fragmentation
+
+As a stream processing system, ***RisingWave*** often gets its upstream data from the CDC of OLTP systems, and its access tend to favor random reads rather than large-scale sequential reads. Also, since S3 has relatively high access latency and charges based on the number of accesses, selecting an appropriate minimum unit for fetching S3 data, that is, the block size is very important for ***RisingWave***.
+
+!['Small Block Size' vs 'Large Block Size'](assets/block-size.svg "'Small Block Size' vs 'Large Block Size'")
+
+For example, in the image above, the gray squares are fetch S3 units, and the green part is the actual required data.
+
+- If the unit is too small, more S3 accesses are needed to obtain the required data.
+- If the fetch unit is too large, although the number of S3 accesses decreases, it will create more internal fragmentation when caching blocks.
+
+If there is only a memory cache, it is difficult to achieve a balanced trade-off because memory is more valuable and has a smaller capacity.
+
+After introducing ***Foyer***, ***Foyer*** can fully utilize both memory and disk to form a hybrid cache, with disk cache often being 10 to 1000 times larger than memory cache. Therefore, even if a relatively large block size is selected, the overhead caused by cache fragmentation is still acceptable.
+
+![Disk Cache Capacity Can be Extremely Large](assets/huge-disk-cache.svg "Disk Cache Capacity Can be Extremely Large")
+
+This gives ***RisingWave*** the opportunity to optimize the performance and cost overhead caused by S3 access by fetching more data at once through operations such as prefetching and refilling.
+
+#### 3.2.4 Comparison of RisingWave w/wo Foyer
 
 !!!!!!!!!!
 
