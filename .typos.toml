@@ -1,5 +1,7 @@
 [default.extend-words]
 infp = "infp"
+filp = "filp"
 
 [files]
 extend-exclude = ["themes/**", "*.svg"]
+

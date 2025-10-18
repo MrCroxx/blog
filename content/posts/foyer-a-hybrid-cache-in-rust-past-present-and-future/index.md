@@ -213,7 +213,7 @@ let entry = hybrid
 
 #### 2.2.4 Encode/Decode on Demand
 
-In [1. Not Only Yet Another Hybrid Cache](#1-not-only-yet-another-hybrid-cache), I mentioned one of the reason that ***RisingWave*** didn't choose ***CacheLib*** as its hybrid cache implementation, which is, it always requires the entry to be copied to the ***cacheLib***'s managed memory, which involves encoding and decoding for complex structs on writting and reading, not matter if an entry actually goes to the disk cache.
+In [1. Not Only Yet Another Hybrid Cache](#1-not-only-yet-another-hybrid-cache), I mentioned one of the reason that ***RisingWave*** didn't choose ***CacheLib*** as its hybrid cache implementation, which is, it always requires the entry to be copied to the ***cacheLib***'s managed memory, which involves encoding and decoding for complex structs on writing and reading, not matter if an entry actually goes to the disk cache.
 
 In contrast, ***Foyer*** only requires entries to be encoded ordecoded when writing to or reading from the disk cache. If an entry only lives in memory, it is never required to be encoded or decoded. 
 
@@ -273,7 +273,7 @@ To further improve disk cache performance, ***Foyer*** also supports the true as
 
 To achieve this, ***Foyer*** uses a plug-and-play I/O engine design. (You can find the disk cache architecture in [2.1.3 Disk Cache Architecture](#213-disk-cache-architecture).)
 
-Inheriting design concepts from the file system in operating systems, ***Foyer***’s I/O Engine operations directly with the file descriptors (`fd`), or `FileHandle` in Windows. And ***Foyer***'s Device abstraction works as a translator that maps logical addresses to file descriptors (`fd`) or `FileHandle`s and their corresponding offsets. This design hides the implementation details of different I/O engines, and can be easily fallback to other I/O engiens if some is not supported on the specificed platforms.
+Inheriting design concepts from the file system in operating systems, ***Foyer***’s I/O Engine operations directly with the file descriptors (`fd`), or `FileHandle` in Windows. And ***Foyer***'s Device abstraction works as a translator that maps logical addresses to file descriptors (`fd`) or `FileHandle`s and their corresponding offsets. This design hides the implementation details of different I/O engines, and can be easily fallback to other I/O engiens if some is not supported on the specified platforms.
 
 According to benchmark results, with proper parameter settings, the `io_uring` engine can reduce the p50 latency of ***Foyer*** disk cache by more than 30%.
 
@@ -343,7 +343,7 @@ let entry_or_nothing = hybrid
     .await?;
 
 // Get an result of an entry, or fetch it from
-// remote storage on cahce miss with optimization.
+// remote storage on cache miss with optimization.
 let entry = hybrid
     .get(&20230512)
     .fetch_on_miss(|| async {
@@ -357,7 +357,7 @@ let entry = hybrid
 
 Improvements to related tools are just as important as API enhancements.
 
-To make it easier for developers to develop, debug, and benchmark Foyer, a utility called `foyer-bench` is provided. With `foyer-bench`, developers can easily benchmark `foyer` with various configurations and wordloads. It also provides the ability of fine-grained tuning. Here is an example of the arguments and options that `foyer-bench` accetps.
+To make it easier for developers to develop, debug, and benchmark Foyer, a utility called `foyer-bench` is provided. With `foyer-bench`, developers can easily benchmark `foyer` with various configurations and wordloads. It also provides the ability of fine-grained tuning. Here is an example of the arguments and options that `foyer-bench` accepts.
 
 ```text
 > foyer-bench -h
