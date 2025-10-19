@@ -687,18 +687,85 @@ After introducing ***Foyer***, ***Foyer*** can fully utilize both memory and dis
 
 This gives ***RisingWave*** the opportunity to optimize the performance and cost overhead caused by S3 access by fetching more data at once through operations such as prefetching and refilling.
 
-#### 3.2.4 Comparison of RisingWave w/wo Foyer
+### 3.3 Foyer.and RisingWave - Comparison w/wo Foyer
 
-!!!!!!!!!!
+> The benchmark result is taken from [RisingWave - Introducing Elastic Disk Cache in RisingWave](https://risingwave.com/blog/risingwave-elastic-disk-cache/). Thanks to *Heng* for helping write the article.
 
-!!!!!!!!!!
+To quantify the benefits, we put ***Foyer*** through its paces in a demanding benchmark scenario, comparing ***RisingWave***'s performance and S3 usage with and without the cache enabled. The difference was dramatic, especially in reducing the load on S3.
 
-!!!!!!!!!!
+This benchmark was conducted under the following conditions to simulate a continuous, high-throughput streaming analytics environment:
 
-!!!!!!!!!!
+| Key | Value |
+| :-: | :-: |
+| ***RisingWave*** Version | 2.3 |
+| Compute Node Replica | 3 |
+| Compute Node Setup | 8c16g |
+| Nexmark Workload | q0, q1, q2, q3, q4, q5, q6-group-top1, q7, q8, q9, q10, q12, q14, q15, q16, q17, q18, q19, q20, q21, q22, q101, q102, q103, q104, q105 |
+| Nexmark Repeat (per query) | 8 |
+| Total Nexmark Jobs | 208 |
+| Job Parallelism (per job) | 3 |
+| Event Ingestion Rate (per job) | 10,000 events/s|
+| Benchmark Duration | 48h |
 
-!!!!!!!!!!
+**1. S3 Access Cost**
 
-!!!!!!!!!!
+| | S3 GET Cost | S3 PUT Cost | S3 Total Cost | Comparison
+| :-: | :-: | :-: | :-: | :-: |
+| w/o ***Foyer*** Hybrid Cache | $24.60 | $1.88 | $26.48 | |
+| w/ ***Foyer*** Hybrid Cache | $6.14 | $2.22 | $8.36 | **-75%** |
 
+![RisingWave S3 Access Cost Comparison w/wo Foyer](assets/rw-s3-access-cost.png#p60 "RisingWave S3 Access Cost Comparison w/wo Foyer")
 
+**2. S3 Read Metrics**
+
+| | S3 Read IOPS AVG (per node) | S3 Read Throughput AVG (per node) | S3 Read Latency P99 |
+| :-: | :-: | :-: | :-: |
+| w/o ***Foyer*** Hybrid Cache | 120 IOPS | 360 MB/s | over 5 s |
+| w/ ***Foyer*** Hybrid Cache | 30 IOPS **(-75%)** | 20 MB/s **(-94.4%)** | around 900 ms **(-82%)** |
+
+![RisingWave S3 Read Metrics Comparison w/wo Foyer](assets/rw-s3-read.png "RisingWave S3 Read Metrics Comparison w/wo Foyer")
+
+**3. Data Freshness**
+
+*w/o Foyer Hybrid Cache:*
+
+Average barrier latency progressively increased, and there was a growing accumulation of barriers. This resulted in deteriorating freshness.
+
+*w/ Foyer Hybrid Cache:*
+
+Both average barrier latency and barrier accumulation remained stable. Consequently, freshness stabilized at a consistently low (and therefore desirable) level.
+
+**Benchmark Note: Interpreting Barrier Latency**
+
+The ~30-second barrier latency shown with **Foyer** reflects a demanding I/O stress test. In such scenarios, systems often experience escalating latency due to frequent main-memory cache misses, forcing slow reads from object storage. This benchmark highlights how ***Foyer*** effectively mitigates this I/O bottleneck by serving reads from faster local disk, thus maintaining stable performance under pressure.
+
+![RisingWave Data Freshness Comparison w/wo Foyer](assets/rw-data-freshness.png#p80 "RisingWave Data Freshness Comparison w/wo Foyer")
+
+**4. Resource Utilization**
+
+*w/o Foyer Hybrid Cache:*
+
+Around the 30-hour mark, the working set exceeded the capacity of the memory cache. Consequently, the workload began to transition from being CPU-bound to I/O-bound. CPU utilization has started to decline significantly.
+
+*w/ Foyer Hybrid Cache:*
+
+Throughout the 48-hour test, the working set consistently remained within the combined capacity of the memory cache and the disk cache. As a result, the workload remained CPU-bound, and the CPUs were fully utilized.
+
+![RisingWave Resource Utilization Comparison w/wo Foyer](assets/rw-resource-utilization.png#p60 "RisingWave Resource Utilization Comparison w/wo Foyer")
+
+**Summary**
+
+Enabling ***Foyer*** hybrid cache demonstrated substantial and multifaceted improvements:
+
+- **Drastically Reduced S3 Read Load:**
+  - S3 read throughput (data volume from S3) decreased by **approximately 94.4%**.
+  - S3 read IOPS (GET requests to S3) were reduced by around **80%**.
+- **Significantly Improved Read Latency:**
+  - S3 read P99 latency stabilized around 900ms, an improvement of **over 82%** from the >5 seconds observed without the cache.
+- **Substantial Cost Savings:**
+  - S3 GET costs were reduced by around **80%** over the 48-hour test period.
+- **Enhanced System Stability and Efficiency:**
+  - Data freshness remained consistently good, with stable barrier latency and no excessive barrier accumulation.
+  - The workload remained CPU-bound, preventing the system from becoming I/O-bound and ensuring efficient resource utilization.
+
+## 4. 
