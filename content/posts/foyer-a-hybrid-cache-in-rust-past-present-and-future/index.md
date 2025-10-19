@@ -687,7 +687,7 @@ After introducing ***Foyer***, ***Foyer*** can fully utilize both memory and dis
 
 This gives ***RisingWave*** the opportunity to optimize the performance and cost overhead caused by S3 access by fetching more data at once through operations such as prefetching and refilling.
 
-### 3.3 Foyer.and RisingWave - Comparison w/wo Foyer
+### 3.3 Foyer and RisingWave - Comparison w/wo Foyer
 
 > The benchmark result is taken from [RisingWave - Introducing Elastic Disk Cache in RisingWave](https://risingwave.com/blog/risingwave-elastic-disk-cache/). Thanks to *Heng* for helping write the article.
 
@@ -768,4 +768,4 @@ Enabling ***Foyer*** hybrid cache demonstrated substantial and multifaceted impr
   - Data freshness remained consistently good, with stable barrier latency and no excessive barrier accumulation.
   - The workload remained CPU-bound, preventing the system from becoming I/O-bound and ensuring efficient resource utilization.
 
-## 4. 
+## 4. Looking Ahead
