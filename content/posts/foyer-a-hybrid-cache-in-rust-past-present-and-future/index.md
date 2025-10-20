@@ -1,6 +1,6 @@
 ---
 title: "Foyer: A Hybrid Cache in Rust — Past, Present, and Future"
-date: "2025-10-11"
+date: "2025-10-20"
 summary: "Foyer: A Hybrid Cache in Rust — Past, Present, and Future"
 categories: ["foyer"]
 tags: ["caching", "storage", "Rust"]
@@ -727,11 +727,11 @@ This benchmark was conducted under the following conditions to simulate a contin
 
 **3. Data Freshness**
 
-*w/o Foyer Hybrid Cache:*
+**w/o Foyer Hybrid Cache:**
 
 Average barrier latency progressively increased, and there was a growing accumulation of barriers. This resulted in deteriorating freshness.
 
-*w/ Foyer Hybrid Cache:*
+**w/ Foyer Hybrid Cache:**
 
 Both average barrier latency and barrier accumulation remained stable. Consequently, freshness stabilized at a consistently low (and therefore desirable) level.
 
@@ -743,11 +743,11 @@ The ~30-second barrier latency shown with **Foyer** reflects a demanding I/O str
 
 **4. Resource Utilization**
 
-*w/o Foyer Hybrid Cache:*
+**w/o Foyer Hybrid Cache:**
 
 Around the 30-hour mark, the working set exceeded the capacity of the memory cache. Consequently, the workload began to transition from being CPU-bound to I/O-bound. CPU utilization has started to decline significantly.
 
-*w/ Foyer Hybrid Cache:*
+**w/ Foyer Hybrid Cache:**
 
 Throughout the 48-hour test, the working set consistently remained within the combined capacity of the memory cache and the disk cache. As a result, the workload remained CPU-bound, and the CPUs were fully utilized.
 
@@ -769,3 +769,52 @@ Enabling ***Foyer*** hybrid cache demonstrated substantial and multifaceted impr
   - The workload remained CPU-bound, preventing the system from becoming I/O-bound and ensuring efficient resource utilization.
 
 ## 4. Looking Ahead
+
+To be honest, ***Foyer*** having more stars on Github than ***CacheLib*** surprised me. While ***Foyer*** has its strengths, it still falls short of ***CacheLib*** in some respects. I hope that in the future ***Foyer*** can address these shortcomings while continuing to build on its strengths.
+
+Here are the areas I'm working on to improve ***Foyer*** in the future:
+
+### 4.1 Better Documentation
+
+Previously, because ***Foyer*** had few real-world use cases, even I lacked a clear vision for its development. Consequently, its architecture and APIs have been changing rapidly and substantially.
+
+As ***Foyer*** gains more users and its internal design stabilizes, now is a good time to organize and improve its documentation.
+
+I'm embarrassed to admit the documentation on the ***Foyer*** website is still outdated. As mentioned earlier, ***Foyer***'s `fetch()` and related APIs are about to undergo a major refactor — I'll update the docs as soon as that refactor is complete.
+
+If you have any suggestions or find issues in ***Foyer***’s documentation, please open an issue on the [***Foyer*** GitHub repository](https://github.com/foyer-rs/foyer).
+
+### 4.2 More Precise Definition of Consistency
+
+Although similar to traditional disk-based key-value stores (but actually not), hybrid cache systems make different trade-offs between performance and consistency.
+
+1. As a cache, it may evict existing entries at any time.
+2. In-memory caches usually have far higher throughput than disk caches, so not every entry can be written to the disk cache.
+3. Hybrid cache is often used on top of shared storage like S3 and cannot detect updates that other nodes make to that shared storage.
+4. Data recovery is important after both graceful shutdown and accidentally crash to prevent from cache cold-start.
+
+If the underlying storage is immutable shared storage (as with typical S3), these problems don’t occur. But if it’s mutable, balancing consistency and performance becomes much harder. Guaranteeing perfect consistency requires making major sacrifices in performance. To address this, ***Foyer*** has tried several approaches, such as using tombstone logs. However, when the underlying storage is mutable, ***Foyer*** still has many issues that require further work. (In fact, ***CacheLib*** faces the same problem.)
+
+Fortunately, most ***Foyer*** users currently deploy it on immutable storage like S3. However, I still hope to push ***Foyer*** to more scenarios with better definition of consistency.
+
+### 4.3 Lower the Barrier for Developers
+
+As mentioned earlier, ***Foyer*** continuously reduces the complexity of its APIs and abstractions and improves the usability of related utilities to lower the barrier to entry for developers. 
+
+However, the current framework design, especially the in-memory cache, still has a high barrier for newcomers. This is not only caused by **Rust**’s strict ownership model, which makes multi-container problems inherently difficult, but also the prioritisation of performance for in-memory cache.
+
+Despite the challenges, ***Foyer*** has iterated several in-memory cache frameworks to lower development difficulty while keeping performance. These improvements require a lot of experimentation. And it will continue as long as ***Foyer's*** mission remains unchanged.
+
+### 4.4 You Name It!
+
+The ***Foyer*** ecosystem remains young and active. We invite more users to try ***Foyer*** and share feedbacks, whether praise or suggestions for improvement. Although we can't promise to implement every request, we'll actively consider and adopt improvements that fit ***Foyer***.
+
+## X. Some Verbose Words for Ending
+
+Thanks for reading this long-overdue, somewhat wordy blog post.
+
+And thanks to open source for bringing people together across time, race, and culture. Hope we will meet again in the open-source community.
+
+I recently had a surgery. (Don't worry, it is minor and safe, just a little bothering). So, I wish you good health.
+
+![Thank You](assets/thank-you.jpg#p60)
