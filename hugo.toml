@@ -1,0 +1,134 @@
+baseURL = 'https://example.org/'
+languageCode = 'en-us'
+title = "MrCroxx's Blog"
+theme = 'typo'
+
+[taxonomies]
+tag = 'tags'
+category = 'categories'
+
+[params]
+# Meta description
+description = "MrCroxx's Blog"
+
+# Appearance settings
+theme = 'auto'
+colorPalette = 'default'
+hideHeader = false
+
+# Intro on main page, content is markdownT
+homeIntroContent = """
+# Hi
+
+I am ***Yao Meng*** (***孟爻***). You can also call me by my nickname **MrCroxx** (***叉鸽***).
+
+I'm a **Software Engineer** specialized in **Distributed Storage Systems**.
+
+I enjoy exploring a variety of technical topics, including **databases**, **distributed systems**, **storage**, **performance optimization**, **kernels**, **open source**, and many more...
+
+Beyond tech, I'm passionate about **movies** 📽️ and enjoy **beer** 🍺.
+
+Welcome to share your favorites.
+
+# Recent Work
+
+Author of
+
+- [**Foyer**](https://github.com/foyer-rs/foyer), a hybrid cache library in Rust.
+
+Contributor of
+
+- [**RisingWave**](https://github.com/risingwavelabs/risingwave), SQL stream processing, analytics, and management.
+- [**TiKV**](https://github.com/tikv/tikv), distributed transactional key-value database.
+- [**Chroma**](https://github.com/chroma-core/chroma), embedding database for LLM apps.
+- ... and many more!
+
+# Chinese Blog (Legacy)
+
+I used to write technical articles in Chinese on [叉鸽 MrCroxx 的博客](https://blogx.mrcroxx.com). 
+
+There were some great articles about **etcd/Raft**, **LevelDB**, **blotdb**, and **paper readings**.
+
+But now I prefer to write in English here.
+
+# Happy Reading
+
+INFP | he/him | Want to watch more films & drink more beer. 🍺
+
+![yao](yao.jpg#p40)
+
+"""
+
+# Collection to display on home
+homeCollectionTitle = 'Posts'
+homeCollection = 'posts'
+
+# Lists parameters
+paginationSize = 100
+listSummaries = true
+listDateFormat = '2 Jan 2006'
+
+# Breadcrumbs
+[params.breadcrumbs]
+enabled = true
+showCurrentPage = true
+home = "Home"
+
+# Social icons
+[[params.social]]
+name = "github"
+url = "https://github.com/mrcroxx"
+
+[[params.social]]
+name = "linkedin"
+url = "https://www.linkedin.com/in/mrcroxx/"
+
+[[params.social]]
+name = "twitter"
+url = "https://twitter.com/CroxxMr/"
+
+[[params.social]]
+name = "douban"
+url = "https://www.douban.com/people/mrcroxx/"
+
+[[params.social]]
+name = "gmail"
+url = "mailto:mrcroxx.cs@gmail.com"
+
+# Main menu pages
+[[params.menu]]
+name = "home"
+url = "/"
+
+[[params.menu]]
+name = "posts"
+url = "/posts"
+
+[[params.menu]]
+name = "categories"
+url = "/categories"
+
+[[params.menu]]
+name = "tags"
+url = "/tags"
+
+[markup]
+
+# Syntax highlight on code blocks
+[markup.highlight]
+style = 'github'
+
+# Table of Contents
+[markup.tableOfContents]
+startLevel = 2
+endLevel = 4
+
+# Giscus comments
+[params.giscus]
+enable = true
+repo = "mrcroxx/blog"
+repoid = "MDEwOlJlcG9zaXRvcnkyMzM5ODI1OTQ="
+category = "Giscus Comments"
+categoryid = "DIC_kwDODfJKgs4CwTlA"
+mapping = "pathname"
+theme = "preferred_color_scheme"
