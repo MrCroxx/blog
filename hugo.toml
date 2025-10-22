@@ -116,7 +116,7 @@ url = "/tags"
 
 # Syntax highlight on code blocks
 [markup.highlight]
-style = 'github'
+style = 'friendly'
 
 # Table of Contents
 [markup.tableOfContents]
