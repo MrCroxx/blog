@@ -163,7 +163,7 @@ If you only need to use ***Foyer*** as a pure in-memory cache, you can directly 
 3. **IO Engine:** Engine for performing disk cache IO operations. Currently, ***Foyer*** provides or plans to provide the following types of io engines:
     - *Psync Engine:* Use a thread pool and blocking `pread(2)/pwrite(2)` syscalls to perform IO operations.
     - *Libaio Engine (WIP):* Use `libaio` asynchronous IO to perform IO operations.
-    - *Uring Engine:* Use `io_uring` asynchronous IO toe perform IO operations.
+    - *Uring Engine:* Use `io_uring` asynchronous IO to perform IO operations.
 4. **IO Device:** Device abstraction layer. Currently supports single file, raw block device, and filesystem directory.
 
 ![Foyer - Disk Cache Architecture](./assets/disk-cache.svg "Foyer - Disk Cache Architecture")
