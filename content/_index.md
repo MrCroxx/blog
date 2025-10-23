@@ -1,7 +1,7 @@
 ---
 cascade:
     author: "Yao Meng"
-    authorAvatarPath: "/yao.jpg"
+    authorAvatarPath: "/avatar.webp"
     readTime: true
     toc: true
     autonumber: false
