@@ -37,7 +37,7 @@ So I decided to keep this style log as a reminder for style inspiration and also
 ![Outfit 2-1](assets/outfit/2-1.jpg#p80 "Outfit 2-1")
 ![Outfit 2-2](assets/outfit/2-2.jpg#p80 "Outfit 2-2")
 
-And I realy love the tabi socks for the flip-flops.
+And I really love the tabi socks for the flip-flops.
 
 ![Outfit 2-3](assets/outfit/2-3.jpg#p80 "Outfit 2-3")
 
