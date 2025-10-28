@@ -334,7 +334,7 @@ For example, here is a upcoming update. In ["All-in-one" API for Concurrent Quer
 
 ***Foyer*** is refining the design of the interfaces for querying. It will combine the current complex interfaces like `get()`, `obtain()`, and `fetch()`. (Don't worry if you are not familiar with other APIs. They will soon become things of the past.)
 
-With the new design, you can use `get()` API to query entryes through a `Future` that returns a result of optilnal entry like with any other cache library . And `.fetch_on_miss()` API can be applied before awaiting the `Future` to achieve the same functionality as the current `fetch()` API. For example:
+With the new design, you can use `get()` API to query entries through a `Future` that returns a result of optilnal entry like with any other cache library . And `.fetch_on_miss()` API can be applied before awaiting the `Future` to achieve the same functionality as the current `fetch()` API. For example:
 
 ```rust
 // Get an result of an optional entry.
