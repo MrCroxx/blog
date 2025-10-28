@@ -1,7 +1,7 @@
 ---
-title: "Outfit & Haristyle Log"
+title: "Style Log"
 date: "2025-10-28"
-summary: "My personal outfit & hairstyle log."
+summary: "Log of my personal outfits & hairstyles & more."
 categories: ["life"]
 tags: ["outfit", "hairstyle"]
 draft: false
