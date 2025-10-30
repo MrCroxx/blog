@@ -24,6 +24,8 @@ So I decided to keep this style log as a reminder for style inspiration and also
 - Pants: OPICLOTH/OPIC 21AW
 - Shoes: Birkenstock Boston
 
+This coat's fabric is amazing—very light and thin. It has a belt (although it doesn't seem obvious in the photo). It's my favorite piece this year.
+
 ![Outfit 1-1](assets/outfit/2025aw/1-1.jpg#p80 "Outfit 1-1")
 ![Outfit 1-2](assets/outfit/2025aw/1-2.jpg#p80 "Outfit 1-2")
 ![Outfit 1-3](assets/outfit/2025aw/1-3.jpg#p80 "Outfit 1-3")
@@ -62,7 +64,7 @@ The coat somewhat looks it came out of Star Wars.
 - Pants: OPICLOTH/OPIC 21AW
 - Shoes: Birkenstock Boston
 
-The coat somewhat looks it came out of Star Wars.
+The surface fabric of this garment is 70% sheep wool and it is warm.
 
 ![Outfit 4-1](assets/outfit/2025aw/4-1.jpg#p80 "Outfit 4-1")
 ![Outfit 4-2](assets/outfit/2025aw/4-2.jpg#p80 "Outfit 4-2")
@@ -74,9 +76,40 @@ The coat somewhat looks it came out of Star Wars.
 - Pants: OPICLOTH/OPIC 21AW
 - Shoes: Birkenstock Boston
 
+This coat is from this year's Uniqlo U collection. The tailoring is very cool, but personally, I think the packable hood is a bit unnecessary.
+
 ![Outfit 5-1](assets/outfit/2025aw/5-1.jpg#p80 "Outfit 5-1")
 ![Outfit 5-2](assets/outfit/2025aw/5-2.jpg#p80 "Outfit 5-2")
 ![Outfit 5-3](assets/outfit/2025aw/5-3.jpg#p80 "Outfit 5-3")
+
+#### Look 6
+
+- Coat: JUNRED
+- T-Shirt: Uniqlo 476216
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+The coat was bought in Tokio, Japan. It's made of denim, curly but cool.
+
+Just found out that the brand is closed. Sad.
+
+![Outfit 6-1](assets/outfit/2025aw/6-1.jpg#p80 "Outfit 6-1")
+![Outfit 6-2](assets/outfit/2025aw/6-2.jpg#p80 "Outfit 6-2")
+![Outfit 6-3](assets/outfit/2025aw/6-3.jpg#p80 "Outfit 6-3")
+
+#### Look 7
+
+- Coat: Zara 3918357 800
+- T-Shirt: Uniqlo 476216
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+This jacket is double-layered, with a detachable padded lining, making it very warm.
+
+I have worn it for two years, and it keeps me warm even in cold winters.
+
+![Outfit 7-1](assets/outfit/2025aw/7-1.jpg#p80 "Outfit 7-1")
+![Outfit 7-2](assets/outfit/2025aw/7-2.jpg#p80 "Outfit 7-2")
 
 ## Hairstyle
 
