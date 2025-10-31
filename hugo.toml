@@ -3,6 +3,9 @@ languageCode = 'en-us'
 title = "MrCroxx's Blog"
 theme = 'typo'
 
+# Google analytics code
+googleAnalytics = "G-566T1L2G7S"
+
 [taxonomies]
 tag = 'tags'
 category = 'categories'

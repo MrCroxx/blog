@@ -206,6 +206,10 @@ The :C series shrits are awesome. I bought three colors of the same style. This 
 ![Outfit 2-2](assets/outfit/2025ss/2-2.jpg#p80 "Outfit 2-2")
 ![Outfit 2-3](assets/outfit/2025ss/2-3.jpg#p80 "Outfit 2-3")
 
+Actually, the original version of my current avatar comes from this outfit. I was photographed at the Apache Community Over Code Asia 2025 event, and I used gpt-image-1 to turn that photo into the original chibi-style avatar.
+
+![Outfit 2-4](assets/outfit/2025ss/2-4.jpg#p80 "Outfit 2-4")
+
 #### Look 3
 
 - Shirt: Uniqlo :C 331-477643
