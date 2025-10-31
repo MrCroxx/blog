@@ -29,6 +29,7 @@ This coat's fabric is amazing—very light and thin. It has a belt (although it 
 ![Outfit 1-1](assets/outfit/2025aw/1-1.jpg#p80 "Outfit 1-1")
 ![Outfit 1-2](assets/outfit/2025aw/1-2.jpg#p80 "Outfit 1-2")
 ![Outfit 1-3](assets/outfit/2025aw/1-3.jpg#p80 "Outfit 1-3")
+![Outfit 1-4](assets/outfit/2025aw/1-4.jpg#p80 "Outfit 1-4")
 
 #### Look 2
 
@@ -104,12 +105,146 @@ Just found out that the brand is closed. Sad.
 - Pants: OPICLOTH/OPIC 21AW
 - Shoes: Birkenstock Boston
 
-This jacket is double-layered, with a detachable padded lining, making it very warm.
+This cost is double-layered, with a detachable padded lining, making it very warm.
 
 I have worn it for two years, and it keeps me warm even in cold winters.
 
 ![Outfit 7-1](assets/outfit/2025aw/7-1.jpg#p80 "Outfit 7-1")
 ![Outfit 7-2](assets/outfit/2025aw/7-2.jpg#p80 "Outfit 7-2")
+
+#### Look 8
+
+- Jacket: Uniqlo 479411
+- T-Shirt: Uniqlo 476216
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Muji
+
+A pilot jacket with a very good fit.
+
+![Outfit 8-1](assets/outfit/2025aw/8-1.jpg#p80 "Outfit 8-1")
+![Outfit 8-2](assets/outfit/2025aw/8-2.jpg#p80 "Outfit 8-2")
+![Outfit 8-3](assets/outfit/2025aw/8-3.jpg#p80 "Outfit 8-3")
+![Outfit 8-4](assets/outfit/2025aw/8-4.jpg#p80 "Outfit 8-4")
+
+#### Look 9
+
+- Coat: SYRI (Taobao)
+- T-Shirt: Uniqlo 476216
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+Very thin and soft plaid trench coat.
+
+![Outfit 9-1](assets/outfit/2025aw/9-1.jpg#p80 "Outfit 9-1")
+![Outfit 9-2](assets/outfit/2025aw/9-2.jpg#p80 "Outfit 9-2")
+![Outfit 9-3](assets/outfit/2025aw/9-3.jpg#p80 "Outfit 9-3")
+
+#### Look 10
+
+- Hooded: Uniqlo :C 471808
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+Very convenient and comfortable outfit.
+
+![Outfit 10-1](assets/outfit/2025aw/10-1.jpg#p80 "Outfit 10-1")
+![Outfit 10-2](assets/outfit/2025aw/10-2.jpg#p80 "Outfit 10-2")
+![Outfit 10-3](assets/outfit/2025aw/10-3.jpg#p80 "Outfit 10-3")
+![Outfit 10-4](assets/outfit/2025aw/10-4.jpg#p80 "Outfit 10-4")
+
+#### Look 11
+
+- Jacket: TERRAINCOGNITA
+- T-Shirt: Uniqlo 476216
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+A jacket that is suitable for show. The buttons and other small design details are very cool, and the slightly reflective fabric adds a nice touch.
+
+![Outfit 11-1](assets/outfit/2025aw/11-1.jpg#p80 "Outfit 11-1")
+![Outfit 11-2](assets/outfit/2025aw/11-2.jpg#p80 "Outfit 11-2")
+![Outfit 11-3](assets/outfit/2025aw/11-3.jpg#p80 "Outfit 11-3")
+![Outfit 11-4](assets/outfit/2025aw/11-4.jpg#p80 "Outfit 11-4")
+
+#### Look 12
+
+- Jacket: HNPOP (Taobao)
+- T-Shirt: Uniqlo 476216
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+A casually bought Hong Kong-style jacket, but I really like it.
+
+![Outfit 12-1](assets/outfit/2025aw/12-1.jpg#p80 "Outfit 12-1")
+![Outfit 12-2](assets/outfit/2025aw/12-2.jpg#p80 "Outfit 12-2")
+![Outfit 12-3](assets/outfit/2025aw/12-3.jpg#p80 "Outfit 12-3")
+
+
+### 2025 Spring/Summer
+
+#### Look 1
+
+- T-Shirt: MUJI AB1O3A5S
+- Pants: RICHMAN (Taobao)
+- Shoes: Muji
+
+One of my favourite T-shirt. I'm not really suited for light colors/white, but this one is an exception.
+
+![Outfit 1-1](assets/outfit/2025ss/1-1.jpg#p80 "Outfit 1-1")
+![Outfit 1-2](assets/outfit/2025ss/1-2.jpg#p80 "Outfit 1-2")
+![Outfit 1-3](assets/outfit/2025ss/1-3.jpg#p80 "Outfit 1-3")
+
+#### Look 2
+
+- Shirt: Uniqlo :C 331-476246
+- Pants: RICHMAN (Taobao)
+- Shoes: Muji
+
+The :C series shrits are awesome. I bought three colors of the same style. This is my favourite.
+
+![Outfit 2-1](assets/outfit/2025ss/2-1.jpg#p80 "Outfit 2-1")
+![Outfit 2-2](assets/outfit/2025ss/2-2.jpg#p80 "Outfit 2-2")
+![Outfit 2-3](assets/outfit/2025ss/2-3.jpg#p80 "Outfit 2-3")
+
+#### Look 3
+
+- Shirt: Uniqlo :C 331-477643
+- Pants: RICHMAN (Taobao)
+- Shoes: Muji
+
+Another :C series shirt. Different color.
+
+![Outfit 3-1](assets/outfit/2025ss/3-1.jpg#p80 "Outfit 3-1")
+![Outfit 3-2](assets/outfit/2025ss/3-2.jpg#p80 "Outfit 3-2")
+
+#### Look 4
+
+- Shirt: QOTRIOCK (Taobao)
+- Pants: RICHMAN (Taobao)
+- Shoes: Muji
+
+Brown tones have always been my likes.
+
+![Outfit 4-1](assets/outfit/2025ss/4-1.jpg#p80 "Outfit 4-1")
+![Outfit 4-2](assets/outfit/2025ss/4-2.jpg#p80 "Outfit 4-2")
+![Outfit 4-3](assets/outfit/2025ss/4-3.jpg#p80 "Outfit 4-3")
+
+The shirt is very thin with hollow-out details, it's cool in summer.
+
+![Outfit 4-4](assets/outfit/2025ss/4-4.jpg#p80 "Outfit 4-4")
+
+#### Look 5
+
+- Vest: Uniqlo 311-484335
+- T-Shirt: MUJI AB1O3A5S
+- Pants: RICHMAN (Taobao)
+- Shoes: Muji
+
+Actually it is the Look 1 with a vest. But it's perfect for slightly cooler days during summer rain.
+
+![Outfit 5-1](assets/outfit/2025ss/5-1.jpg#p80 "Outfit 5-1")
+![Outfit 5-2](assets/outfit/2025ss/5-2.jpg#p80 "Outfit 5-2")
+![Outfit 5-3](assets/outfit/2025ss/5-3.jpg#p80 "Outfit 5-3")
 
 ## Hairstyle
 
