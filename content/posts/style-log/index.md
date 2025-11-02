@@ -168,7 +168,7 @@ A jacket that is suitable for show. The buttons and other small design details a
 
 #### Look 12
 
-- Jacket: HNPOP (Taobao)
+- Jacket: Jiwuus (Taobao)
 - T-Shirt: Uniqlo 476216
 - Pants: OPICLOTH/OPIC 21AW
 - Shoes: Birkenstock Boston
@@ -179,6 +179,19 @@ A casually bought Hong Kong-style jacket, but I really like it.
 ![Outfit 12-2](assets/outfit/2025aw/12-2.jpg#p80 "Outfit 12-2")
 ![Outfit 12-3](assets/outfit/2025aw/12-3.jpg#p80 "Outfit 12-3")
 
+#### Look 13
+
+- Jacket: Zara 9598/270/800
+- T-Shirt: Uniqlo 475357
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+A jacket that I rarely find to be a perfect match for a white T-shirt on me.
+
+![Outfit 13-1](assets/outfit/2025aw/13-1.jpg#p80 "Outfit 13-1")
+![Outfit 13-2](assets/outfit/2025aw/13-2.jpg#p80 "Outfit 13-2")
+![Outfit 13-3](assets/outfit/2025aw/13-3.jpg#p80 "Outfit 13-3")
+![Outfit 13-4](assets/outfit/2025aw/13-4.jpg#p80 "Outfit 13-4")
 
 ### 2025 Spring/Summer
 
@@ -249,6 +262,23 @@ Actually it is the Look 1 with a vest. But it's perfect for slightly cooler days
 ![Outfit 5-1](assets/outfit/2025ss/5-1.jpg#p80 "Outfit 5-1")
 ![Outfit 5-2](assets/outfit/2025ss/5-2.jpg#p80 "Outfit 5-2")
 ![Outfit 5-3](assets/outfit/2025ss/5-3.jpg#p80 "Outfit 5-3")
+
+#### Look 6
+
+- Shirt: 331-462389
+- T-Shirt: Uniqlo 475357
+- Pants: OPICLOTH/OPIC 21AW
+- Shoes: Birkenstock Boston
+
+Traditional Chineses programmer plaid look. (x)
+
+![Outfit 6-1](assets/outfit/2025ss/6-1.jpg#p80 "Outfit 6-1")
+![Outfit 6-2](assets/outfit/2025ss/6-2.jpg#p80 "Outfit 6-2")
+![Outfit 6-3](assets/outfit/2025ss/6-3.jpg#p80 "Outfit 6-3")
+
+This shirt always reminds me of Tanjiro Kamado.
+
+![Outfit 6-4](assets/outfit/2025ss/6-4.jpg#p80 "Outfit 6-4")
 
 ## Hairstyle
 
