@@ -90,7 +90,7 @@ This coat is from this year's Uniqlo U collection. The tailoring is very cool, b
 - Pants: OPICLOTH/OPIC 21AW
 - Shoes: Birkenstock Boston
 
-The coat was bought in Tokio, Japan. It's made of denim, curly but cool.
+The coat was bought in Tokyo, Japan. It's made of denim, curly but cool.
 
 Just found out that the brand is closed. Sad.
 
