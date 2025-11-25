@@ -23,15 +23,13 @@ hideHeader = false
 homeIntroContent = """
 # Hi
 
-I am ***Yao Meng*** (***孟爻***). You can also call me by my nickname **MrCroxx** (***叉鸽***).
+I am ***Yao Meng*** (***孟爻***), also known as **MrCroxx** (***叉鸽***).
 
-I'm a **Software Engineer** specialized in **Distributed Storage Systems**.
+I'm a **software engineer** focusing on **distributed storage systems**.
 
-I enjoy exploring a variety of technical topics, including **databases**, **distributed systems**, **storage**, **performance optimization**, **kernels**, **open source**, and many more...
+My work and interests span **databases**, **distributed systems**, **storage**, **performance optimization**, **kernels**, and **open-source software**. I enjoy exploring how systems behave, how they fail, and how to make them faster and more reliable.
 
-Beyond tech, I'm passionate about **movies** 📽️ and enjoy **beer** 🍺.
-
-Welcome to share your favorites.
+Outside of engineering, I have a deep appreciation for **film** 📽️ and a quiet fondness for **beer** 🍺. Feel free to share your recommendations.
 
 # Recent Work
 
@@ -44,15 +42,13 @@ Contributor of
 - [**RisingWave**](https://github.com/risingwavelabs/risingwave), SQL stream processing, analytics, and management.
 - [**TiKV**](https://github.com/tikv/tikv), distributed transactional key-value database.
 - [**Chroma**](https://github.com/chroma-core/chroma), embedding database for LLM apps.
-- ... and many more!
+- ... and several other open-source projects.
 
 # Chinese Blog (Legacy)
 
-I used to write technical articles in Chinese on [叉鸽 MrCroxx 的博客](https://blogx.mrcroxx.com). 
+I previously wrote technical articles in Chinese on [叉鸽 MrCroxx 的博客](https://blogx.mrcroxx.com), mostly on **etcd/Raft**, **LevelDB**, **boltdb**, and various **paper readings**.
 
-There were some great articles about **etcd/Raft**, **LevelDB**, **blotdb**, and **paper readings**.
-
-But now I prefer to write in English here.
+I now prefer to write in English here.
 
 # Happy Reading
 
