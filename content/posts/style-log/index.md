@@ -323,11 +323,17 @@ This shirt always reminds me of Tanjiro Kamado.
 
 ## Hairstyle
 
-### 2025 Spring/Summer
-
 #### Look 1
 
 Claw clips are really useful for my curly and messy hair.
 
 ![Hairstyle 1-1](assets/hairstyle/1-1.jpg#p80 "Hairstyle 1-1")
 ![Hairstyle 1-2](assets/hairstyle/1-2.jpg#p80 "Hairstyle 1-2")
+
+#### Look 2
+
+Finally I learned how to use a hairpin!
+
+![Hairstyle 2-1](assets/hairstyle/2-1.jpg#p80 "Hairstyle 2-1")
+![Hairstyle 2-2](assets/hairstyle/2-2.jpg#p80 "Hairstyle 2-2")
+![Hairstyle 2-3](assets/hairstyle/2-3.jpg#p80 "Hairstyle 2-3")
