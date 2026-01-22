@@ -1,6 +1,6 @@
 ---
 title: "Style Log"
-date: "2025-10-28"
+date: "2025-10-01"
 summary: "Log of my personal outfits & hairstyles & more."
 categories: ["life"]
 tags: ["outfit", "hairstyle"]
