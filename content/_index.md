@@ -8,5 +8,4 @@ cascade:
     math: true
     showTags: true
     hideBackToTop: false
-
 ---
