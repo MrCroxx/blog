@@ -1,4 +1,4 @@
 User-agent: *
-Disallow:
+Disallow: /resume.pdf
 
 Sitemap: https://blog.mrcroxx.com/sitemap.xml
