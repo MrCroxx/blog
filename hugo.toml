@@ -126,6 +126,9 @@ style = 'friendly'
 startLevel = 2
 endLevel = 4
 
+[markup.goldmark]
+renderer.unsafe = true
+
 # Giscus comments
 [params.giscus]
 enable = true
