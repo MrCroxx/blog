@@ -176,7 +176,7 @@ As mentioned before, it’s challenging to achieve optimal performance with a fl
 
 The memory cache framework of ***Foyer*** adopts sharding design to improve performance under high concurrency loads. Each shard has its own indexer and eviction algorithm container. This design greatly simplifies the engineering of concurrent data structures. Although usage imbalance between shards may occur when the capacity is extremely small, such severe data skew rarely happens in production environments.
 
-![Foyer - Sharding in In-memory Cache](assets/memory-cache-shards.svg "[Foyer - Sharding in In-memory Cache")
+![Foyer - Sharding in In-memory Cache](assets/memory-cache-shards.svg "Foyer - Sharding in In-memory Cache")
 
 #### 2.2.2 Intrusive Data Structures
 
