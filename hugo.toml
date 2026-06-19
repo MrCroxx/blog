@@ -119,7 +119,7 @@ url = "/resume.pdf"
 
 # Syntax highlight on code blocks
 [markup.highlight]
-style = 'friendly'
+noClasses = false
 
 # Table of Contents
 [markup.tableOfContents]
