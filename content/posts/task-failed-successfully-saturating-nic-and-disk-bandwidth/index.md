@@ -1,6 +1,6 @@
 ---
 title: "Task Failed Successfully: Saturating NIC and Disk Bandwidth"
-date: "2026-06-18"
+date: "2026-06-21"
 summary: "A journey from 'wonder how' to 'wonder why'."
 categories: ["foyer"]
 tags: ["System", "TLB", "RDMA", "io_uring"]
