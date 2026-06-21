@@ -423,7 +423,7 @@
 ]]>
 </script>
 <rect x="0.0" y="0" width="1200.0" height="1078.0" fill="url(#background)"  />
-<text id="title" x="600.00" y="24" >RDMA baseline inflight=16</text>
+<text id="title" x="600.00" y="24" >Simeple Demo Flamegraph (iodepth=16)</text>
 <text id="details" x="10.00" y="1061" > </text>
 <text id="unzoom" x="10.00" y="24" class="hide">Reset Zoom</text>
 <text id="search" x="1090.00" y="24" >Search</text>
