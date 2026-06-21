@@ -299,44 +299,57 @@ This is enough to show that CRC computation itself is not the source of the bott
 
 ## 3. The Real Bottleneck: TLB Misses
 
-In [Section 2.3](#23-ruling-out-the-impact-of-crc-computation), we observed an interesting phenomenon: as long as we touch the buffer after the read—even without performing any computation—we hit the bottleneck.
+In [Section 2.3](#23-ruling-out-the-impact-of-crc-computation), we observed an interesting phenomenon: as long as we touch the buffer after the read, even without performing any computation, the system still hit the bottleneck. Looking back at the experiments in [Chapter 1](#1-optimize-a-demo-with-1-nic-and-8-disks) and [Section 2.1](#21-ruling-out-the-impact-of-iou-wrk), we repeatedly encountered issues caused by 4 KiB pages. Could the bottleneck here be neither compute-bound nor I/O-bound, but instead caused by stalls in 4 KiB-page address translation?
 
+To test this hypothesis, we replace the 64 MiB read arena backed by 4 KiB pages with a 1 GiB hugepage-backed read arena and compare the results.
 
+| Config | inf=16 | inf=32 | **inf=64** |
+|:------:|-------:|-------:|-----------:|
+| T=8, CRC=on, hugepage=off | 183.2 | 207.1 | 209.8 |
+| T=8, CRC=off, hugepage=off | 220.3 | 291.9 | 306.3 |
+| T=8, CRC=off, hugepage=on | 229.8 | 309.3 | 355.3 |
+| T=8, CRC=on, hugepage=on | 209.7 | 298.4 | **350.7** |
+| T=16, CRC=on, hugepage=off | 181.4 | 206.0 | 211.2 |
+| T=16, CRC=on, hugepage=on | 210.1 | 298.0 | **347.6** |
 
+The results show that, with hugepages enabled, we can nearly saturate the NIC at T=8 even with CRC enabled.
 
+This is sufficient to confirm that hugepages are an effective remedy for the bottleneck. It also validates that the three factors we ruled out in [Chapter 2](#2-scale-to-a-larger-deployment) are not the root cause.
 
+However, although we have eliminated the bottleneck, we still cannot conclusively show that it was caused by address translation. We still need hard evidence to prove it. Therefore, I reran the experiment and used perf stat to measure CPU L1D misses and dTLB misses.
 
+| state | aggregate GB/s | L1D load misses / GET | dTLB load misses / GET | 4K page-walk reloads / GET |
+|:-----:|---------------:|----------------------:|------------:|-----------------------:|---------------------------:|
+| HP=off, CRC=off, touch=off | 306.1 | 2045.0 | 6.7 | 3.6 |
+| HP=off, CRC=off, touch=on | 210.3 | **18472.7** | **88.5** | **78.7** |
+| HP=off, CRC=on, touch=off | 209.7 | **19214.5** | **81.0** | **66.0** |
+| HP=on, CRC=off, touch=on | 350.2 | 17005.4 | 5.1 | 2.9 |
 
+The results make the picture clear. With 4 KiB pages, both CRC-enabled runs and runs with CRC disabled but a single touch of the read buffer incur more than 80 dTLB misses per GET on average. Once hugepages are enabled, the dTLB-miss count drops to the same level as in the fully CRC-disabled case. This provides direct evidence that dTLB misses are the root cause of the throughput bottleneck.
 
+By contrast, higher L1D-miss counts do not correlate with lower throughput in any of the tested configurations. That also rules out L1D misses as the bottleneck.
 
+**Why do TLB misses cause such a large performance regression?**
 
+A TLB is the CPU’s address-translation cache: it stores recent virtual-to-physical page translations. Before the CPU can load from or store to memory, it must determine which physical page backs the virtual address. A TLB hit is fast; on a miss, the CPU must walk the page tables.
 
+TLB misses matter because they stall execution before the actual data access can proceed. Translating an address in a 4 KiB page may require a multi-level page-table walk through entries such as PGD, PUD, PMD, and PTE. Those page-table entries must themselves be fetched from cache or memory, and can in turn incur cache misses.
 
+For a path that streams through a 1028 KiB value, the CPU reads cache lines while repeatedly crossing 4 KiB page boundaries. A 1 MiB value spans 257 * 4 KiB pages. Once the active translations no longer fit in the dTLB, the CPU repeatedly performs page walks, directly reducing throughput.
 
+Hugepages help because they increase the granularity of address translation. With 4 KiB pages, a 1028 KiB value requires 257 page translations. With 1 GiB hugepages, the same 1028 KiB region is typically covered by a single large-page translation. A small number of TLB entries can therefore cover far more data, substantially reducing dTLB misses and 4 KiB page-walk reloads.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-***TBC ... ...***
+At this point, the story finally lines up end to end. READ_FIXED removed the repeated kernel-side cost of discovering and pinning user pages, but it did not change what the CPU had to pay when the application later scanned the data. With 4 KiB pages, every 1028 KiB value still forced the CPU to cross hundreds of page translations; CRC merely made that scan explicit, while touch=on reproduced the same pressure without doing any checksum work. Hugepages fixed the missing piece by making the data path translation-friendly as well. The bottleneck was not in the disks, the NIC, io_uring offload, fd lookup, or CRC arithmetic. It was the cost of translating the memory that all of those components were moving through.
 
 ## X. "A Planet Upside Down"
 
-In fact, my work should have been done as soon as the AI finished the initial performance optimization. Ironically, figuring out why the optimization worked ended up taking far more of my own time than the original task itself. As AI models become more capable, they can build surprisingly good systems even without a real understanding of the underlying principles.
+In fact, when I first used AI to debug this performance bottleneck, its earliest suggestion was to optimize the read arena with hugepages—and that was enough to saturate the NIC. However, it did not identify the real underlying cause: TLB misses. Instead, it kept circling around the various issues we had already uncovered.
+
+For an engineer with experience in HPC and storage performance optimization, the nature of the problem may be recognizable from experience. But because the debugging trace left behind was probably too sparse, the AI did not have enough evidence to reconstruct that reasoning. It could produce the answer, but not the full chain of reasoning that leads to it.
+
+I think that may be one of the reasons this blog post is worth writing.
+
+To be honest, my work should have been done as soon as the AI finished the initial performance optimization. Ironically, figuring out why the optimization worked ended up taking far more of my own time than the original task itself. As AI models become more capable, they can build surprisingly good systems even without a real understanding of the underlying principles.
 
 But digging into those principles has always been one of my small obsessions as a programmer. In the flood of AI, it may also be one of the ways I keep myself from slipping into a sense of meaninglessness.
 
@@ -361,6 +374,5 @@ To close, I want to share a few lines from a song I’ve been listening to latel
 > a planet upside down.
 >
 > --- A Planet Upside Down (Pearl & The Oysters)
-
 
 ![A Planet Upside Down](assets/a-planet-upside-down.png#rounded-30px#p80 "A Planet Upside Down - Pearl & The Oysters")
