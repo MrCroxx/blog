@@ -39,8 +39,8 @@ This demo setup is very straightforward and rules out almost all sources of inte
 
 Now that everything is in place, let’s look at the results.
 
-| inflight | GiB/s | avg µs | p50   | p90   | p99   | p99.9 |
-|:--------:|------:|-------:|------:|------:|------:|------:|
+| inflight | GiB/s | avg µs | p50 µs | p90 µs | p99 µs | p99.9 µs |
+|:--------:|------:|-------:|-------:|-------:|-------:|---------:|
 | 4        | 8.87  | 440    | 430   | 519   | 632   | 759   |
 | 8        | 15.56 | 501    | 486   | 616   | 784   | 955   |
 | **16**   | **22.69** | 688 | 670   | 850   | 1118  | 1436  |
@@ -62,7 +62,7 @@ As the flamegraph shows, most of the CPU time is spent in `io_submit_sqes`, whic
 
 In a word, the wide frame of `io_submit_sqes` represents the cumulative cost of preparing user memory for Direct I/O DMA. Each SQE contains only a user-space pointer and length. The kernel must walk the page tables, find and pin the backing struct pages, build bio_vec entries, update folio state, and submit the resulting bio.
 
-Most of that work is paid per page. A 1 MiB read backed by 4 KiB pages touches roughly 256 pages, turning one logical read into hundreds of page-table lookups, page pins, folio updates, and bio-vector operations. At 20,000 to 50,000 reads per second, the system performs roughly 5 to 13 million GUPs (Get User Pages) per second. If the virtual address range is backed by heavily fragmented physical memory, there may be a comparable number of folio metadata updates and atomic refcount/pincount updates, along with potential cross-core cache-line ownership transfers.
+Most of that work is paid per page. A 1 MiB read backed by 4 KiB pages touches roughly 256 pages, turning one logical read into hundreds of page-table lookups, page pins, folio updates, and bio-vector operations. At 20,000 to 50,000 reads per second, the system processes roughly 5 to 13 million pages through GUP (Get User Pages) per second. If the virtual address range is backed by heavily fragmented physical memory, there may be a comparable number of folio metadata updates and atomic refcount/pincount updates, along with potential cross-core cache-line ownership transfers.
 
 Therefore, if we can avoid paying the cost of processing the user-space buffer on every I/O, we should be able to improve performance. Fortunately, `liburing` provides a way to do exactly that. `io_uring_register_buffers(3)` lets us register I/O buffers ahead of time, moving this metadata preparation work out of the per-I/O path. More specifically, `io_uring_register_buffers(3)` performs the following work up front:
 
@@ -72,8 +72,8 @@ Therefore, if we can avoid paying the cost of processing the user-space buffer o
 
 These are exactly the major costs we just observed in the flamegraph! Let’s try it. In the demo, we introduce a 64 MiB read arena and divide it into 1 MiB slots, matching the I/O size. At startup, we register the 64-slot read arena as 64 io_uring fixed buffers through `io_uring_register_buffers(3)`, with one iovec per slot. For each read, we switch the opcode from `opcode::Read` to `opcode::ReadFixed` and set buf_index to the corresponding slot. This allows the I/O path to use registered buffers. Here are the results:
 
-| inflight | GiB/s | avg µs | p50   | p90   | p99   | p99.9 |
-|:--------:|------:|-------:|------:|------:|------:|------:|
+| inflight | GiB/s | avg µs | p50 µs | p90 µs | p99 µs | p99.9 µs |
+|:--------:|------:|-------:|-------:|-------:|-------:|---------:|
 | 4 | 9.09 | 429 | 421 | 519 | 641 | 767 |
 | 8 | 16.78 | 465 | 447 | 590 | 775 | 966 |
 | 16 | 28.08 | 556 | 514 | 774 | 1119 | 1425 |
@@ -82,15 +82,15 @@ These are exactly the major costs we just observed in the flamegraph! Let’s tr
 
 As the I/O depth increases, throughput continues to rise. At an I/O depth of 64, it nearly saturates the NIC bandwidth.
 
-| inflight | Baseline GiB/s | Step1 GiB/s | Δ | Baseline p99 | ReadFixed p99 |
-|:--------:|---------------:|------------:|--:|-------------:|--------------:|
+| inflight | Baseline GiB/s | READ_FIXED GiB/s | Δ | Baseline p99 µs | READ_FIXED p99 µs |
+|:--------:|---------------:|-----------------:|--:|----------------:|------------------:|
 | 4 | 8.87 | 9.09 | +2% | 632 | 641 |
 | 8 | 15.56 | 16.78 | +8% | 784 | 775 |
 | 16 | 22.69 | 28.08 | +24% | 1118 | 1119 |
 | 32 | 22.53 | 39.87 | **+77%** | 1934 | 1754 |
 | 64 | 22.15 | 46.00 | **+108%** | 3366 | 3195 |
 
-Compared with the baseline, throughput is similar up to an I/O depth of 16, where the CPU has not yet become the bottleneck. Beyond that point, per-I/O buffer handling in the baseline becomes CPU-bound. ReadFixed removes this bottleneck, allowing throughput to continue scaling until it saturates the NIC.
+Compared with the baseline, throughput is similar at low I/O depths, where the CPU has not yet become the bottleneck. By an I/O depth of 16, the baseline is already showing CPU pressure; beyond that point, per-I/O buffer handling becomes fully CPU-bound. READ_FIXED removes this bottleneck, allowing throughput to continue scaling until it saturates the NIC.
 
 The flame graph also confirms this.
 
@@ -110,7 +110,7 @@ While the CRC computation throughput is just enough for this workload in isolati
 
 Each worker thread connects to every NIC on the client node. Each connection has its own QP, while all QPs owned by the same worker share a single CQ for completion processing.
 
-!["Large Demo Topology"](assets/large-demo-topology.png "Large Demo Topology")
+![Large Demo Topology](assets/large-demo-topology.png "Large Demo Topology")
 
 To make the discussion below clearer, I will use the following terms for the different levels of sharding on the server side:
 
@@ -121,7 +121,7 @@ To make the discussion below clearer, I will use the following terms for the dif
 | Shard | 1 * NUMA node within a physical server. Each shard owns 1 * 400 Gb/s NIC and 8 * NVMe drives, and is served by multiple worker threads. |
 | Worker thread | A CPU-pinned worker thread. Worker threads within the same shard share the NIC, index, and local NVMe drives. Each worker thread connects to every client NIC through a dedicated QP per connection, while sharing a single CQ across all of its QPs. |
 
-Now that we have a clear picture of the larger-scale demo (hopefully), let’s put it under load! Here are the results; `T` represents worker thread count here.
+Now that we have a clear picture of the larger-scale demo (hopefully), let’s put it under load! Here are the results; `T` represents the worker thread count per shard, and all throughput numbers are in GiB/s.
 
 | Config | iodepth=16 | iodepth=32 | **iodepth=64** |
 |:------:|----------:|-----------:|---------------:|
@@ -129,7 +129,7 @@ Now that we have a clear picture of the larger-scale demo (hopefully), let’s p
 | T=8 | 183.2 | 207.1 | **209.8** |
 | T=16 | 181.4 | 206.0 | **211.2** |
 
-In theory, the system should be able to reach an aggregate throughput of 372.8 GiB/s across all 8 * NICs. In practice, however, we achieved only about half of that throughput.
+In theory, the system should be able to reach an aggregate throughput of 372.5 GiB/s across all 8 * NICs. In practice, however, we achieved only about half of that throughput.
 
 ***Here comes a new bottleneck!***
 
@@ -137,7 +137,7 @@ Next, let’s work through the flame graph step by step to identify the bottlene
 
 ### 2.1 Ruling Out the Impact of `iou-wrk`
 
-To locate the bottleneck, let’s look at the new flamegraph, captured from a run with 8 worker threads and an I/O depth of 64. 
+To locate the bottleneck, let’s look at the new flamegraph, captured from a `T=8` run with an I/O depth of 64.
 
 > Tips: The full flamegraph is too large to embed here. You can download the SVG and open it directly in a browser to explore the details.
 
@@ -147,9 +147,9 @@ Although the multi-shard flame graph is fairly complex, it splits quite clearly 
 
 When we captured the flame graph for the simple demo, there was only a single worker thread, so we profiled only that thread and did not include the `iou-wrk` threads. And because the simple demo was already able to saturate the NIC, this also made it easy to overlook the impact of `iou-wrk`.
 
-Could this bottleneck be caused by `iou-wrk` overhead? To answer that, let’s first look at where the `iou-wrk` threads come from. 
+Could this bottleneck be caused by `iou-wrk` overhead? To answer that, let’s first look at where the `iou-wrk` threads come from.
 
-`iou-wrk` is a kernel worker thread that io_uring uses when the submitting thread cannot complete an I/O request immediately. It continues the request asynchronously through the kernel submission or potentially blocking path. 
+`iou-wrk` is a kernel worker thread that io_uring uses when the submitting thread cannot complete an I/O request immediately. It continues the request asynchronously through the kernel submission or potentially blocking path.
 
 Then why are our reads being offloaded to iou-wrk?
 
@@ -166,7 +166,8 @@ The larger-scale demo inherits the simple demo’s read-arena design: buffers ar
 On the server, these parameters are configured as follows:
 
 ```bash
-> dev=nvme0n1                                                                                                                    for f in \
+> dev=nvme0n1
+> for f in \
   max_segments \
   max_segment_size \
   max_sectors_kb \
@@ -195,7 +196,7 @@ nvme0n1 ... 342.65 ...
 Therefore, the trigger chain for a 1,028 KiB request is roughly as follows:
 
 ```plain
-1,028 KiB buffer without huge pages
+1,028 KiB buffer without hugepages
   → 257 physical 4 KiB segments
   → exceeds `max_segments = 128`
   → enters the multi-bio / split path
@@ -208,7 +209,7 @@ Therefore, the trigger chain for a 1,028 KiB request is roughly as follows:
 
 At this point, we have identified what triggers iou-wrk. The next question is whether iou-wrk is actually the bottleneck preventing throughput from scaling further.
 
-Unfortunately, the answer here is NO. A few additional experiments allow us to rule it out. While running the larger-scale demo, I also ran a separate experiment with CRC disabled. The results are shown below.
+Unfortunately, the answer here is NO. A few additional experiments allow us to rule it out. While running the larger-scale demo, I also ran a separate experiment with CRC disabled. The results are shown below, in GiB/s.
 
 | Config | iodepth=16 | iodepth=32 | **iodepth=64** |
 |:------:|-------:|-------:|-----------:|
@@ -266,7 +267,7 @@ Similar to `READ_FIXED`, io_uring provides mechanisms to eliminate both sources 
 
 ![Large Demo Flamegraph (shard=48, regfiles=on, regring=on)](assets/large-demo-flamegraph-shard-48-regfiles-regring.svg "Large Demo Flamegraph (shard=48, regfiles=on, regring=on)")
 
-From the flame graph, we can confirm that fget overhead is now almost entirely gone. However, the bottleneck still remains.
+From the flame graph, we can confirm that fget overhead is now almost entirely gone. However, the bottleneck still remains. The throughput numbers below are in GiB/s.
 
 | Config | inf=16 | inf=32 | **inf=64** |
 |:------:|-------:|-------:|-----------:|
@@ -303,7 +304,7 @@ This is enough to show that CRC computation itself is not the source of the bott
 
 In [Section 2.3](#23-ruling-out-the-impact-of-crc-computation), we observed an interesting phenomenon: as long as we touch the buffer at a 64 B stride after the read, even without performing any computation, the system still hit the bottleneck. Looking back at the experiments in [Chapter 1](#1-optimize-a-demo-with-1-nic-and-8-disks) and [Section 2.1](#21-ruling-out-the-impact-of-iou-wrk), we repeatedly encountered issues caused by 4 KiB pages. Could the bottleneck here be neither compute-bound nor I/O-bound, but instead caused by stalls in 4 KiB-page address translation?
 
-To test this hypothesis, we replace the 64 MiB read arena backed by 4 KiB pages with a 1 GiB hugepage-backed read arena and compare the results.
+To test this hypothesis, we replace the 64 MiB read arena backed by 4 KiB pages with a 1 GiB hugepage-backed read arena and compare the results. The throughput numbers below are in GiB/s.
 
 | Config | inf=16 | inf=32 | **inf=64** |
 |:------:|-------:|-------:|-----------:|
@@ -320,14 +321,14 @@ This is sufficient to confirm that hugepages are an effective remedy for the bot
 
 However, although we have eliminated the bottleneck, we still cannot conclusively show that it was caused by address translation. We still need hard evidence to prove it. Therefore, I reran the experiment and used perf stat to measure CPU L1D misses and dTLB misses.
 
-| state | aggregate GiB/s | L1D load misses / GET | dTLB load misses / GET | 4K page-walk reloads / GET |
+| state | aggregate GiB/s | L1D load misses / GET | dTLB load misses / GET | 4 KiB page-walk reloads / GET |
 |:-----:|---------------:|----------------------:|-----------------------:|---------------------------:|
 | HP=off, CRC=off, touch=off | 306.1 | 2045.0 | 6.7 | 3.6 |
 | HP=off, CRC=off, touch=on | 210.3 | **18472.7** | **88.5** | **78.7** |
 | HP=off, CRC=on, touch=off | 209.7 | **19214.5** | **81.0** | **66.0** |
 | HP=on, CRC=off, touch=on | 350.2 | 17005.4 | 5.1 | 2.9 |
 
-The results make the picture clear. With 4 KiB pages, both CRC-enabled runs and runs with CRC disabled but a 64 B-stride scan across the read buffer incur more than 80 dTLB misses per GET on average. Once hugepages are enabled, the dTLB-miss count drops to the same level as in the fully CRC-disabled case. This provides direct evidence that dTLB misses are the root cause of the throughput bottleneck.
+The results make the picture clear. With 4 KiB pages, both the CRC-enabled run and the CRC-disabled run with a 64 B-stride scan across the read buffer incur more than 80 dTLB misses per GET on average. Once hugepages are enabled, the dTLB-miss count drops to the same level as in the fully CRC-disabled case. This provides direct evidence that dTLB misses are the root cause of the throughput bottleneck.
 
 By contrast, higher L1D-miss counts do not correlate with lower throughput in any of the tested configurations. That also rules out L1D misses as the bottleneck.
 
@@ -357,22 +358,22 @@ But digging into those principles has always been one of my small obsessions as 
 
 To close, I want to share a few lines from a song I’ve been listening to lately. A toast to everyone still trying to stay grounded in this era.
 
-> You used to wonder why, 
-> 
+> You used to wonder why,
+>
 > but now you wonder how.
 >
 > ...
-> 
+>
 > But you're still trying hard to understand,
-> 
+>
 > to comprehend,
-> 
+>
 > to wrap your head around
-> 
+>
 > all the things that don't make sense,
-> 
->  that don't mix in
-> 
+>
+> that don't mix in
+>
 > a planet upside down.
 >
 > --- A Planet Upside Down (Pearl & The Oysters)
