@@ -23,7 +23,7 @@ After I gave my agent the prompt to optimize the performance of my system, the A
 
 This post doesn't talk about why the AI "failed successfully". It is a walkthrough of the analysis and debugging process behind this system performance optimization.
 
-## 1. Optimize a demo with 1 NIC and 8 disks
+## 1. Optimize a Demo with 1 NIC and 8 disks
 
 Let's turn the system into a simple abstraction to foucus on the performance optimization rather than the complex business:
 
@@ -96,7 +96,7 @@ The flame graph also confirms this.
 
 ![Simple Demo Flamegraph (iodepth=16, with READFIXED)](assets/simple-demo-flamegraph-io-depth-16-readfixed.svg "Simple Demo Flamegraph (iodepth=16, with READFIXED)")
 
-## 2. Scale to a larger deployment
+## 2. Scale to a Larger Deployment
 
 With the simple demo resolved, we can move on to a larger-scale demo that more closely reflects a real-world deployment.
 
@@ -254,7 +254,52 @@ The lower `rareq-sz` value confirms that requests are being split more aggressiv
 
 This rules out request splitting itself, per-split CPU overhead, and the async-versus-inline transition as sufficient explanations for the throughput gap. They are all real effects, but none of them is the wall on its own.
 
+### 2.2 Ruling Out the Impact of `fget`
 
+In the per-shard flame graphs for both the simple demo and the large demo, we found another major source of overhead in `io_uring_enter`, with `fget` accounting for most of its cost. Take shard 48 from one run of the large demo as an example.
+
+![Large Demo Flamegraph (shard=48)](assets/large-demo-flamegraph-shard-48.svg "Large Demo Flamegraph (shard=48)")
+
+`fget` can come from two places: looking up the target file descriptor for disk SQEs (once per actual disk I/O), and looking up the ring file descriptor itself on every `io_uring_enter` call. Could `fget` be the source of the performance bottleneck?
+
+Similar to `READ_FIXED`, io_uring provides mechanisms to eliminate both sources of overhead: registered files remove the fd lookup on the disk-I/O path, while a registered ring fd removes the lookup of the ring fd itself on every io_uring_enter call. Together, they eliminate both categories of `fget`.
+
+![Large Demo Flamegraph (shard=48, regfiles=on, regring=on)](assets/large-demo-flamegraph-shard-48-regfiles-regring.svg "Large Demo Flamegraph (shard=48, regfiles=on, regring=on)")
+
+From the flame graph, we can confirm that fget overhead is now almost entirely gone. However, the bottleneck still remains.
+
+| Config | inf=16 | inf=32 | **inf=64** |
+|:------:|-------:|-------:|-----------:|
+| T=8 | 183.2 | 207.1 | **209.8** |
+| T=8, regfiles=on, regring=on | 180.6 | 206.6 | **210.2** |
+
+This shows that fget is not the source of the performance bottleneck. The flame graph also reveals that, although fget has disappeared, the cost of io_uring_enter remains. Why?
+
+That remaining cost comes from our busy-polling loop: when no I/O has completed and the CPU is otherwise idle, the io_uring poll path simply spins. This is also indirect evidence that the current bottleneck is not CPU-bound.
+
+### 2.3 Ruling Out the Impact of CRC Computation
+
+Although [Section 2.2](#22-ruling-out-the-impact-of-fget) is already sufficient to show that the bottleneck is not CPU-bound, we still rule out CRC computation as a possible source of contention, just to be safe. Because disabling CRC in an earlier experiment allowed performance to break through the bottleneck.
+
+This time, we test the hypothesis more thoroughly under three configurations:
+
+1. CRC enabled
+2. CRC disabled
+3. CRC disabled, but with the read buffer scanned once in memory after each read
+
+| Config | agg GB/s |
+|-------|---------:|
+| T=16, CRC=on | **208.6** |
+| T=16, CRC=off | 305.9 |
+| **T=16, CRC=off, touch=on** | **209.3** |
+
+Something surprising happens: when we disable CRC entirely, performance breaks through the bottleneck. But when we disable the CRC computation while merely touching the read buffer once, performance hits the bottleneck again!
+
+This is enough to show that CRC computation itself is not the source of the bottleneck. ***More importantly, we seem to have identified the key operation that reproduces it.***
+
+## 3. The Real Bottleneck: TLB Misses
+
+In [Section 2.3](#23-ruling-out-the-impact-of-crc-computation), we observed an interesting phenomenon: as long as we touch the buffer after the read—even without performing any computation—we hit the bottleneck.
 
 
 
