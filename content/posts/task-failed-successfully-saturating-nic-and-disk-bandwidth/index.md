@@ -9,15 +9,15 @@ draft: false
 
 ## 0. "Task Failed Successfully"
 
-The AI era has arrived faster than most of us expected. Agentic coding has completely changed the way I work day to day. To be honest, I haven’t written a single line of code at work in quite a while. Yes, it is true. ***NOT A SINGLE LINE!!*** And yet, that hasn't stopped the code from running across clusters with hundreds of HPC servers at the peak performce.
+The AI era has arrived faster than most of us expected. Agentic coding has completely changed the way I work day to day. To be honest, I haven’t written a single line of code at work in quite a while. Yes, it is true. ***NOT A SINGLE LINE!!*** And yet, that hasn't stopped the code from running across clusters with hundreds of HPC servers at peak performance.
 
 Of course, not writing code (or even not fully reviewing it) does not mean we are just randomly poking around, like *monkey typing*. We still need to analyze requirements, refine the design with the agent, build demos, run mock experiments, study the results from small-scale tests, iterate on the problems we find, and maintain a complete, solid testing process, blah blah blah.
 
 ![Monkey Typing](assets/monkey-typing.gif#max-width-360px "Monkey Typing")
 
-However, with AI and agentic coding, everything has become faster. Sometimes, code is churned out faster than we can fully understand it. And sometims, it is even faster than AI can understand it. You, you read that right. And this post comes from one such example.
+However, with AI and agentic coding, everything has become faster. Sometimes, code is churned out faster than we can fully understand it. And sometimes, it is even faster than AI can understand it. Yes, you read that right. And this post comes from one such example.
 
-After I gave my agent the prompt to optimize the performance of my system, the AI quickly took the it from roughly half throughput to full saturation. But its explanation of why it worked was completely wrong. It was a classic case of ***task failed successfully***.
+After I gave my agent the prompt to optimize the performance of my system, the AI quickly took it from roughly half throughput to full saturation. But its explanation of why it worked was completely wrong. It was a classic case of ***task failed successfully***.
 
 ![Task Failed Successfully](assets/task-failed-successfully.jpg#max-width-360px "Task Failed Successfully")
 
@@ -25,7 +25,7 @@ This post doesn't talk about why the AI "failed successfully". It is a walkthrou
 
 ## 1. Optimize a Demo with 1 NIC and 8 disks
 
-Let's turn the system into a simple abstraction to foucus on the performance optimization rather than the complex business:
+Let's turn the system into a simple abstraction to focus on the performance optimization rather than the complex business:
 
 A single thread issues 1 MiB random direct I/O reads across 8 NVMe drives, then sends the data to a remote host via RDMA WRITE. Now, saturate the NIC bandwidth.
 
@@ -68,9 +68,9 @@ Therefore, if we can avoid paying the cost of processing the user-space buffer o
 
 - Validates the `iovecs` up front, checking address ranges, lengths, alignment, and count limits.
 - Performs GUP on the buffers, translates the user-space virtual addresses into the corresponding struct pages / folios, and pins those pages for the lifetime of the registration.
-- Constructs and retains kernel-side buffer metadata, build `io_mapped_ubuf` for each registered buffer.
+- Constructs and retains kernel-side buffer metadata, building `io_mapped_ubuf` for each registered buffer.
 
-These are exactly the major costs we just observed in the flamegraph! Let’s try it. In the demo, we introduce a 64 MiB read arena and divide it into 1 MiB slots, matching the I/O size. At startup, we register the 64-slot read arena as 64 io_uring fixed buffers through `io_uring_register_buffers(3)`, with one iovec per slot. For each read, we switch the opcode from `opcode::Read` to `opcode::ReadFixed` and set buf_index to the corresponding slot. This allows the I/O path to use registered buffers. Here is the results:
+These are exactly the major costs we just observed in the flamegraph! Let’s try it. In the demo, we introduce a 64 MiB read arena and divide it into 1 MiB slots, matching the I/O size. At startup, we register the 64-slot read arena as 64 io_uring fixed buffers through `io_uring_register_buffers(3)`, with one iovec per slot. For each read, we switch the opcode from `opcode::Read` to `opcode::ReadFixed` and set buf_index to the corresponding slot. This allows the I/O path to use registered buffers. Here are the results:
 
 | inflight | GiB/s | avg µs | p50   | p90   | p99   | p99.9 |
 |:--------:|------:|-------:|------:|------:|------:|------:|
@@ -100,7 +100,7 @@ The flame graph also confirms this.
 
 With the simple demo resolved, we can move on to a larger-scale demo that more closely reflects a real-world deployment.
 
-In the larger-scale demo, the client consists of a single node equipped with 8 * 400 Gb/s NICs. The server side consists of 4 nodes. Each server has 2 * NUMA nodes, and each NUMA node has 1 * 400 Gb/s NIC and 8 * same NVMe drives used in the previous demo.
+In the larger-scale demo, the client consists of a single node equipped with 8 * 400 Gb/s NICs. The server side consists of 4 nodes. Each server has 2 * NUMA nodes, and each NUMA node has 1 * 400 Gb/s NIC and 8 * the same NVMe drives used in the previous demo.
 
 The I/O size increases from 1 MiB to 1,028 KiB because an additional 4 KiB is needed to store metadata.
 
@@ -114,14 +114,14 @@ Each worker thread connects to every NIC on the client node. Each connection has
 
 To make the discussion below clearer, I will use the following terms for the different levels of sharding on the server side:
 
-| Term | Explain|
+| Term | Explanation |
 |:----:|:-------|
 | Cluster | The four-node deployment. |
 | Node | A physical server. Each node contains two NUMA nodes, with a total of two 400 Gb/s NICs and sixteen NVMe drives. |
 | Shard | 1 * NUMA node within a physical server. Each shard owns 1 * 400 Gb/s NIC and 8 * NVMe drives, and is served by multiple worker threads. |
 | Worker thread | A CPU-pinned worker thread. Worker threads within the same shard share the NIC, index, and local NVMe drives. Each worker thread connects to every client NIC through a dedicated QP per connection, while sharing a single CQ across all of its QPs. |
 
-Now that we have a clear picture of the larger-scale demo (hopefully), let’s put it under load! Here is the result, `T` represents worker thread count here.
+Now that we have a clear picture of the larger-scale demo (hopefully), let’s put it under load! Here are the results; `T` represents worker thread count here.
 
 | Config | iodepth=16 | iodepth=32 | **iodepth=64** |
 |:------:|----------:|-----------:|---------------:|
@@ -192,7 +192,7 @@ Device  ... rareq-sz ...
 nvme0n1 ... 342.65 ...
 ```
 
-Therefore, the trigger chain for a 1,028 KiB request is therefore roughly as follows:
+Therefore, the trigger chain for a 1,028 KiB request is roughly as follows:
 
 ```plain
 1,028 KiB buffer without huge pages
@@ -243,14 +243,14 @@ The worker pool is not short on threads either. Under saturation, the system cre
 
 So this is not a case of exhausting the worker pool. The disk queues are not saturated either: per-disk `aqu-sz` is around 3, while `nr_requests` is 1023.
 
-Finally, to isolate the split operation itself, we ran one more control, and only lower the block queue's `max_sectors_kb`.
+Finally, to isolate the split operation itself, we ran one more control by lowering only the block queue's `max_sectors_kb`.
 
 The lower `rareq-sz` value confirms that requests are being split more aggressively, from `342.67 KiB` to `205.60 KiB`. So the control really did increase the split count from **3 requests/GET** to **5 requests/GET**. But throughput did not move:
 
 | CRC=on, T=16, inflight=64 | `max_sectors_kb` | `rareq-sz` | requests / GET | aggregate throughput |
 |---|---:|---:|---:|---:|
-| default | 1280 | 342.67 KiB | 3.00 | **211.2 GB/s** |
-| forced more splits | 256 | 205.60 KiB | 5.00 | **211.2 GB/s** |
+| default | 1280 | 342.67 KiB | 3.00 | **211.2 GiB/s** |
+| forced more splits | 256 | 205.60 KiB | 5.00 | **211.2 GiB/s** |
 
 This rules out request splitting itself, per-split CPU overhead, and the async-versus-inline transition as sufficient explanations for the throughput gap. They are all real effects, but none of them is the wall on its own.
 
@@ -285,21 +285,23 @@ This time, we test the hypothesis more thoroughly under three configurations:
 
 1. CRC enabled
 2. CRC disabled
-3. CRC disabled, but with the read buffer scanned once in memory after each read
+3. CRC disabled, but with the read buffer touched at a 64 B stride after each read
 
-| Config | agg GB/s |
+Here `touch=on` means a cache-line-granular scan: after each read, the worker performs one load every 64 B across the 1,028 KiB buffer, without doing CRC arithmetic.
+
+| Config | agg GiB/s |
 |-------|---------:|
 | T=16, CRC=on | **208.6** |
 | T=16, CRC=off | 305.9 |
 | **T=16, CRC=off, touch=on** | **209.3** |
 
-Something surprising happens: when we disable CRC entirely, performance breaks through the bottleneck. But when we disable the CRC computation while merely touching the read buffer once, performance hits the bottleneck again!
+Something surprising happens: when we disable CRC entirely, performance breaks through the bottleneck. But when we disable the CRC computation while performing only one load every 64 B across the read buffer, performance hits the bottleneck again!
 
 This is enough to show that CRC computation itself is not the source of the bottleneck. ***More importantly, we seem to have identified the key operation that reproduces it.***
 
 ## 3. The Real Bottleneck: TLB Misses
 
-In [Section 2.3](#23-ruling-out-the-impact-of-crc-computation), we observed an interesting phenomenon: as long as we touch the buffer after the read, even without performing any computation, the system still hit the bottleneck. Looking back at the experiments in [Chapter 1](#1-optimize-a-demo-with-1-nic-and-8-disks) and [Section 2.1](#21-ruling-out-the-impact-of-iou-wrk), we repeatedly encountered issues caused by 4 KiB pages. Could the bottleneck here be neither compute-bound nor I/O-bound, but instead caused by stalls in 4 KiB-page address translation?
+In [Section 2.3](#23-ruling-out-the-impact-of-crc-computation), we observed an interesting phenomenon: as long as we touch the buffer at a 64 B stride after the read, even without performing any computation, the system still hit the bottleneck. Looking back at the experiments in [Chapter 1](#1-optimize-a-demo-with-1-nic-and-8-disks) and [Section 2.1](#21-ruling-out-the-impact-of-iou-wrk), we repeatedly encountered issues caused by 4 KiB pages. Could the bottleneck here be neither compute-bound nor I/O-bound, but instead caused by stalls in 4 KiB-page address translation?
 
 To test this hypothesis, we replace the 64 MiB read arena backed by 4 KiB pages with a 1 GiB hugepage-backed read arena and compare the results.
 
@@ -318,14 +320,14 @@ This is sufficient to confirm that hugepages are an effective remedy for the bot
 
 However, although we have eliminated the bottleneck, we still cannot conclusively show that it was caused by address translation. We still need hard evidence to prove it. Therefore, I reran the experiment and used perf stat to measure CPU L1D misses and dTLB misses.
 
-| state | aggregate GB/s | L1D load misses / GET | dTLB load misses / GET | 4K page-walk reloads / GET |
-|:-----:|---------------:|----------------------:|------------:|-----------------------:|---------------------------:|
+| state | aggregate GiB/s | L1D load misses / GET | dTLB load misses / GET | 4K page-walk reloads / GET |
+|:-----:|---------------:|----------------------:|-----------------------:|---------------------------:|
 | HP=off, CRC=off, touch=off | 306.1 | 2045.0 | 6.7 | 3.6 |
 | HP=off, CRC=off, touch=on | 210.3 | **18472.7** | **88.5** | **78.7** |
 | HP=off, CRC=on, touch=off | 209.7 | **19214.5** | **81.0** | **66.0** |
 | HP=on, CRC=off, touch=on | 350.2 | 17005.4 | 5.1 | 2.9 |
 
-The results make the picture clear. With 4 KiB pages, both CRC-enabled runs and runs with CRC disabled but a single touch of the read buffer incur more than 80 dTLB misses per GET on average. Once hugepages are enabled, the dTLB-miss count drops to the same level as in the fully CRC-disabled case. This provides direct evidence that dTLB misses are the root cause of the throughput bottleneck.
+The results make the picture clear. With 4 KiB pages, both CRC-enabled runs and runs with CRC disabled but a 64 B-stride scan across the read buffer incur more than 80 dTLB misses per GET on average. Once hugepages are enabled, the dTLB-miss count drops to the same level as in the fully CRC-disabled case. This provides direct evidence that dTLB misses are the root cause of the throughput bottleneck.
 
 By contrast, higher L1D-miss counts do not correlate with lower throughput in any of the tested configurations. That also rules out L1D misses as the bottleneck.
 
@@ -335,11 +337,11 @@ A TLB is the CPU’s address-translation cache: it stores recent virtual-to-phys
 
 TLB misses matter because they stall execution before the actual data access can proceed. Translating an address in a 4 KiB page may require a multi-level page-table walk through entries such as PGD, PUD, PMD, and PTE. Those page-table entries must themselves be fetched from cache or memory, and can in turn incur cache misses.
 
-For a path that streams through a 1028 KiB value, the CPU reads cache lines while repeatedly crossing 4 KiB page boundaries. A 1 MiB value spans 257 * 4 KiB pages. Once the active translations no longer fit in the dTLB, the CPU repeatedly performs page walks, directly reducing throughput.
+For a path that streams through a 1,028 KiB value, the CPU reads cache lines while repeatedly crossing 4 KiB page boundaries. A 1,028 KiB value spans 257 * 4 KiB pages. Once the active translations no longer fit in the dTLB, the CPU repeatedly performs page walks, directly reducing throughput.
 
-Hugepages help because they increase the granularity of address translation. With 4 KiB pages, a 1028 KiB value requires 257 page translations. With 1 GiB hugepages, the same 1028 KiB region is typically covered by a single large-page translation. A small number of TLB entries can therefore cover far more data, substantially reducing dTLB misses and 4 KiB page-walk reloads.
+Hugepages help because they increase the granularity of address translation. With 4 KiB pages, a 1,028 KiB value requires 257 page translations. With 1 GiB hugepages, the same 1,028 KiB region is typically covered by a single large-page translation. A small number of TLB entries can therefore cover far more data, substantially reducing dTLB misses and 4 KiB page-walk reloads.
 
-At this point, the story finally lines up end to end. READ_FIXED removed the repeated kernel-side cost of discovering and pinning user pages, but it did not change what the CPU had to pay when the application later scanned the data. With 4 KiB pages, every 1028 KiB value still forced the CPU to cross hundreds of page translations; CRC merely made that scan explicit, while touch=on reproduced the same pressure without doing any checksum work. Hugepages fixed the missing piece by making the data path translation-friendly as well. The bottleneck was not in the disks, the NIC, io_uring offload, fd lookup, or CRC arithmetic. It was the cost of translating the memory that all of those components were moving through.
+At this point, the story finally lines up end to end. READ_FIXED removed the repeated kernel-side cost of discovering and pinning user pages, but it did not change what the CPU had to pay when the application later scanned the data. With 4 KiB pages, every 1,028 KiB value still forced the CPU to cross hundreds of page translations; CRC merely made that scan explicit, while touch=on reproduced the same pressure without doing any checksum work. Hugepages fixed the missing piece by making the data path translation-friendly as well. The bottleneck was not in the disks, the NIC, io_uring offload, fd lookup, or CRC arithmetic. It was the cost of translating the memory that all of those components were moving through.
 
 ## X. "A Planet Upside Down"
 
