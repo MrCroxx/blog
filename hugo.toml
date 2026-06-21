@@ -112,7 +112,7 @@ name = "tags"
 url = "/tags"
 
 [[params.menu]]
-name = "resume★"
+name = "resume"
 url = "/resume.pdf"
 
 [markup]
