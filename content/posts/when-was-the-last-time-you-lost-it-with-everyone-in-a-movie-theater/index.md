@@ -5,6 +5,7 @@ summary: "From the firsthand experience of watching Niu Lai to the *The Room* mo
 categories: ["Life"]
 tags: ["Niu Lai","Cult", "Movie"]
 draft: false
+toc: false
 ---
 
 "When was the last time you lost it with everyone in a movie theater?"
