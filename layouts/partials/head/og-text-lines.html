@@ -1,0 +1,57 @@
+{{- $text := .text | replaceRE `\s+` " " | strings.TrimSpace -}}
+{{- $maxLineLength := .maxLineLength -}}
+{{- $maxLines := .maxLines -}}
+{{- $lines := slice -}}
+{{- $line := "" -}}
+
+{{- range $word := split $text " " -}}
+  {{- $wordLength := strings.RuneCount $word -}}
+  {{- if gt $wordLength $maxLineLength -}}
+    {{- with $line -}}
+      {{- $lines = $lines | append . -}}
+      {{- $line = "" -}}
+    {{- end -}}
+    {{- range $offset := seq 0 $maxLineLength (sub $wordLength 1) -}}
+      {{- $segment := strings.Substr $word $offset $maxLineLength -}}
+      {{- if lt (add $offset $maxLineLength) $wordLength -}}
+        {{- $lines = $lines | append $segment -}}
+      {{- else -}}
+        {{- $line = $segment -}}
+      {{- end -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $candidate := $word -}}
+    {{- if $line -}}
+      {{- $candidate = printf "%s %s" $line $word -}}
+    {{- end -}}
+
+    {{- if and $line (gt (strings.RuneCount $candidate) $maxLineLength) -}}
+      {{- $lines = $lines | append $line -}}
+      {{- $line = $word -}}
+    {{- else -}}
+      {{- $line = $candidate -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+
+{{- with $line -}}
+  {{- $lines = $lines | append . -}}
+{{- end -}}
+
+{{- if and (gt $maxLines 0) (gt (len $lines) $maxLines) -}}
+  {{- $trimmedLines := slice -}}
+  {{- range $index, $value := first $maxLines $lines -}}
+    {{- if eq $index (sub $maxLines 1) -}}
+      {{- $lastLine := $value | strings.TrimSpace -}}
+      {{- if ge (strings.RuneCount $lastLine) $maxLineLength -}}
+        {{- $lastLine = strings.Substr $lastLine 0 (sub $maxLineLength 1) -}}
+      {{- end -}}
+      {{- $trimmedLines = $trimmedLines | append (printf "%s…" $lastLine) -}}
+    {{- else -}}
+      {{- $trimmedLines = $trimmedLines | append $value -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $lines = $trimmedLines -}}
+{{- end -}}
+
+{{- delimit $lines "\n" -}}

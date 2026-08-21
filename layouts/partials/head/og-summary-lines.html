@@ -1,0 +1,13 @@
+{{- $summary := . | strings.TrimSpace -}}
+{{- $summaryLength := strings.RuneCount $summary -}}
+{{- $maxLineLength := 72 -}}
+{{- $hanCount := len (findRE `\p{Han}` $summary) -}}
+{{- if and (gt $summaryLength 0) (ge $hanCount (div $summaryLength 3)) -}}
+  {{- $maxLineLength = 36 -}}
+{{- end -}}
+
+{{- partial "head/og-text-lines.html" (dict
+  "maxLineLength" $maxLineLength
+  "maxLines" 2
+  "text" $summary
+) -}}

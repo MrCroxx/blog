@@ -1,0 +1,102 @@
+{{- $image := false -}}
+
+{{- if and .IsPage (eq .Section "posts") -}}
+  {{- /* Keep this source image RGB TrueColor; a paletted PNG quantizes all overlays. */ -}}
+  {{- $background := resources.Get "images/og-background.png" -}}
+  {{- $avatar := resources.Get "images/og-avatar.png" -}}
+  {{- $font := resources.Get "fonts/NotoSansCJKsc-OG.otf" -}}
+  {{- if and $background $avatar $font -}}
+    {{- $plainTitle := .Title | plainify | htmlUnescape | strings.TrimSpace -}}
+    {{- $title := partial "head/og-title-lines.html" .Title -}}
+    {{- $lineCount := len (split $title "\n") -}}
+    {{- $summaryText := or .Description .Summary | plainify | htmlUnescape | strings.TrimSpace -}}
+    {{- $normalizedTitle := replaceRE `^\([^)]+\)\s*` "" $plainTitle -}}
+    {{- if eq (lower $summaryText) (lower $normalizedTitle) -}}
+      {{- $summaryText = "" -}}
+    {{- end -}}
+    {{- $summary := "" -}}
+    {{- $summaryLineCount := 0 -}}
+    {{- with $summaryText -}}
+      {{- $summary = partial "head/og-summary-lines.html" . -}}
+      {{- $summary = replace $summary "&amp;" "&" -}}
+      {{- $summaryLineCount = len (split $summary "\n") -}}
+    {{- end -}}
+
+    {{- $fontSize := 62 -}}
+    {{- if eq $lineCount 2 -}}
+      {{- $fontSize = 52 -}}
+    {{- else if eq $lineCount 3 -}}
+      {{- $fontSize = 44 -}}
+    {{- else if eq $lineCount 4 -}}
+      {{- $fontSize = 37 -}}
+    {{- else if ge $lineCount 5 -}}
+      {{- $fontSize = 32 -}}
+    {{- end -}}
+    {{- $contentBottomY := 470 -}}
+    {{- if ge $lineCount 4 -}}
+      {{- $contentBottomY = 485 -}}
+    {{- end -}}
+    {{- $titleY := $contentBottomY -}}
+    {{- if eq $summaryLineCount 1 -}}
+      {{- $titleY = sub $contentBottomY 52 -}}
+    {{- else if ge $summaryLineCount 2 -}}
+      {{- $titleY = sub $contentBottomY 84 -}}
+    {{- end -}}
+
+    {{- $targetPath := printf "images/og/%s.png" (md5 .RelPermalink) -}}
+    {{- $background = resources.Copy $targetPath $background -}}
+    {{- $avatar = $avatar.Fill "88x88 webp q90" -}}
+    {{- $brandOptions := dict
+      "alignx" "left"
+      "aligny" "center"
+      "color" "#334155"
+      "font" $font
+      "size" 27
+      "x" 196
+      "y" 86
+    -}}
+    {{- $labelOptions := dict
+      "alignx" "left"
+      "aligny" "bottom"
+      "color" "#7892ad"
+      "font" $font
+      "size" 18
+      "x" 116
+      "y" 570
+    -}}
+    {{- $textOptions := dict
+      "alignx" "left"
+      "aligny" "bottom"
+      "color" "#0f172a"
+      "font" $font
+      "linespacing" 10
+      "size" $fontSize
+      "x" 116
+      "y" $titleY
+    -}}
+    {{- $summaryOptions := dict
+      "alignx" "left"
+      "aligny" "bottom"
+      "color" "#64748b"
+      "font" $font
+      "linespacing" 8
+      "size" 22
+      "x" 116
+      "y" $contentBottomY
+    -}}
+    {{- $image = $background.Filter (images.Overlay $avatar 84 42) -}}
+    {{- $image = $image.Filter (images.Text "MrCroxx's Blog" $brandOptions) -}}
+    {{- $image = $image.Filter (images.Text "POST" $labelOptions) -}}
+    {{- $image = $image.Filter (images.Text $title $textOptions) -}}
+    {{- with $summary -}}
+      {{- $image = $image.Filter (images.Text . $summaryOptions) -}}
+    {{- end -}}
+    {{- $image = $image.Process "webp q90" -}}
+  {{- end -}}
+{{- else if .IsHome -}}
+  {{- $image = resources.GetMatch "images/og-image.{webp,png,jpg}" -}}
+{{- end -}}
+
+{{- with $image -}}
+  {{- .RelPermalink -}}
+{{- end -}}
