@@ -1,0 +1,18 @@
+{{- $title := . | plainify | htmlUnescape | strings.TrimSpace -}}
+{{- $titleLength := strings.RuneCount $title -}}
+{{- $maxLineLength := 32 -}}
+{{- $hanCount := len (findRE `\p{Han}` $title) -}}
+{{- if and (gt $titleLength 0) (ge $hanCount (div $titleLength 3)) -}}
+  {{- $maxLineLength = 20 -}}
+  {{- if gt $titleLength 60 -}}
+    {{- $maxLineLength = 22 -}}
+  {{- end -}}
+{{- else if gt $titleLength 64 -}}
+  {{- $maxLineLength = 38 -}}
+{{- end -}}
+
+{{- partial "head/og-text-lines.html" (dict
+  "maxLineLength" $maxLineLength
+  "maxLines" 5
+  "text" $title
+) -}}
