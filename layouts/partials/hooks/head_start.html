@@ -1,3 +1,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap" rel="stylesheet">
+
+{{ $palettes := slice }}
+{{ $css := "" }}
+{{ range resources.Match "css/colors/*.css" }}
+    {{ $name := strings.TrimSuffix ".css" (path.Base .Name) }}
+    {{ $palettes = $palettes | append $name }}
+    {{ $css = printf "%s\n%s" $css (replace .Content ":root" (printf ":root[data-palette='%s']" $name)) }}
+{{ end }}
+{{ $style := resources.FromString "css/palettes.css" $css | minify | fingerprint }}
+<link rel="stylesheet" href="{{ $style.RelPermalink }}">
+<script data-palettes="{{ delimit $palettes "," }}">{{ (resources.Get "js/theme.js").Content | safeJS }}</script>

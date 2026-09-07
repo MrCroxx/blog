@@ -111,10 +111,6 @@ url = "/categories"
 name = "tags"
 url = "/tags"
 
-[[params.menu]]
-name = "resume"
-url = "/resume.pdf"
-
 [markup]
 
 # Syntax highlight on code blocks
