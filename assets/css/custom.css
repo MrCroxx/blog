@@ -19,6 +19,17 @@
     margin: 0 auto;
 }
 
+/* Keep the image within the height reserved by its container. */
+figure img {
+    max-height: var(--figure-img-max-height);
+}
+
+/* Full-width images follow the viewport width instead of the height limit. */
+.img-full .img-container,
+.img-full img {
+    max-height: none;
+}
+
 .img-container img {
     display: block;
     margin-left: auto;
