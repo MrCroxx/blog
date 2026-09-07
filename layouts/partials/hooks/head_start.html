@@ -11,4 +11,4 @@
 {{ end }}
 {{ $style := resources.FromString "css/palettes.css" $css | minify | fingerprint }}
 <link rel="stylesheet" href="{{ $style.RelPermalink }}">
-<script data-palettes="{{ delimit $palettes "," }}">{{ (resources.Get "js/theme.js").Content | safeJS }}</script>
+<script data-palettes="{{ delimit $palettes "," }}">{{ (resources.Get "js/theme.js" | minify).Content | safeJS }}</script>

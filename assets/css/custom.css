@@ -60,19 +60,13 @@ code {
 }
 
 .theme-control summary::after {
-  content: "";
+  content: "▾";
   display: inline-block;
-  width: 0.4em;
-  height: 0.4em;
-  margin: 0 0.25em 0.2em 0.6em;
-  border-right: 1px solid;
-  border-bottom: 1px solid;
-  transform: rotate(45deg);
+  margin-left: 0.5em;
 }
 
 .theme-control[open] summary::after {
-  transform: rotate(225deg);
-  margin-bottom: 0;
+  transform: rotate(180deg);
 }
 
 .theme-options {

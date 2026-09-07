@@ -14,7 +14,8 @@
     }
   }
 
-  function syncComments() {
+  function syncComments(event) {
+    if (event && !event.target.matches?.("iframe.giscus-frame")) return;
     document
       .querySelector("iframe.giscus-frame")
       ?.contentWindow.postMessage(
@@ -46,14 +47,8 @@
   window.addEventListener("storage", (event) => {
     if (event.key === key || event.key === null) apply(readPreference());
   });
-  // Comments may load after the user has already selected a theme.
-  document.addEventListener(
-    "load",
-    (event) => {
-      if (event.target.matches?.("iframe.giscus-frame")) syncComments();
-    },
-    true,
-  );
+  // Also sync comments that load after the theme was selected.
+  document.addEventListener("load", syncComments, true);
   document.addEventListener("DOMContentLoaded", () => {
     const control = document.querySelector(".theme-control");
     if (!control) return;
@@ -96,38 +91,31 @@
       }
     });
     control.addEventListener("keydown", (event) => {
-      if (event.key === "Escape") {
-        close();
-      } else if (event.key === "Tab") {
-        // Wait for the browser to finish keyboard focus navigation.
-        setTimeout(() => {
-          if (!control.contains(document.activeElement)) control.open = false;
-        }, 0);
-      } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
-        event.preventDefault();
-        control.open = true;
-        const index = buttons.indexOf(document.activeElement);
-        const next =
-          event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? buttons.length - 1
-              : event.key === "ArrowDown"
-                ? (index + 1) % buttons.length
-                : index < 0
-                  ? buttons.length - 1
-                  : (index - 1 + buttons.length) % buttons.length;
-        buttons[next].focus();
+      if (event.key === "Escape") return close();
+      if (event.key === "Tab") {
+        // Wait for keyboard focus navigation, including leaving the document.
+        return setTimeout(() => dismiss(document.activeElement), 0);
       }
+      const index = buttons.indexOf(document.activeElement);
+      const next = {
+        ArrowDown: index + 1,
+        ArrowUp: Math.max(0, index) - 1,
+        Home: 0,
+        End: buttons.length - 1,
+      }[event.key];
+      if (next === undefined) return;
+      event.preventDefault();
+      control.open = true;
+      buttons[(next + buttons.length) % buttons.length].focus();
     });
-    document.addEventListener("pointerdown", (event) => {
-      if (!control.contains(event.target)) control.open = false;
-    });
-    control.addEventListener("focusout", (event) => {
-      // Pointer activation can blur the trigger without focusing the option.
-      if (event.relatedTarget && !control.contains(event.relatedTarget)) {
-        control.open = false;
-      }
-    });
+
+    function dismiss(target) {
+      if (target && !control.contains(target)) control.open = false;
+    }
+    document.addEventListener("pointerdown", (event) => dismiss(event.target));
+    // A pointer can blur the trigger without focusing the clicked option.
+    control.addEventListener("focusout", (event) =>
+      dismiss(event.relatedTarget),
+    );
   });
 })();

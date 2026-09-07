@@ -1,5 +1,3 @@
-{{/* Header */}}
-
 <div class="header">
 
     {{ if or (not (.Param "hideHeader")) .IsHome }}
@@ -11,8 +9,7 @@
     <div class="header-menu">
         {{ $currentPage := . }}
 
-        {{ with site.Params.menu }}
-        {{ range . }}
+        {{ range site.Params.menu }}
 
         <p
             class="small {{ if eq .name (lower $currentPage.Name) }} bold {{end}}">
@@ -21,7 +18,6 @@
                 /{{.name }}
             </a>
         </p>
-        {{ end }}
         {{ end }}
         <details class="theme-control" hidden>
             <summary>/theme</summary>
@@ -34,9 +30,7 @@
                 {{ range resources.Match "css/colors/*.css" }}
                 {{ $name := strings.TrimSuffix ".css" (path.Base .Name) }}
                 {{ if eq $name "default" }}{{ continue }}{{ end }}
-                {{ $label := title (replace $name "-" " ") }}
-                {{ if eq $name "catpuccin" }}{{ $label = "Catppuccin" }}{{ end }}
-                {{ if eq $name "gruvebox" }}{{ $label = "Gruvbox" }}{{ end }}
+                {{ $label := index (dict "catpuccin" "Catppuccin" "gruvebox" "Gruvbox") $name | default (title (replace $name "-" " ")) }}
                 <button type="button" data-theme="{{ $name }}" aria-pressed="false">{{ $label }}</button>
                 {{ end }}
             </div>
