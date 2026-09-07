@@ -1,0 +1,42 @@
+<div class="header">
+
+    {{ if or (not (.Param "hideHeader")) .IsHome }}
+
+    <h1 class="header-title">
+        <a href="{{ site.BaseURL }}">{{ site.Title }}</a>
+    </h1>
+
+    <div class="header-menu">
+        {{ $currentPage := . }}
+
+        {{ range site.Params.menu }}
+
+        <p
+            class="small {{ if eq .name (lower $currentPage.Name) }} bold {{end}}">
+            <a href="{{ .url }}" {{ if and (isset . "newTab") .newTab
+                }}target="_blank" rel="noopener noreferrer" {{ end }}>
+                /{{.name }}
+            </a>
+        </p>
+        {{ end }}
+        <details class="theme-control" hidden>
+            <summary>/theme</summary>
+            <div class="theme-options" role="group" aria-label="Theme">
+                <button type="button" data-theme="auto" aria-pressed="true">Auto</button>
+                <hr>
+                <button type="button" data-theme="light" aria-pressed="false">Light</button>
+                <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+                <hr>
+                {{ range resources.Match "css/colors/*.css" }}
+                {{ $name := strings.TrimSuffix ".css" (path.Base .Name) }}
+                {{ if eq $name "default" }}{{ continue }}{{ end }}
+                {{ $label := index (dict "catpuccin" "Catppuccin" "gruvebox" "Gruvbox") $name | default (title (replace $name "-" " ")) }}
+                <button type="button" data-theme="{{ $name }}" aria-pressed="false">{{ $label }}</button>
+                {{ end }}
+            </div>
+        </details>
+    </div>
+
+    {{ end }}
+
+</div>
